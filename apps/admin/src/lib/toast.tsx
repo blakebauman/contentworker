@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { cn } from './utils.js';
 
 type ToastKind = 'success' | 'error';
 
@@ -51,13 +52,23 @@ export function ToastProvider(props: { children: React.ReactNode }) {
   return (
     <ToastCtx.Provider value={api}>
       {props.children}
-      <div className="toaster" aria-live="polite" aria-atomic="false">
+      <div
+        className="fixed bottom-4 right-4 z-50 flex flex-col gap-2"
+        aria-live="polite"
+        aria-atomic="false"
+      >
         {toasts.map((t) => (
-          <output key={t.id} className={`toast ${t.kind}`}>
-            <span>{t.message}</span>
+          <output
+            key={t.id}
+            className={cn(
+              'flex min-w-60 max-w-md items-center gap-3 rounded-lg border bg-card px-3 py-2.5 text-sm text-card-foreground shadow-lg',
+              t.kind === 'success' ? 'border-success/50' : 'border-destructive/50',
+            )}
+          >
+            <span className="flex-1">{t.message}</span>
             <button
               type="button"
-              className="toast-x"
+              className="text-lg leading-none text-muted-foreground hover:text-foreground"
               aria-label="Dismiss"
               onClick={() => dismiss(t.id)}
             >

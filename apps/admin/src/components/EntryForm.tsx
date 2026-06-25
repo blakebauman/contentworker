@@ -1,7 +1,21 @@
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import type { ContentType, EntryFields, FieldDefinition } from '@cw/domain';
 import { useMemo, useState } from 'react';
 
 const SCALAR = new Set(['Symbol', 'Text', 'Integer', 'Number', 'Boolean', 'Date']);
+// Radix Select forbids an empty-string item value; use a sentinel for "no link".
+const NONE = '__none__';
 
 /** A selectable reference target (entry or asset). */
 export interface PickOption {
@@ -66,19 +80,22 @@ export function EntryForm(props: {
   };
 
   return (
-    <form onSubmit={submit}>
+    <form onSubmit={submit} className="max-w-2xl space-y-4">
       {hasLocalized && locales.length > 1 && (
-        <div className="row" style={{ gap: 4, marginBottom: 12 }}>
+        <div className="flex flex-wrap gap-1.5">
           {locales.map((loc) => (
-            <button
+            // Locale switcher stays a <button> (role=button) — component tests select
+            // it via getByRole('button', { name: 'de-DE' }).
+            <Button
               type="button"
               key={loc}
-              className={loc === activeLocale ? '' : 'ghost'}
+              size="sm"
+              variant={loc === activeLocale ? 'default' : 'outline'}
               onClick={() => setActiveLocale(loc)}
             >
               {loc}
               {loc === defaultLocale ? ' (default)' : ''}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -87,35 +104,34 @@ export function EntryForm(props: {
         // Non-localized fields are only editable on the default-locale tab.
         const locale = f.localized ? activeLocale : defaultLocale;
         if (!f.localized && activeLocale !== defaultLocale) return null;
+        const id = `field-${f.apiId}`;
         return (
-          <div className="field" key={f.apiId}>
-            {/* biome-ignore lint/a11y/noLabelWithoutControl: input is rendered by <FieldInput> */}
-            <label>
-              <span>
-                {f.name}{' '}
-                <span className="muted">
-                  ({f.type}
-                  {f.required ? ', required' : ''}
-                  {f.localized ? `, ${activeLocale}` : ', not localized'})
-                </span>
+          <div className="space-y-1.5" key={f.apiId}>
+            <Label htmlFor={id}>
+              {f.name}{' '}
+              <span className="font-normal text-muted-foreground">
+                ({f.type}
+                {f.required ? ', required' : ''}
+                {f.localized ? `, ${activeLocale}` : ', not localized'})
               </span>
-              <FieldInput
-                field={f}
-                value={values[f.apiId]?.[locale]}
-                pickers={props.pickers}
-                onChange={(v) => set(f.apiId, locale, v)}
-              />
-            </label>
+            </Label>
+            <FieldInput
+              id={id}
+              field={f}
+              value={values[f.apiId]?.[locale]}
+              pickers={props.pickers}
+              onChange={(v) => set(f.apiId, locale, v)}
+            />
           </div>
         );
       })}
-      <div className="row">
-        <button type="submit" disabled={props.busy}>
+      <div className="flex gap-2">
+        <Button type="submit" disabled={props.busy}>
           Save draft
-        </button>
-        <button type="button" className="ghost" onClick={props.onCancel} disabled={props.busy}>
+        </Button>
+        <Button type="button" variant="outline" onClick={props.onCancel} disabled={props.busy}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -148,12 +164,13 @@ function textToRich(text: string): RichTextNode {
 }
 
 function FieldInput(props: {
+  id: string;
   field: FieldDefinition;
   value: unknown;
   pickers: Pickers;
   onChange: (v: unknown) => void;
 }) {
-  const { field, value, onChange, pickers } = props;
+  const { id, field, value, onChange, pickers } = props;
 
   // Reference fields: a dropdown of entries/assets, stored as { id, linkType }.
   if (field.type === 'Link') {
@@ -165,24 +182,30 @@ function FieldInput(props: {
     }
     const currentId = (value as { id?: string } | undefined)?.id ?? '';
     return (
-      <select
-        value={currentId}
-        onChange={(e) => onChange(e.target.value ? { id: e.target.value, linkType } : undefined)}
+      <Select
+        value={currentId || NONE}
+        onValueChange={(v) => onChange(v === NONE ? undefined : { id: v, linkType })}
       >
-        <option value="">— none —</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>— none —</SelectItem>
+          {options.map((o) => (
+            <SelectItem key={o.id} value={o.id}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     );
   }
 
   // Rich text: a plain-text editor backed by a simple paragraph document.
   if (field.type === 'RichText') {
     return (
-      <textarea
+      <Textarea
+        id={id}
         rows={6}
         placeholder="Rich text…"
         value={richToText(value)}
@@ -193,17 +216,15 @@ function FieldInput(props: {
 
   if (field.type === 'Boolean') {
     return (
-      <input
-        type="checkbox"
-        checked={!!value}
-        onChange={(e) => onChange(e.target.checked)}
-        style={{ width: 'auto' }}
-      />
+      <div>
+        <Checkbox id={id} checked={!!value} onCheckedChange={(c) => onChange(c === true)} />
+      </div>
     );
   }
   if (field.type === 'Integer' || field.type === 'Number') {
     return (
-      <input
+      <Input
+        id={id}
         type="number"
         value={value === undefined || value === null ? '' : String(value)}
         onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
@@ -212,7 +233,8 @@ function FieldInput(props: {
   }
   if (field.type === 'Date') {
     return (
-      <input
+      <Input
+        id={id}
         type="date"
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
@@ -221,7 +243,8 @@ function FieldInput(props: {
   }
   if (field.type === 'Text') {
     return (
-      <textarea
+      <Textarea
+        id={id}
         rows={4}
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
@@ -230,7 +253,8 @@ function FieldInput(props: {
   }
   if (SCALAR.has(field.type)) {
     return (
-      <input
+      <Input
+        id={id}
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -238,7 +262,8 @@ function FieldInput(props: {
   }
   // Complex types (Array, JSON, Location): raw JSON editor for the MVP.
   return (
-    <textarea
+    <Textarea
+      id={id}
       rows={3}
       placeholder="JSON value"
       defaultValue={value === undefined ? '' : JSON.stringify(value)}

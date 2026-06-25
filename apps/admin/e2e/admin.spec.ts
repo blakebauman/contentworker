@@ -11,8 +11,9 @@ test.beforeEach(async ({ page }) => {
 test('authors and publishes an entry end-to-end', async ({ page }) => {
   await page.goto('/');
 
-  // The seeded content type appears in the sidebar.
-  await page.getByRole('button', { name: /Article/ }).click();
+  // Open the Content section, then pick the seeded content type from its sub-nav.
+  await page.getByRole('link', { name: 'Content' }).click();
+  await page.getByRole('link', { name: /Article/ }).click();
 
   // Author a new entry.
   await page.getByRole('button', { name: '+ New entry' }).click();
@@ -34,7 +35,7 @@ test('authors and publishes an entry end-to-end', async ({ page }) => {
 
 test('navigates to settings and lists the seeded dev API keys', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('link', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { name: 'API keys' })).toBeVisible();
   // The three seeded dev keys (cma/cda/cpa) render as kind badges.
   await expect(page.getByText('CMA', { exact: true })).toBeVisible();
