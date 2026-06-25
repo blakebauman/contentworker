@@ -11,7 +11,8 @@ import type { AppContext } from './context.js';
 export interface CreateApiKeyInput {
   readonly spaceId: string;
   readonly kind: ApiKeyKind;
-  readonly name: string;
+  /** Optional human-readable label. */
+  readonly name?: string;
   /** Overrides the default scope set for the kind. */
   readonly scopes?: readonly string[];
 }

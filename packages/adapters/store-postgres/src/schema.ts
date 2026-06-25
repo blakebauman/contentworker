@@ -157,7 +157,8 @@ export const apiKeys = pgTable(
     id: text('id').primaryKey(),
     spaceId: text('space_id').notNull(),
     kind: text('kind').$type<'cma' | 'cda' | 'cpa'>().notNull(),
-    name: text('name').notNull(),
+    // Optional human label; the admin shows "Name (optional)".
+    name: text('name'),
     hashedToken: text('hashed_token').notNull(),
     scopes: jsonb('scopes').$type<string[]>().notNull(),
     revoked: boolean('revoked').notNull().default(false),

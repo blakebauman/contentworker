@@ -32,6 +32,15 @@ describe('RBAC: API keys + authorization', () => {
     expect(principal.scopes).toContain(SCOPES.contentWrite);
   });
 
+  it('mints a key without a name (name is optional)', async () => {
+    const c = ctx();
+    // The admin labels the field "Name (optional)"; omitting it must not fail.
+    const { apiKey, token } = await createApiKey(c, hasher, { spaceId: 's1', kind: 'cda' });
+    expect(apiKey.name).toBeUndefined();
+    const principal = await authenticate(c, hasher, token);
+    expect(principal.kind).toBe('cda');
+  });
+
   it('rejects unknown / missing tokens with UnauthorizedError', async () => {
     const c = ctx();
     await expect(authenticate(c, hasher, undefined)).rejects.toBeInstanceOf(UnauthorizedError);
