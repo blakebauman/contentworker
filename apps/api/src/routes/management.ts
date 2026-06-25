@@ -18,6 +18,7 @@ import {
   listApiKeys,
   listAssets,
   listContentTypes,
+  listWebhookDeliveries,
   listWebhooks,
   publishAsset,
   publishContentType,
@@ -194,6 +195,13 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.delete(`${BASE}/webhooks/:id`, requireScope(SCOPES.spaceAdmin), async (c) => {
     await deleteWebhook(ctx, scopeOf(c), c.req.param('id'));
     return c.body(null, 204);
+  });
+  app.get(`${BASE}/webhooks/:id/deliveries`, requireScope(SCOPES.spaceAdmin), async (c) => {
+    const limit = c.req.query('limit');
+    const items = await listWebhookDeliveries(ctx, scopeOf(c), c.req.param('id'), {
+      limit: limit ? Number(limit) : undefined,
+    });
+    return c.json({ items });
   });
 
   return app;

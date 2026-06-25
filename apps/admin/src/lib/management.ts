@@ -116,6 +116,18 @@ export interface WebhookSummary {
   readonly active: boolean;
 }
 
+/** A recorded webhook delivery attempt. */
+export interface WebhookDeliveryRecord {
+  readonly id: number;
+  readonly webhookId: string;
+  readonly eventId: string;
+  readonly status: 'success' | 'failed';
+  readonly statusCode?: number;
+  readonly attempts: number;
+  readonly error?: string;
+  readonly createdAt: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -311,6 +323,15 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     },
     deleteWebhook(id: string): Promise<void> {
       return req('DELETE', `${mgmt}/webhooks/${encodeURIComponent(id)}`);
+    },
+    /** Recent delivery attempts for a webhook, newest first. */
+    async webhookDeliveries(id: string, limit?: number): Promise<WebhookDeliveryRecord[]> {
+      const qs = limit ? `?limit=${limit}` : '';
+      const r = await req<{ items: WebhookDeliveryRecord[] }>(
+        'GET',
+        `${mgmt}/webhooks/${encodeURIComponent(id)}/deliveries${qs}`,
+      );
+      return r.items;
     },
   };
 }

@@ -8,7 +8,6 @@ import {
   type ReferenceEdge,
   type Scope,
   type Webhook,
-  type WebhookDelivery,
   matchesTopic,
 } from '@cw/domain';
 import type {
@@ -28,6 +27,7 @@ import type {
   ReferenceRepo,
   SpaceConfig,
   SpaceRepo,
+  WebhookDeliveryRecord,
   WebhookRepo,
 } from '@cw/ports';
 
@@ -192,7 +192,8 @@ export class InMemoryContentStore implements ContentStore {
   };
 
   private readonly webhookData = new Map<string, Webhook[]>();
-  readonly webhookDeliveries: WebhookDelivery[] = [];
+  readonly webhookDeliveries: WebhookDeliveryRecord[] = [];
+  private deliverySeq = 0;
 
   readonly webhooks: WebhookRepo = {
     create: async (scope, webhook) => {
@@ -221,8 +222,18 @@ export class InMemoryContentStore implements ContentStore {
       );
     },
     recordDelivery: async (_scope, delivery) => {
-      this.webhookDeliveries.push(delivery);
+      this.deliverySeq += 1;
+      this.webhookDeliveries.push({
+        ...delivery,
+        id: this.deliverySeq,
+        createdAt: new Date(this.deliverySeq).toISOString(),
+      });
     },
+    listDeliveries: async (_scope, webhookId, opts) =>
+      this.webhookDeliveries
+        .filter((d) => d.webhookId === webhookId)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, opts?.limit ?? 50),
   };
 
   private readonly apiKeyData = new Map<string, ApiKey>();

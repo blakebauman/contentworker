@@ -5,6 +5,7 @@ import {
   type AppContext,
   createWebhook,
   deleteWebhook,
+  listWebhookDeliveries,
   listWebhooks,
   updateWebhook,
 } from '../src/index.js';
@@ -50,5 +51,36 @@ describe('webhook management', () => {
       NotFoundError,
     );
     await expect(deleteWebhook(c, scope, 'nope')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('lists recorded delivery attempts newest-first (404 if the webhook is gone)', async () => {
+    const c = ctx();
+    const wh = await createWebhook(c, scope, {
+      url: 'https://hook.example/cw',
+      topics: ['*'],
+      secret: 's',
+    });
+    await c.store.webhooks.recordDelivery(scope, {
+      webhookId: wh.id,
+      eventId: 'e1',
+      status: 'failed',
+      statusCode: 500,
+      attempts: 3,
+      error: 'boom',
+    });
+    await c.store.webhooks.recordDelivery(scope, {
+      webhookId: wh.id,
+      eventId: 'e2',
+      status: 'success',
+      statusCode: 200,
+      attempts: 1,
+    });
+
+    const deliveries = await listWebhookDeliveries(c, scope, wh.id);
+    expect(deliveries.map((d) => d.eventId)).toEqual(['e2', 'e1']); // newest first
+    expect(deliveries[0]?.status).toBe('success');
+    expect(deliveries[1]?.error).toBe('boom');
+
+    await expect(listWebhookDeliveries(c, scope, 'nope')).rejects.toBeInstanceOf(NotFoundError);
   });
 });

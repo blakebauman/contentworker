@@ -61,3 +61,15 @@ export async function deleteWebhook(ctx: AppContext, scope: Scope, id: string): 
   if (!current) throw new NotFoundError('Webhook', id);
   await ctx.store.webhooks.delete(scope, id);
 }
+
+/** Recent delivery attempts for a webhook (404 if it doesn't exist). */
+export async function listWebhookDeliveries(
+  ctx: AppContext,
+  scope: Scope,
+  id: string,
+  opts?: { limit?: number },
+) {
+  const current = await ctx.store.webhooks.get(scope, id);
+  if (!current) throw new NotFoundError('Webhook', id);
+  return ctx.store.webhooks.listDeliveries(scope, id, opts);
+}
