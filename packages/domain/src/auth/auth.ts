@@ -40,7 +40,8 @@ export interface ApiKey {
   readonly id: string;
   readonly spaceId: string;
   readonly kind: ApiKeyKind;
-  readonly name: string;
+  /** Optional human-readable label. */
+  readonly name?: string;
   readonly hashedToken: string;
   readonly scopes: readonly string[];
   readonly revoked: boolean;
