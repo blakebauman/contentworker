@@ -79,8 +79,3 @@ export function ContentLayout() {
     </div>
   );
 }
-
-/** Default content pane shown at /content before a type is selected. */
-export function ContentIndex() {
-  return <p className="text-muted-foreground">Select a content type to browse its entries.</p>;
-}
