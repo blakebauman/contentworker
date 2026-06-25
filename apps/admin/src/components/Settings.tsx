@@ -1,4 +1,5 @@
 import { StatusBadge } from '@/components/StatusBadge';
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -21,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { KeyRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useClient } from '../lib/client-context.js';
 import {
@@ -121,21 +123,25 @@ function ApiKeys(props: { client: ManagementClient }) {
       </CardHeader>
       <CardContent className="space-y-4">
         {minted && (
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
-            <div className="min-w-0">
-              <div className="text-sm text-muted-foreground">
-                New {minted.kind.toUpperCase()} token — copy it now, it won't be shown again.
-              </div>
-              <code className="break-all text-sm">{minted.token}</code>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigator.clipboard?.writeText(minted.token)}
-            >
-              Copy
-            </Button>
-          </div>
+          <Alert>
+            <KeyRound />
+            <AlertTitle>
+              New {minted.kind.toUpperCase()} token — copy it now, it won't be shown again.
+            </AlertTitle>
+            <AlertDescription>
+              <code className="break-all text-sm text-foreground">{minted.token}</code>
+            </AlertDescription>
+            <AlertAction>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => navigator.clipboard?.writeText(minted.token)}
+              >
+                Copy
+              </Button>
+            </AlertAction>
+          </Alert>
         )}
 
         <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
@@ -178,7 +184,11 @@ function ApiKeys(props: { client: ManagementClient }) {
                   <Badge variant="outline">{k.kind.toUpperCase()}</Badge>
                 </TableCell>
                 <TableCell>{k.name ?? <span className="text-muted-foreground">—</span>}</TableCell>
-                <TableCell className="text-muted-foreground">{k.scopes.join(', ')}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  <div className="max-w-[360px] truncate" title={k.scopes.join(', ')}>
+                    {k.scopes.join(', ')}
+                  </div>
+                </TableCell>
                 <TableCell>
                   <StatusBadge status={k.revoked ? 'revoked' : 'active'} />
                 </TableCell>

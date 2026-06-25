@@ -1,3 +1,4 @@
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Table,
   TableBody,
@@ -7,6 +8,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { ManagementClient, PreviewEntry } from '../lib/management.js';
 
@@ -73,10 +75,20 @@ export function EntryDiff(props: {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        {deltas ? `${changedCount} field${changedCount === 1 ? '' : 's'} changed` : 'Comparing…'}
-      </p>
-      {error && <div className="text-sm text-destructive">⚠ {error}</div>}
+      {!error && (
+        <p className="text-sm text-muted-foreground">
+          {deltas ? `${changedCount} field${changedCount === 1 ? '' : 's'} changed` : 'Comparing…'}
+        </p>
+      )}
+      {error && (
+        <Alert variant="destructive">
+          <TriangleAlert />
+          <AlertTitle>No published version</AlertTitle>
+          <AlertDescription>
+            This entry hasn’t been published yet, so there’s nothing to compare against.
+          </AlertDescription>
+        </Alert>
+      )}
       {deltas && (
         <Table>
           <TableHeader>

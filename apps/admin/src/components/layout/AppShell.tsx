@@ -1,5 +1,15 @@
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
   FileText,
@@ -12,7 +22,8 @@ import {
   Sun,
 } from 'lucide-react';
 import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useClient } from '../../lib/client-context.js';
 import { useTheme } from '../../lib/theme.js';
 import { Breadcrumbs } from './Breadcrumbs.js';
 import { CommandPalette, openCommandPalette } from './CommandPalette.js';
@@ -53,20 +64,28 @@ export function AppShell() {
             <Breadcrumbs />
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={openCommandPalette}
-              className="gap-2 text-muted-foreground"
-            >
-              <Search className="size-4" />
-              <span className="hidden sm:inline">Search</span>
-              <kbd className="hidden rounded border bg-muted px-1 text-[10px] sm:inline">⌘K</kbd>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openCommandPalette}
+                  className="gap-2 text-muted-foreground"
+                >
+                  <Search className="size-4" />
+                  <span className="hidden sm:inline">Search</span>
+                  <kbd className="hidden rounded border bg-muted px-1 text-[10px] sm:inline">
+                    ⌘K
+                  </kbd>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Jump to anything (⌘K)</TooltipContent>
+            </Tooltip>
             <div className="hidden sm:block">
               <SpaceSwitcher />
             </div>
             <ThemeToggle />
+            <AccountMenu />
           </div>
         </header>
 
@@ -112,15 +131,55 @@ function SidebarNav(props: { onNavigate?: () => void }) {
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      onClick={toggle}
-      aria-label="Toggle theme"
-      title="Toggle theme"
-    >
-      {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={toggle}
+          aria-label="Toggle theme"
+        >
+          {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Avatar dropdown showing the active connection identity + shortcuts to settings. */
+function AccountMenu() {
+  const { conn } = useClient();
+  const initials =
+    (conn.space || 'cw')
+      .replace(/[^a-z0-9]/gi, '')
+      .slice(0, 2)
+      .toUpperCase() || 'CW';
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="rounded-full" aria-label="Account">
+          <Avatar className="size-7">
+            <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+          </Avatar>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel>
+          <div className="font-medium">{conn.space || 'no space'}</div>
+          <div className="text-xs font-normal text-muted-foreground">
+            environment: {conn.environment || 'master'}
+          </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link to="/settings/connection">Connection settings</Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/settings/api-keys">API keys</Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

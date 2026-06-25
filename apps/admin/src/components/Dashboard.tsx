@@ -1,7 +1,9 @@
+import { EmptyState } from '@/components/EmptyState';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
   TableBody,
@@ -10,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Activity, ArrowDownToLine, ArrowUpFromLine, Bot, SearchX } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { AgentRun, ManagementClient, SearchHit, UsageSummary } from '../lib/management.js';
 import { useToast } from '../lib/toast.js';
@@ -23,6 +26,7 @@ export function Dashboard(props: { client: ManagementClient }) {
 
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searched, setSearched] = useState(false);
   const [searching, setSearching] = useState(false);
 
   const load = useCallback(async () => {
@@ -45,6 +49,7 @@ export function Dashboard(props: { client: ManagementClient }) {
     setSearching(true);
     try {
       setHits(await client.search(query));
+      setSearched(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -58,9 +63,19 @@ export function Dashboard(props: { client: ManagementClient }) {
 
       {/* Cost ledger */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label="Agent runs" value={usage?.runs} />
-        <Stat label="Input tokens" value={usage?.inputTokens?.toLocaleString()} />
-        <Stat label="Output tokens" value={usage?.outputTokens?.toLocaleString()} />
+        <Stat icon={Activity} label="Agent runs" value={usage?.runs} loading={!usage} />
+        <Stat
+          icon={ArrowDownToLine}
+          label="Input tokens"
+          value={usage?.inputTokens?.toLocaleString()}
+          loading={!usage}
+        />
+        <Stat
+          icon={ArrowUpFromLine}
+          label="Output tokens"
+          value={usage?.outputTokens?.toLocaleString()}
+          loading={!usage}
+        />
       </div>
 
       {/* Semantic search */}
@@ -94,56 +109,79 @@ export function Dashboard(props: { client: ManagementClient }) {
           </TableBody>
         </Table>
       )}
+      {searched && hits.length === 0 && (
+        <EmptyState
+          icon={SearchX}
+          title="No matches"
+          description="No published content matched that query. Try different wording."
+        />
+      )}
 
       {/* Agent runs */}
       <div className="space-y-3">
         <h2 className="text-base font-semibold">Recent agent runs</h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Workflow</TableHead>
-              <TableHead>Entry</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Tokens (in/out)</TableHead>
-              <TableHead>When</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {runs.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell>{r.workflow}</TableCell>
-                <TableCell className="text-muted-foreground">{r.entryId}</TableCell>
-                <TableCell>
-                  <StatusBadge status={r.status} />
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {r.inputTokens}/{r.outputTokens}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {new Date(r.createdAt).toLocaleString()}
-                </TableCell>
-              </TableRow>
-            ))}
-            {runs.length === 0 && (
+        {runs.length === 0 ? (
+          <EmptyState
+            icon={Bot}
+            title="No agent runs yet"
+            description="Enable AGENTS_ENRICH on the worker and runs will appear here as content is published."
+          />
+        ) : (
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
-                  No agent runs yet (enable AGENTS_ENRICH on the worker).
-                </TableCell>
+                <TableHead>Workflow</TableHead>
+                <TableHead>Entry</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Tokens (in/out)</TableHead>
+                <TableHead>When</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {runs.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.workflow}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.entryId}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={r.status} />
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {r.inputTokens}/{r.outputTokens}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {new Date(r.createdAt).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </div>
     </div>
   );
 }
 
-function Stat(props: { label: string; value: number | string | undefined }) {
+function Stat(props: {
+  icon: typeof Activity;
+  label: string;
+  value: number | string | undefined;
+  loading?: boolean;
+}) {
+  const { icon: Icon } = props;
   return (
     <Card>
-      <CardContent>
-        <div className="text-sm text-muted-foreground">{props.label}</div>
-        <div className="text-3xl font-bold">{props.value ?? '—'}</div>
+      <CardContent className="flex items-center gap-4">
+        <div className="flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+          <Icon className="size-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm text-muted-foreground">{props.label}</div>
+          {props.loading ? (
+            <Skeleton className="mt-1 h-7 w-16" />
+          ) : (
+            <div className="text-2xl font-bold">{props.value ?? '—'}</div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

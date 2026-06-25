@@ -1,7 +1,9 @@
+import { EmptyState } from '@/components/EmptyState';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import type { Asset } from '@cw/domain';
+import { ImageIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ManagementClient } from '../lib/management.js';
 import { useToast } from '../lib/toast.js';
@@ -56,40 +58,49 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
           </Button>
         </div>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
-        {assets.map((a) => (
-          <Card key={a.id} size="sm" className="gap-2 p-2">
-            {a.file.contentType.startsWith('image/') ? (
-              <img
-                src={a.file.url}
-                alt={a.file.fileName}
-                className="h-28 w-full rounded-md object-cover"
-              />
-            ) : (
-              <div className="grid h-28 place-items-center rounded-md bg-muted text-xs text-muted-foreground">
-                {a.file.contentType}
-              </div>
-            )}
-            <div className="truncate text-sm">{String(a.title?.[locale] ?? a.file.fileName)}</div>
-            <div className="flex items-center justify-between">
-              <StatusBadge status={a.status} />
-              {a.status !== 'published' && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => client.publishAsset(a.id).then(load)}
-                >
-                  Publish
-                </Button>
+      {assets.length === 0 ? (
+        <EmptyState
+          icon={ImageIcon}
+          title="No assets yet"
+          description="Upload an image or file to start building your media library."
+        >
+          <Button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+            Upload asset
+          </Button>
+        </EmptyState>
+      ) : (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+          {assets.map((a) => (
+            <Card key={a.id} size="sm" className="gap-2 p-2">
+              {a.file.contentType.startsWith('image/') ? (
+                <img
+                  src={a.file.url}
+                  alt={a.file.fileName}
+                  className="h-28 w-full rounded-md object-cover"
+                />
+              ) : (
+                <div className="grid h-28 place-items-center rounded-md bg-muted text-xs text-muted-foreground">
+                  {a.file.contentType}
+                </div>
               )}
-            </div>
-          </Card>
-        ))}
-        {assets.length === 0 && (
-          <p className="text-muted-foreground">No assets yet. Upload one to get started.</p>
-        )}
-      </div>
+              <div className="truncate text-sm">{String(a.title?.[locale] ?? a.file.fileName)}</div>
+              <div className="flex items-center justify-between">
+                <StatusBadge status={a.status} />
+                {a.status !== 'published' && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => client.publishAsset(a.id).then(load)}
+                  >
+                    Publish
+                  </Button>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
