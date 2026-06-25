@@ -1,4 +1,5 @@
 import { EmptyState } from '@/components/EmptyState';
+import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -44,20 +45,17 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Media</h1>
-        <div>
-          <input
-            ref={fileRef}
-            type="file"
-            className="hidden"
-            onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])}
-          />
-          <Button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
-            {busy ? 'Uploading…' : '+ Upload asset'}
-          </Button>
-        </div>
-      </div>
+      <PageHeader title="Media" description="Images and files you can reference from entries.">
+        <input
+          ref={fileRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])}
+        />
+        <Button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? 'Uploading…' : '+ Upload asset'}
+        </Button>
+      </PageHeader>
       {assets.length === 0 ? (
         <EmptyState
           icon={ImageIcon}

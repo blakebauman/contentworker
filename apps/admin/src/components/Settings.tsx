@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -49,8 +50,11 @@ export function Settings(props: {
   const { client, section, onSection } = props;
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <h1 className="mb-4 text-2xl font-semibold tracking-tight">Settings</h1>
+    <div className="mx-auto max-w-4xl space-y-4">
+      <PageHeader
+        title="Settings"
+        description="API keys, webhooks, and the API connection for this space."
+      />
       <Tabs value={section} onValueChange={onSection}>
         <TabsList>
           <TabsTrigger value="api-keys">API keys</TabsTrigger>
