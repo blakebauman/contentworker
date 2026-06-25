@@ -1,0 +1,34 @@
+{
+  "name": "@cw/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx --watch src/server.ts",
+    "start": "node --import tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cw/adapter-ai-azure-openai": "workspace:*",
+    "@cw/adapter-redis": "workspace:*",
+    "@cw/adapter-store-postgres": "workspace:*",
+    "@cw/adapter-vector-pgvector": "workspace:*",
+    "@cw/application": "workspace:*",
+    "@cw/domain": "workspace:*",
+    "@cw/ports": "workspace:*",
+    "@cw/test-kit": "workspace:*",
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14",
+    "ioredis": "^5.4.2",
+    "uuid": "^11.0.3",
+    "@cw/adapter-blob-s3": "workspace:*"
+  },
+  "devDependencies": {
+    "@cw/sdk-core": "workspace:*",
+    "@types/node": "^22.20.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

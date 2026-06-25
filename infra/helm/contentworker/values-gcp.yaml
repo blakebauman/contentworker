@@ -1,0 +1,37 @@
+# GCP GKE. Postgres = Cloud SQL, Redis = Memorystore, secrets via External
+# Secrets Operator (from GCP Secret Manager), workload identity via GKE WI.
+#   helm install cw ./infra/helm/contentworker -f values-gcp.yaml \
+#     --set image.repository=<region>-docker.pkg.dev/<project>/cw/contentworker
+image:
+  repository: us-docker.pkg.dev/REPLACE/cw/contentworker
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  annotations:
+    iam.gke.io/gcp-service-account: contentworker@REPLACE.iam.gserviceaccount.com
+
+config:
+  aiProvider: anthropic
+  embeddingsProvider: azure-openai
+
+secrets:
+  create: false
+  existingSecret: contentworker-secrets
+
+postgres: { bundled: false } # Cloud SQL (via Auth Proxy sidecar or private IP)
+redis: { bundled: false }    # Memorystore
+
+api:
+  split:
+    enabled: true
+  autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 20 }
+
+worker:
+  autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 10 }
+
+ingress:
+  enabled: true
+  className: gce
+  host: cms.example.com
+  tls: true

@@ -1,0 +1,24 @@
+contentworker {{ .Chart.AppVersion }} deployed as release "{{ .Release.Name }}".
+
+Workloads:
+  • API        ({{ if .Values.api.split.enabled }}split: management/delivery/preview{{ else }}role={{ .Values.api.role }}{{ end }})
+  • Worker     (outbox relay, webhooks, cache invalidation{{ if .Values.config.embeddingsProvider }}, RAG embedding{{ end }})
+{{- if .Values.mcpServer.enabled }}
+  • MCP server (agent tool surface)
+{{- end }}
+  • Migrator   (ran as a pre-install/upgrade hook)
+
+Datastores: {{ if .Values.postgres.bundled }}bundled Postgres{{ else }}external Postgres (via secret DATABASE_URL){{ end }}, {{ if .Values.redis.bundled }}bundled Redis{{ else }}external Redis (via secret REDIS_URL){{ end }}.
+
+{{- if not .Values.secrets.existingSecret }}
+{{- if .Values.secrets.create }}
+
+⚠️  Using a chart-created Secret with inline values — fine for local/dev only.
+   For production set secrets.create=false and point secrets.existingSecret at a
+   Secret populated by External Secrets Operator.
+{{- end }}
+{{- end }}
+
+Try the API:
+  kubectl port-forward svc/{{ include "cw.fullname" . }}-{{ if .Values.api.split.enabled }}api-delivery{{ else }}api{{ end }} 8787:80
+  curl -s localhost:8787/healthz

@@ -1,0 +1,28 @@
+{{- if .Values.migrator.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "cw.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels: {{- include "cw.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels: {{- include "cw.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "cw.serviceAccountName" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["pnpm", "--filter", "@cw/migrator", "start"]
+          envFrom:
+            - secretRef:
+                name: {{ include "cw.secretName" . }}
+{{- end }}

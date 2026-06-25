@@ -1,0 +1,92 @@
+{{- $root := . -}}
+{{- $port := .Values.api.port -}}
+{{- $instances := list (dict "name" "api" "role" .Values.api.role "replicas" (int .Values.api.replicas)) -}}
+{{- if .Values.api.split.enabled -}}
+{{- $instances = list
+    (dict "name" "api-management" "role" "management" "replicas" (int .Values.api.split.management.replicas))
+    (dict "name" "api-delivery"   "role" "delivery"   "replicas" (int .Values.api.split.delivery.replicas))
+    (dict "name" "api-preview"    "role" "preview"    "replicas" (int .Values.api.split.preview.replicas)) -}}
+{{- end -}}
+{{- range $inst := $instances }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cw.fullname" $root }}-{{ $inst.name }}
+  labels: {{- include "cw.labels" $root | nindent 4 }}
+spec:
+  {{- if not $root.Values.api.autoscaling.enabled }}
+  replicas: {{ $inst.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "cw.selectorLabels" (dict "ctx" $root "component" $inst.name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cw.selectorLabels" (dict "ctx" $root "component" $inst.name) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cw.serviceAccountName" $root }}
+      securityContext: {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["pnpm", "--filter", "@cw/api", "start"]
+          env:
+            - name: ROLE
+              value: {{ $inst.role | quote }}
+            - name: PORT
+              value: {{ $port | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "cw.fullname" $root }}-config
+            - secretRef:
+                name: {{ include "cw.secretName" $root }}
+          ports:
+            - name: http
+              containerPort: {{ $port }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+          resources: {{- toYaml $root.Values.api.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cw.fullname" $root }}-{{ $inst.name }}
+  labels: {{- include "cw.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cw.selectorLabels" (dict "ctx" $root "component" $inst.name) | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- if $root.Values.api.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "cw.fullname" $root }}-{{ $inst.name }}
+  labels: {{- include "cw.labels" $root | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "cw.fullname" $root }}-{{ $inst.name }}
+  minReplicas: {{ $root.Values.api.autoscaling.minReplicas }}
+  maxReplicas: {{ $root.Values.api.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $root.Values.api.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

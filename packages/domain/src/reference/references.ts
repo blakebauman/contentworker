@@ -1,0 +1,63 @@
+import type { ContentType } from '../content-type/content-type.js';
+import type { LinkType } from '../content-type/field.js';
+import type { EntryFields } from '../types.js';
+
+/**
+ * A materialized reference edge: entry `fromEntryId` links to `toId` (an entry
+ * or asset) via field `fromField`. These edges back referential integrity,
+ * delivery link resolution, and reverse-lookup cache invalidation.
+ */
+export interface ReferenceEdge {
+  readonly fromEntryId: string;
+  readonly fromField: string;
+  readonly toId: string;
+  readonly toType: LinkType;
+}
+
+interface LinkValue {
+  id: string;
+  linkType: LinkType;
+}
+
+function asLink(value: unknown): LinkValue | null {
+  const l = value as { id?: unknown; linkType?: unknown };
+  if (typeof l?.id === 'string' && (l.linkType === 'Entry' || l.linkType === 'Asset')) {
+    return { id: l.id, linkType: l.linkType };
+  }
+  return null;
+}
+
+/**
+ * Walks an entry's field values and extracts every link edge it contains,
+ * across all locales, deduplicated by (field, target). Pure — no I/O.
+ */
+export function extractReferences(
+  fromEntryId: string,
+  fields: EntryFields,
+  contentType: ContentType,
+): ReferenceEdge[] {
+  const edges = new Map<string, ReferenceEdge>();
+  const add = (fromField: string, link: LinkValue) => {
+    const key = `${fromField}::${link.linkType}::${link.id}`;
+    edges.set(key, { fromEntryId, fromField, toId: link.id, toType: link.linkType });
+  };
+
+  for (const field of contentType.fields) {
+    if (field.type !== 'Link' && field.type !== 'Array') continue;
+    const localized = fields[field.apiId];
+    if (!localized) continue;
+
+    for (const value of Object.values(localized)) {
+      if (field.type === 'Link') {
+        const link = asLink(value);
+        if (link) add(field.apiId, link);
+      } else if (field.type === 'Array' && field.items?.type === 'Link' && Array.isArray(value)) {
+        for (const item of value) {
+          const link = asLink(item);
+          if (link) add(field.apiId, link);
+        }
+      }
+    }
+  }
+  return [...edges.values()];
+}

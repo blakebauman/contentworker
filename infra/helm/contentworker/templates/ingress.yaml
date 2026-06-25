@@ -1,0 +1,58 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullname := include "cw.fullname" . -}}
+{{- $svcPort := 80 -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "cw.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ $fullname }}-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          {{- if .Values.api.split.enabled }}
+          - path: /spaces
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api-management
+                port: { number: {{ $svcPort }} }
+          - path: /delivery
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api-delivery
+                port: { number: {{ $svcPort }} }
+          - path: /preview
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api-preview
+                port: { number: {{ $svcPort }} }
+          {{- else }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port: { number: {{ $svcPort }} }
+          {{- end }}
+          {{- if .Values.mcpServer.enabled }}
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-mcp
+                port: { number: {{ $svcPort }} }
+          {{- end }}
+{{- end }}

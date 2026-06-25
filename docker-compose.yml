@@ -1,0 +1,75 @@
+# Local contentworker stack: Postgres + Redis + migrator + API + worker.
+#
+#   docker compose up --build
+#
+# API → http://localhost:8787  (CMA: dev-cma-key, CDA: dev-cda-key, CPA: dev-cpa-key)
+# The migrator runs once to apply schema, then the api/worker start.
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://postgres:postgres@postgres:5432/contentworker
+  REDIS_URL: redis://redis:6379
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: contentworker
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrator:
+    build: .
+    command: ["pnpm", "--filter", "@cw/migrator", "start"]
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    command: ["pnpm", "--filter", "@cw/api", "start"]
+    environment:
+      <<: *app-env
+      PORT: "8787"
+      ROLE: all
+    ports:
+      - "8787:8787"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["pnpm", "--filter", "@cw/worker", "start"]
+    environment:
+      <<: *app-env
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:

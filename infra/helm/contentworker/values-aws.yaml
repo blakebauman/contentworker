@@ -1,0 +1,42 @@
+# AWS EKS. Postgres = RDS, Redis = ElastiCache, secrets via External Secrets
+# Operator (from AWS Secrets Manager), workload identity via IRSA.
+#   helm install cw ./infra/helm/contentworker -f values-aws.yaml \
+#     --set image.repository=<acct>.dkr.ecr.<region>.amazonaws.com/contentworker
+image:
+  repository: REPLACE.dkr.ecr.us-east-1.amazonaws.com/contentworker
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE:role/contentworker
+
+config:
+  aiProvider: anthropic
+  embeddingsProvider: azure-openai # or run a hosted embeddings model of choice
+
+# DATABASE_URL / REDIS_URL / ADMIN_TOKEN / ANTHROPIC_API_KEY come from a Secret
+# synced by External Secrets Operator — the chart does not create one.
+secrets:
+  create: false
+  existingSecret: contentworker-secrets
+
+postgres: { bundled: false } # RDS
+redis: { bundled: false }    # ElastiCache
+
+api:
+  split:
+    enabled: true # scale the read-heavy Delivery module independently
+  autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 20 }
+
+worker:
+  autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 10 }
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+  host: cms.example.com
+  tls: true

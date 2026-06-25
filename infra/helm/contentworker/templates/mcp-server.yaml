@@ -1,0 +1,56 @@
+{{- if .Values.mcpServer.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cw.fullname" . }}-mcp
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.mcpServer.replicas }}
+  selector:
+    matchLabels: {{- include "cw.selectorLabels" (dict "ctx" . "component" "mcp") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cw.selectorLabels" (dict "ctx" . "component" "mcp") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cw.serviceAccountName" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["pnpm", "--filter", "@cw/mcp-server", "start"]
+          env:
+            - name: PORT
+              value: {{ .Values.mcpServer.port | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "cw.fullname" . }}-config
+            - secretRef:
+                name: {{ include "cw.secretName" . }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.mcpServer.port }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+          resources: {{- toYaml .Values.mcpServer.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cw.fullname" . }}-mcp
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cw.selectorLabels" (dict "ctx" . "component" "mcp") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}

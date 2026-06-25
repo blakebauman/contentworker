@@ -1,0 +1,110 @@
+# Default values for contentworker. Override per-cloud via values-<cloud>.yaml.
+# Identical container image across all clouds — only config/secret sources differ.
+
+image:
+  repository: contentworker
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  # Cloud workload-identity annotations (IRSA / GCP WI / Azure WI) go here.
+  annotations: {}
+
+# Non-secret configuration, surfaced to every workload via a ConfigMap.
+config:
+  # AIProvider: anthropic | azure-openai
+  aiProvider: anthropic
+  # EmbeddingsProvider: "" (disabled) | local | azure-openai
+  embeddingsProvider: local
+  embeddingsDim: "1536"
+  seedSpaceId: space-1
+  seedEnvId: master
+  seedDefaultLocale: en-US
+  seedLocales: en-US
+  # Extra non-secret env (e.g. AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_VERSION).
+  extraEnv: {}
+
+# Secrets. In cloud, set create=false and point existingSecret at one populated
+# by External Secrets Operator from the cloud's secret manager. For local dev,
+# create=true writes the values below into a Secret (NOT for production).
+secrets:
+  create: true
+  existingSecret: ""
+  data:
+    DATABASE_URL: "postgres://postgres:postgres@contentworker-postgres:5432/contentworker"
+    REDIS_URL: "redis://contentworker-redis:6379"
+    ADMIN_TOKEN: "dev-admin-token"
+    MCP_TOKEN: "dev-mcp-token"
+    ANTHROPIC_API_KEY: ""
+    AZURE_OPENAI_API_KEY: ""
+
+# --- API (Management + Delivery + Preview) -------------------------------------
+# Run as one combined Deployment (role=all) or split into independently-scaled
+# roles. When split.enabled=true, three Deployments are created.
+api:
+  replicas: 2
+  role: all
+  port: 8787
+  split:
+    enabled: false
+    delivery: { replicas: 3 }
+    management: { replicas: 2 }
+    preview: { replicas: 1 }
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+worker:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+mcpServer:
+  enabled: true
+  replicas: 2
+  port: 8788
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+migrator:
+  enabled: true
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  host: cms.example.com
+  tls: false
+
+# Bundled datastores for LOCAL dev only. In cloud these stay false and you point
+# DATABASE_URL/REDIS_URL at managed services via the secret.
+postgres:
+  bundled: false
+  image: pgvector/pgvector:pg16
+  storage: 2Gi
+redis:
+  bundled: false
+  image: redis:7-alpine
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000

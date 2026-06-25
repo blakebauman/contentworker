@@ -1,0 +1,49 @@
+# Azure AKS. Postgres = Azure DB for PostgreSQL, Redis = Azure Cache for Redis,
+# secrets via External Secrets Operator (from Azure Key Vault), workload identity
+# via Azure Workload Identity. Uses Azure OpenAI for both chat and embeddings.
+#   helm install cw ./infra/helm/contentworker -f values-azure.yaml \
+#     --set image.repository=<registry>.azurecr.io/contentworker
+image:
+  repository: REPLACE.azurecr.io/contentworker
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  annotations:
+    azure.workload.identity/client-id: REPLACE-CLIENT-ID
+
+config:
+  aiProvider: azure-openai
+  embeddingsProvider: azure-openai
+  embeddingsDim: "1536"
+  # Non-secret Azure OpenAI config (endpoint + deployments). The API key is a secret.
+  extraEnv:
+    AZURE_OPENAI_ENDPOINT: "https://REPLACE.openai.azure.com"
+    AZURE_OPENAI_API_VERSION: "2024-10-21"
+    AZURE_OPENAI_DEPLOYMENT_FLAGSHIP: "gpt-4o"
+    AZURE_OPENAI_DEPLOYMENT_BALANCED: "gpt-4o-mini"
+    AZURE_OPENAI_DEPLOYMENT_FAST: "gpt-4o-mini"
+    AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT: "text-embedding-3-small"
+
+# Secret (synced from Key Vault) must include AZURE_OPENAI_API_KEY in addition to
+# DATABASE_URL / REDIS_URL / ADMIN_TOKEN / MCP_TOKEN.
+secrets:
+  create: false
+  existingSecret: contentworker-secrets
+
+postgres: { bundled: false } # Azure DB for PostgreSQL (Flexible Server)
+redis: { bundled: false }    # Azure Cache for Redis
+
+api:
+  split:
+    enabled: true
+  autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 20 }
+
+worker:
+  autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 10 }
+
+ingress:
+  enabled: true
+  className: webapprouting.kubernetes.azure.com
+  host: cms.example.com
+  tls: true

@@ -1,0 +1,123 @@
+import {
+  createApiKey,
+  createAsset,
+  createContentType,
+  createEntry,
+  createEnvironment,
+  createSpace,
+  createWebhook,
+  getAsset,
+  getContentType,
+  getEntry,
+  listApiKeys,
+  listContentTypes,
+  listWebhooks,
+  publishAsset,
+  publishContentType,
+  publishEntry,
+  unpublishAsset,
+  unpublishEntry,
+  updateEntry,
+} from '@cw/application';
+import { SCOPES, type Scope } from '@cw/domain';
+import { Hono } from 'hono';
+import { type AuthDeps, type AuthVars, principalMiddleware, requireScope } from '../auth.js';
+
+const scopeOf = (c: { req: { param: (k: string) => string } }): Scope => ({
+  spaceId: c.req.param('space'),
+  environmentId: c.req.param('env'),
+});
+
+const BASE = '/spaces/:space/environments/:env';
+
+/** Management API (CMA): authoring + publishing, gated by RBAC scopes. */
+export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
+  const { ctx, hasher, blob } = deps;
+  const app = new Hono<AuthVars>();
+  app.use('/spaces', principalMiddleware(deps));
+  app.use('/spaces/*', principalMiddleware(deps));
+
+  // --- provisioning (admin) ----------------------------------------------
+  app.post('/spaces', requireScope(SCOPES.spaceAdmin), async (c) => {
+    const body = await c.req.json();
+    return c.json(await createSpace(ctx, body), 201);
+  });
+
+  app.post('/spaces/:space/environments', requireScope(SCOPES.spaceAdmin), async (c) => {
+    const body = await c.req.json();
+    await createEnvironment(ctx, c.req.param('space'), body.id, body.name);
+    return c.json({ id: body.id }, 201);
+  });
+
+  // --- API key management (admin) ----------------------------------------
+  app.get('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json({ items: await listApiKeys(ctx, c.req.param('space')) }),
+  );
+  app.post('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) => {
+    const body = await c.req.json();
+    const created = await createApiKey(ctx, hasher, { spaceId: c.req.param('space'), ...body });
+    // Return the raw token once; only its hash is stored.
+    return c.json({ id: created.apiKey.id, kind: created.apiKey.kind, token: created.token }, 201);
+  });
+
+  // --- content types ------------------------------------------------------
+  app.get(`${BASE}/content-types`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listContentTypes(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/content-types`, requireScope(SCOPES.contentManage), async (c) => {
+    const ct = await createContentType(ctx, scopeOf(c), await c.req.json());
+    return c.json(ct, 201);
+  });
+  app.get(`${BASE}/content-types/:apiId`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(await getContentType(ctx, scopeOf(c), c.req.param('apiId'))),
+  );
+  app.post(
+    `${BASE}/content-types/:apiId/published`,
+    requireScope(SCOPES.contentPublish),
+    async (c) => c.json(await publishContentType(ctx, scopeOf(c), c.req.param('apiId'))),
+  );
+
+  // --- entries ------------------------------------------------------------
+  app.post(`${BASE}/entries`, requireScope(SCOPES.contentWrite), async (c) => {
+    const view = await createEntry(ctx, scopeOf(c), await c.req.json());
+    return c.json(view, 201);
+  });
+  app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(await getEntry(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  app.put(`${BASE}/entries/:id`, requireScope(SCOPES.contentWrite), async (c) => {
+    const body = await c.req.json();
+    return c.json(await updateEntry(ctx, scopeOf(c), c.req.param('id'), body.fields));
+  });
+  app.post(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await publishEntry(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  app.delete(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await unpublishEntry(ctx, scopeOf(c), c.req.param('id'))),
+  );
+
+  // --- assets -------------------------------------------------------------
+  app.post(`${BASE}/assets`, requireScope(SCOPES.contentWrite), async (c) => {
+    const created = await createAsset(ctx, blob, scopeOf(c), await c.req.json());
+    return c.json(created, 201);
+  });
+  app.get(`${BASE}/assets/:id`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(await getAsset(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  app.post(`${BASE}/assets/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await publishAsset(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  app.delete(`${BASE}/assets/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await unpublishAsset(ctx, scopeOf(c), c.req.param('id'))),
+  );
+
+  // --- webhooks (admin) ---------------------------------------------------
+  app.get(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json({ items: await listWebhooks(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json(await createWebhook(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+
+  return app;
+}

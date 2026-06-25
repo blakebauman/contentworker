@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.turbo
+.git
+*.log
+.env
+.env.*
+**/coverage
+.DS_Store

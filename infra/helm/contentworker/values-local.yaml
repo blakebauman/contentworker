@@ -1,0 +1,31 @@
+# Local / kind / minikube — fully self-contained (bundled Postgres + Redis).
+#   helm install cw ./infra/helm/contentworker -f values-local.yaml
+image:
+  pullPolicy: Never # use a locally-built image (docker build -t contentworker:0.1.0 .)
+
+config:
+  aiProvider: anthropic
+  embeddingsProvider: local
+
+# Bundled datastores; the default secret URLs already point at these services.
+postgres:
+  bundled: true
+redis:
+  bundled: true
+
+secrets:
+  create: true
+  data:
+    DATABASE_URL: "postgres://postgres:postgres@cw-contentworker-postgres:5432/contentworker"
+    REDIS_URL: "redis://cw-contentworker-redis:6379"
+    ADMIN_TOKEN: "dev-admin-token"
+    MCP_TOKEN: "dev-mcp-token"
+
+api:
+  replicas: 1
+  autoscaling: { enabled: false }
+
+ingress:
+  enabled: true
+  className: nginx
+  host: cms.localtest.me

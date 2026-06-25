@@ -1,0 +1,15 @@
+apiVersion: v2
+name: contentworker
+description: >-
+  Composable, AI-agentic-first headless CMS. Cloud-agnostic Kubernetes chart —
+  one image, ROLE-gated API modules, worker, and MCP server. Postgres/Redis are
+  external in cloud (managed) and optionally bundled for local development.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - cms
+  - headless
+  - mcp
+  - ai
+home: https://github.com/contentworker/contentworker

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cw.fullname" . }}-config
+  labels: {{- include "cw.labels" . | nindent 4 }}
+data:
+  AI_PROVIDER: {{ .Values.config.aiProvider | quote }}
+  {{- if .Values.config.embeddingsProvider }}
+  EMBEDDINGS_PROVIDER: {{ .Values.config.embeddingsProvider | quote }}
+  {{- end }}
+  EMBEDDINGS_DIM: {{ .Values.config.embeddingsDim | quote }}
+  SEED_SPACE_ID: {{ .Values.config.seedSpaceId | quote }}
+  SEED_ENV_ID: {{ .Values.config.seedEnvId | quote }}
+  SEED_DEFAULT_LOCALE: {{ .Values.config.seedDefaultLocale | quote }}
+  SEED_LOCALES: {{ .Values.config.seedLocales | quote }}
+  {{- range $k, $v := .Values.config.extraEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

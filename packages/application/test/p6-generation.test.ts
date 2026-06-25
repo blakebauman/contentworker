@@ -1,0 +1,93 @@
+import { ValidationError } from '@cw/domain';
+import {
+  FixedClock,
+  InMemoryContentStore,
+  SequenceIdGenerator,
+  StubAIProvider,
+} from '@cw/test-kit';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { type AppContext, createContentType, createSpace, draftEntry } from '../src/index.js';
+
+const scope = { spaceId: 'shop', environmentId: 'master' };
+
+function makeContext() {
+  const store = new InMemoryContentStore();
+  const ctx: AppContext = { store, clock: new FixedClock(), ids: new SequenceIdGenerator('e') };
+  return { ctx };
+}
+
+async function seedArticle(ctx: AppContext) {
+  await createSpace(ctx, { spaceId: 'shop', name: 'Shop', defaultLocale: 'en-US' });
+  await createContentType(ctx, scope, {
+    apiId: 'article',
+    name: 'Article',
+    displayField: 'title',
+    fields: [
+      {
+        apiId: 'title',
+        name: 'Title',
+        type: 'Symbol',
+        localized: false,
+        required: true,
+        position: 0,
+      },
+      {
+        apiId: 'wordCount',
+        name: 'Word count',
+        type: 'Integer',
+        localized: false,
+        required: false,
+        position: 1,
+        validations: { range: { min: 0 } },
+      },
+    ],
+  });
+}
+
+describe('P6: AI generation over the content model', () => {
+  let ctx: AppContext;
+  beforeEach(() => {
+    ({ ctx } = makeContext());
+  });
+
+  it('builds a schema from the content type and returns validated draft fields', async () => {
+    await seedArticle(ctx);
+    const ai = new StubAIProvider(() => ({ title: 'A Generated Headline', wordCount: 850 }));
+
+    const result = await draftEntry(ctx, ai, scope, {
+      contentTypeApiId: 'article',
+      prompt: 'Write about TS',
+    });
+
+    expect(result.fields.title?.['en-US']).toBe('A Generated Headline');
+    expect(result.fields.wordCount?.['en-US']).toBe(850);
+    // The request carried a strict JSON schema derived from the content type.
+    const schema = ai.requests[0]?.outputSchema as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(Object.keys(schema.properties)).toEqual(['title', 'wordCount']);
+    expect(schema.required).toContain('title');
+  });
+
+  it('rejects model output that violates the content model (validation gate)', async () => {
+    await seedArticle(ctx);
+    // Model returns a negative wordCount, violating the range validation.
+    const ai = new StubAIProvider(() => ({ title: 'Bad', wordCount: -5 }));
+
+    await expect(
+      draftEntry(ctx, ai, scope, { contentTypeApiId: 'article', prompt: 'x' }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('passes the requested tier through to the provider', async () => {
+    await seedArticle(ctx);
+    const ai = new StubAIProvider(() => ({ title: 'T', wordCount: 1 }));
+    await draftEntry(ctx, ai, scope, {
+      contentTypeApiId: 'article',
+      prompt: 'x',
+      tier: 'flagship',
+    });
+    expect(ai.requests[0]?.tier).toBe('flagship');
+  });
+});

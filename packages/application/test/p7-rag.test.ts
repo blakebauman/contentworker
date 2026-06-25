@@ -1,0 +1,75 @@
+import { InMemoryVectorStore, LocalEmbeddingsProvider } from '@cw/test-kit';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  type RagDeps,
+  chunk,
+  extractTextByLocale,
+  indexEntryEmbeddings,
+  removeEntryEmbeddings,
+  semanticSearch,
+} from '../src/index.js';
+
+const scope = { spaceId: 'kb', environmentId: 'master' };
+
+describe('P7: RAG indexing + semantic search', () => {
+  let deps: RagDeps;
+  beforeEach(() => {
+    deps = { embeddings: new LocalEmbeddingsProvider(512), vectors: new InMemoryVectorStore() };
+  });
+
+  it('extracts localized text and chunks long text', () => {
+    const text = extractTextByLocale({ title: { 'en-US': 'Hello' }, body: { 'en-US': 'World' } });
+    expect(text['en-US']).toContain('Hello');
+    expect(text['en-US']).toContain('World');
+    expect(chunk('a b c d e', 2)).toEqual(['a b', 'c d', 'e']);
+  });
+
+  it('indexes entries and ranks the relevant one first', async () => {
+    await indexEntryEmbeddings(deps, scope, {
+      entryId: 'e-postgres',
+      entryVersion: 1,
+      fields: {
+        body: {
+          'en-US': 'PostgreSQL is a relational database with strong SQL support and indexes',
+        },
+      },
+    });
+    await indexEntryEmbeddings(deps, scope, {
+      entryId: 'e-coffee',
+      entryVersion: 1,
+      fields: {
+        body: { 'en-US': 'Espresso is a brewing method for coffee using pressure and hot water' },
+      },
+    });
+
+    const hits = await semanticSearch(deps, scope, 'database sql indexes', { topK: 2 });
+    expect(hits[0]?.entryId).toBe('e-postgres');
+    expect(hits[0]?.score).toBeGreaterThan(hits[1]?.score ?? 0);
+  });
+
+  it('replaces stale vectors on re-index (republish)', async () => {
+    await indexEntryEmbeddings(deps, scope, {
+      entryId: 'e1',
+      entryVersion: 1,
+      fields: { body: { 'en-US': 'aardvark anteater' } },
+    });
+    await indexEntryEmbeddings(deps, scope, {
+      entryId: 'e1',
+      entryVersion: 2,
+      fields: { body: { 'en-US': 'zebra zeppelin' } },
+    });
+    // Old terms no longer match; new terms do.
+    expect((await semanticSearch(deps, scope, 'aardvark', { topK: 5 })).length).toBe(0);
+    expect((await semanticSearch(deps, scope, 'zebra', { topK: 5 }))[0]?.entryId).toBe('e1');
+  });
+
+  it('removes embeddings on unpublish', async () => {
+    await indexEntryEmbeddings(deps, scope, {
+      entryId: 'e1',
+      entryVersion: 1,
+      fields: { body: { 'en-US': 'searchable content here' } },
+    });
+    await removeEntryEmbeddings(deps, scope, 'e1');
+    expect((await semanticSearch(deps, scope, 'searchable', { topK: 5 })).length).toBe(0);
+  });
+});

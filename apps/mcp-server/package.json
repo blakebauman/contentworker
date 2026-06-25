@@ -1,0 +1,30 @@
+{
+  "name": "@cw/mcp-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@cw/adapter-ai-anthropic": "workspace:*",
+    "@cw/adapter-ai-azure-openai": "workspace:*",
+    "@cw/adapter-store-postgres": "workspace:*",
+    "@cw/adapter-vector-pgvector": "workspace:*",
+    "@cw/application": "workspace:*",
+    "@cw/domain": "workspace:*",
+    "@cw/ports": "workspace:*",
+    "@cw/test-kit": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "uuid": "^11.0.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
