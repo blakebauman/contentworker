@@ -71,6 +71,8 @@ export interface PublishedAsset {
 
 export interface AssetRepo {
   get(scope: Scope, id: string): Promise<Asset | null>;
+  /** Lists all assets (draft + published) for the media library. */
+  list(scope: Scope, query: { limit?: number; skip?: number }): Promise<Asset[]>;
   create(scope: Scope, asset: Asset): Promise<void>;
   save(scope: Scope, asset: Asset): Promise<void>;
   putPublished(scope: Scope, snapshot: PublishedAsset): Promise<void>;

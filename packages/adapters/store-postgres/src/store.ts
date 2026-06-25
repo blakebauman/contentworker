@@ -255,6 +255,16 @@ function makeAssetRepo(db: Db): AssetRepo {
           }
         : null;
     },
+    async list(scope, query) {
+      const rows = await db
+        .select()
+        .from(schema.assets)
+        .where(scopeFilter(schema.assets, scope))
+        .orderBy(desc(schema.assets.updatedAt))
+        .limit(query.limit ?? 100)
+        .offset(query.skip ?? 0);
+      return rows.map((r) => ({ id: r.id, status: r.status, file: r.file, title: r.title, description: r.description }));
+    },
     create: upsertDraft,
     save: upsertDraft,
     async putPublished(scope, s) {

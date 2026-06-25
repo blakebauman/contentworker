@@ -54,6 +54,15 @@ export async function getAsset(ctx: AppContext, scope: Scope, id: string): Promi
   return asset;
 }
 
+/** Lists all assets (draft + published) — the media library view. */
+export async function listAssets(
+  ctx: AppContext,
+  scope: Scope,
+  query: { limit?: number; skip?: number } = {},
+): Promise<Asset[]> {
+  return ctx.store.assets.list(scope, query);
+}
+
 /** Publishes an asset — writes the denormalized snapshot served by Delivery. */
 export async function publishAsset(ctx: AppContext, scope: Scope, id: string): Promise<Asset> {
   const asset = await ctx.store.assets.get(scope, id);

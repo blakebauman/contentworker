@@ -1,4 +1,4 @@
-import { type LocaleCode, ValidationError } from '@cw/domain';
+import { type LocaleCode, NotFoundError, type Scope, ValidationError } from '@cw/domain';
 import type { SpaceConfig } from '@cw/ports';
 import type { AppContext } from './context.js';
 
@@ -35,6 +35,13 @@ export async function createSpace(ctx: AppContext, input: CreateSpaceInput): Pro
   for (const env of environments) {
     await ctx.store.spaces.createEnvironment(input.spaceId, env, env);
   }
+  return config;
+}
+
+/** Reads a space's configuration (locales, default locale, fallbacks). */
+export async function getSpaceConfig(ctx: AppContext, scope: Scope): Promise<SpaceConfig> {
+  const config = await ctx.store.spaces.getConfig(scope);
+  if (!config) throw new NotFoundError('Space', scope.spaceId);
   return config;
 }
 
