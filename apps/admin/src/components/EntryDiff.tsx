@@ -1,3 +1,14 @@
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import type { ManagementClient, PreviewEntry } from '../lib/management.js';
 
@@ -64,42 +75,44 @@ export function EntryDiff(props: {
   const changedCount = deltas?.filter((d) => d.changed).length ?? 0;
 
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 16, marginTop: 12 }}>
-      <div className="row between">
-        <h2 className="h" style={{ fontSize: 15 }}>
-          Diff vs published{deltas && <span className="muted"> · {changedCount} changed</span>}
+    <Card className="mt-3">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <h2 className="text-sm font-semibold">
+          Diff vs published
+          {deltas && <span className="text-muted-foreground"> · {changedCount} changed</span>}
         </h2>
-        <button type="button" className="ghost" onClick={onClose}>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           Close
-        </button>
-      </div>
-      {error && <div className="error">⚠ {error}</div>}
-      {deltas && (
-        <table>
-          <thead>
-            <tr>
-              <th style={{ width: 160 }}>Field</th>
-              <th>Published</th>
-              <th>Draft</th>
-            </tr>
-          </thead>
-          <tbody>
-            {deltas.map((d) => (
-              <tr
-                key={d.apiId}
-                style={d.changed ? { background: 'rgba(255,200,0,0.06)' } : undefined}
-              >
-                <td>
-                  {d.changed && <span style={{ color: 'var(--accent)' }}>● </span>}
-                  {d.apiId}
-                </td>
-                <td className="muted">{show(d.published).slice(0, 200)}</td>
-                <td>{show(d.draft).slice(0, 200)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {error && <div className="p-2 text-destructive">⚠ {error}</div>}
+        {deltas && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-40">Field</TableHead>
+                <TableHead>Published</TableHead>
+                <TableHead>Draft</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {deltas.map((d) => (
+                <TableRow key={d.apiId} className={cn(d.changed && 'bg-warning/5')}>
+                  <TableCell>
+                    {d.changed && <span className="text-primary">● </span>}
+                    {d.apiId}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {show(d.published).slice(0, 200)}
+                  </TableCell>
+                  <TableCell>{show(d.draft).slice(0, 200)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }

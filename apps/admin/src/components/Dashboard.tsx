@@ -1,3 +1,15 @@
+import { StatusBadge } from '@/components/StatusBadge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { useCallback, useEffect, useState } from 'react';
 import type { AgentRun, ManagementClient, SearchHit, UsageSummary } from '../lib/management.js';
 import { useToast } from '../lib/toast.js';
@@ -40,108 +52,99 @@ export function Dashboard(props: { client: ManagementClient }) {
     }
   };
 
-  const card: React.CSSProperties = {
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    padding: 16,
-    minWidth: 130,
-  };
-
   return (
-    <>
-      <h1 className="h">Dashboard</h1>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
 
       {/* Cost ledger */}
-      <div className="row" style={{ gap: 12, marginBottom: 20 }}>
-        <div style={card}>
-          <div className="muted">Agent runs</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{usage?.runs ?? '—'}</div>
-        </div>
-        <div style={card}>
-          <div className="muted">Input tokens</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>
-            {usage?.inputTokens?.toLocaleString() ?? '—'}
-          </div>
-        </div>
-        <div style={card}>
-          <div className="muted">Output tokens</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>
-            {usage?.outputTokens?.toLocaleString() ?? '—'}
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Stat label="Agent runs" value={usage?.runs} />
+        <Stat label="Input tokens" value={usage?.inputTokens?.toLocaleString()} />
+        <Stat label="Output tokens" value={usage?.outputTokens?.toLocaleString()} />
       </div>
 
       {/* Semantic search */}
-      <form className="row" onSubmit={runSearch} style={{ marginBottom: 8 }}>
-        <input
+      <form className="flex items-center gap-2" onSubmit={runSearch}>
+        <Input
           placeholder="Semantic search published content…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <button type="submit" disabled={searching}>
+        <Button type="submit" disabled={searching}>
           {searching ? 'Searching…' : 'Search'}
-        </button>
+        </Button>
       </form>
       {hits.length > 0 && (
-        <table style={{ marginBottom: 20 }}>
-          <thead>
-            <tr>
-              <th style={{ width: 80 }}>Score</th>
-              <th>Entry</th>
-              <th>Snippet</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-20">Score</TableHead>
+              <TableHead>Entry</TableHead>
+              <TableHead>Snippet</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {hits.map((h) => (
-              <tr key={h.entryId}>
-                <td>{h.score.toFixed(3)}</td>
-                <td className="muted">{h.entryId}</td>
-                <td>{h.snippet.slice(0, 120)}</td>
-              </tr>
+              <TableRow key={h.entryId}>
+                <TableCell>{h.score.toFixed(3)}</TableCell>
+                <TableCell className="text-muted-foreground">{h.entryId}</TableCell>
+                <TableCell>{h.snippet.slice(0, 120)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
 
       {/* Agent runs */}
-      <h2 className="h" style={{ fontSize: 15 }}>
-        Recent agent runs
-      </h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Workflow</th>
-            <th>Entry</th>
-            <th>Status</th>
-            <th>Tokens (in/out)</th>
-            <th>When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {runs.map((r) => (
-            <tr key={r.id}>
-              <td>{r.workflow}</td>
-              <td className="muted">{r.entryId}</td>
-              <td>
-                <span className={`badge ${r.status === 'completed' ? 'published' : 'draft'}`}>
-                  {r.status}
-                </span>
-              </td>
-              <td className="muted">
-                {r.inputTokens}/{r.outputTokens}
-              </td>
-              <td className="muted">{new Date(r.createdAt).toLocaleString()}</td>
-            </tr>
-          ))}
-          {runs.length === 0 && (
-            <tr>
-              <td colSpan={5} className="muted">
-                No agent runs yet (enable AGENTS_ENRICH on the worker).
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </>
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold">Recent agent runs</h2>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Workflow</TableHead>
+              <TableHead>Entry</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Tokens (in/out)</TableHead>
+              <TableHead>When</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {runs.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell>{r.workflow}</TableCell>
+                <TableCell className="text-muted-foreground">{r.entryId}</TableCell>
+                <TableCell>
+                  <StatusBadge status={r.status} />
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {r.inputTokens}/{r.outputTokens}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {new Date(r.createdAt).toLocaleString()}
+                </TableCell>
+              </TableRow>
+            ))}
+            {runs.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-muted-foreground">
+                  No agent runs yet (enable AGENTS_ENRICH on the worker).
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+function Stat(props: { label: string; value: number | string | undefined }) {
+  return (
+    <Card>
+      <CardContent>
+        <div className="text-sm text-muted-foreground">{props.label}</div>
+        <div className="text-3xl font-bold">{props.value ?? '—'}</div>
+      </CardContent>
+    </Card>
   );
 }

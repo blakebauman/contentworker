@@ -1,0 +1,244 @@
+import { StatusBadge } from '@/components/StatusBadge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { EntryDiff } from '../components/EntryDiff.js';
+import { useClient } from '../lib/client-context.js';
+import type { PreviewEntry } from '../lib/management.js';
+import { useToast } from '../lib/toast.js';
+import { useContentOutlet } from './content-context.js';
+
+/** Entries table for one content type, with bulk publishing and a draft/published diff. */
+export function EntriesList() {
+  const { typeId } = useParams();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const { client, conn, busy, run } = useClient();
+  const { types } = useContentOutlet();
+
+  const [entries, setEntries] = useState<PreviewEntry[]>([]);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [diffEntry, setDiffEntry] = useState<PreviewEntry | null>(null);
+
+  const selectedType = types.find((t) => t.apiId === typeId);
+
+  const loadEntries = useCallback(
+    () =>
+      run(async () => {
+        if (typeId) setEntries(await client.listEntries(typeId));
+      }),
+    [client, run, typeId],
+  );
+
+  // Reload when the selected content type changes; clear cross-type UI state.
+  useEffect(() => {
+    setPicked(new Set());
+    setDiffEntry(null);
+    loadEntries();
+  }, [loadEntries]);
+
+  const togglePick = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // Optimistically reflect a status change; reconcile on success, roll back on failure.
+  const optimisticStatus = (ids: Set<string>, status: string) =>
+    setEntries((es) => es.map((e) => (ids.has(e.id) ? { ...e, status } : e)));
+
+  const bulk = (action: (id: string) => Promise<unknown>, verb: string, status: string) => {
+    const snapshot = entries;
+    const ids = picked;
+    optimisticStatus(ids, status);
+    setPicked(new Set());
+    return run(async () => {
+      try {
+        for (const id of ids) await action(id);
+      } catch (e) {
+        setEntries(snapshot);
+        throw e;
+      }
+      await loadEntries();
+      toast.success(`${verb} ${ids.size} ${ids.size === 1 ? 'entry' : 'entries'}`);
+    });
+  };
+
+  const setStatus = (
+    id: string,
+    status: string,
+    act: (id: string) => Promise<unknown>,
+    msg: string,
+  ) => {
+    const snapshot = entries;
+    optimisticStatus(new Set([id]), status);
+    return run(async () => {
+      try {
+        await act(id);
+      } catch (e) {
+        setEntries(snapshot);
+        throw e;
+      }
+      await loadEntries();
+      toast.success(msg);
+    });
+  };
+
+  if (!selectedType) {
+    return <p className="text-muted-foreground">Select a content type to browse its entries.</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">{selectedType.name} entries</h1>
+        <div className="flex items-center gap-2">
+          {picked.size > 0 && (
+            <>
+              <span className="text-sm text-muted-foreground">{picked.size} selected</span>
+              <Button
+                type="button"
+                onClick={() => bulk((id) => client.publishEntry(id), 'Published', 'published')}
+                disabled={busy}
+              >
+                Publish selected
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => bulk((id) => client.unpublishEntry(id), 'Unpublished', 'draft')}
+                disabled={busy}
+              >
+                Unpublish selected
+              </Button>
+            </>
+          )}
+          <Button
+            type="button"
+            onClick={() => navigate(`/content/${selectedType.apiId}/new`)}
+            disabled={busy}
+          >
+            + New entry
+          </Button>
+        </div>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8" />
+            <TableHead>{selectedType.displayField}</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="w-[320px]">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {entries.map((e) => (
+            <TableRow key={e.id}>
+              <TableCell>
+                <Checkbox
+                  aria-label={`Select ${e.id}`}
+                  checked={picked.has(e.id)}
+                  onCheckedChange={() => togglePick(e.id)}
+                />
+              </TableCell>
+              <TableCell>
+                {String(
+                  (e.fields[selectedType.displayField] as Record<string, unknown>)?.[conn.locale] ??
+                    '—',
+                )}
+              </TableCell>
+              <TableCell>
+                <StatusBadge status={e.status} />
+              </TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate(`/content/${selectedType.apiId}/${e.id}`)}
+                    disabled={busy}
+                  >
+                    Edit
+                  </Button>
+                  {e.status !== 'draft' && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDiffEntry(diffEntry?.id === e.id ? null : e)}
+                      disabled={busy}
+                    >
+                      Diff
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() =>
+                      setStatus(
+                        e.id,
+                        'published',
+                        (id) => client.publishEntry(id),
+                        'Entry published',
+                      )
+                    }
+                    disabled={busy}
+                  >
+                    Publish
+                  </Button>
+                  {e.status === 'published' && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setStatus(
+                          e.id,
+                          'draft',
+                          (id) => client.unpublishEntry(id),
+                          'Entry unpublished',
+                        )
+                      }
+                      disabled={busy}
+                    >
+                      Unpublish
+                    </Button>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+          {entries.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={4} className="text-muted-foreground">
+                No entries yet.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+
+      {diffEntry && (
+        <EntryDiff
+          client={client}
+          entry={diffEntry}
+          locale={conn.locale}
+          onClose={() => setDiffEntry(null)}
+        />
+      )}
+    </div>
+  );
+}

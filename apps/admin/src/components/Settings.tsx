@@ -1,7 +1,32 @@
+import { StatusBadge } from '@/components/StatusBadge';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCallback, useEffect, useState } from 'react';
+import { useClient } from '../lib/client-context.js';
 import {
   type ApiKeyKind,
   type ApiKeySummary,
+  type Connection,
   type CreatedApiKey,
   type ManagementClient,
   WEBHOOK_TOPICS,
@@ -10,18 +35,45 @@ import {
 } from '../lib/management.js';
 import { useToast } from '../lib/toast.js';
 
-/** Space settings: API key issuance + webhook subscriptions (space-admin scope). */
-export function Settings(props: { client: ManagementClient }) {
-  const { client } = props;
+/**
+ * Space settings, organized as URL-driven tabs (`/settings/:section`): API key
+ * issuance, webhook subscriptions, and the API connection config.
+ */
+export function Settings(props: {
+  client: ManagementClient;
+  section: string;
+  onSection: (section: string) => void;
+}) {
+  const { client, section, onSection } = props;
 
   return (
-    <>
-      <h1 className="h">Settings</h1>
-      <ApiKeys client={client} />
-      <Webhooks client={client} />
-    </>
+    <div className="mx-auto max-w-4xl">
+      <h1 className="mb-4 text-2xl font-semibold tracking-tight">Settings</h1>
+      <Tabs value={section} onValueChange={onSection}>
+        <TabsList>
+          <TabsTrigger value="api-keys">API keys</TabsTrigger>
+          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+          <TabsTrigger value="connection">Connection</TabsTrigger>
+        </TabsList>
+        <TabsContent value="api-keys" className="mt-4">
+          <ApiKeys client={client} />
+        </TabsContent>
+        <TabsContent value="webhooks" className="mt-4">
+          <Webhooks client={client} />
+        </TabsContent>
+        <TabsContent value="connection" className="mt-4">
+          <ConnectionSettings />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
+
+const KEY_KINDS: { value: ApiKeyKind; label: string }[] = [
+  { value: 'cda', label: 'CDA — Delivery (read published)' },
+  { value: 'cpa', label: 'CPA — Preview (read drafts)' },
+  { value: 'cma', label: 'CMA — Management (full author/publish)' },
+];
 
 function ApiKeys(props: { client: ManagementClient }) {
   const { client } = props;
@@ -62,88 +114,87 @@ function ApiKeys(props: { client: ManagementClient }) {
   };
 
   return (
-    <section style={{ marginBottom: 28 }}>
-      <h2 className="h" style={{ fontSize: 15 }}>
-        API keys
-      </h2>
-
-      {minted && (
-        <div
-          className="row between"
-          style={{
-            border: '1px solid var(--accent)',
-            borderRadius: 8,
-            padding: 12,
-            marginBottom: 12,
-            gap: 8,
-          }}
-        >
-          <div>
-            <div className="muted">
-              New {minted.kind.toUpperCase()} token — copy it now, it won't be shown again.
+    <Card>
+      <CardHeader>
+        {/* Explicit heading element — the e2e asserts getByRole('heading', { name: 'API keys' }). */}
+        <h2 className="font-heading text-base font-medium">API keys</h2>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {minted && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+            <div className="min-w-0">
+              <div className="text-sm text-muted-foreground">
+                New {minted.kind.toUpperCase()} token — copy it now, it won't be shown again.
+              </div>
+              <code className="break-all text-sm">{minted.token}</code>
             </div>
-            <code style={{ wordBreak: 'break-all' }}>{minted.token}</code>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigator.clipboard?.writeText(minted.token)}
+            >
+              Copy
+            </Button>
           </div>
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => navigator.clipboard?.writeText(minted.token)}
-          >
-            Copy
-          </button>
-        </div>
-      )}
+        )}
 
-      <form className="row" onSubmit={create} style={{ marginBottom: 12, gap: 8 }}>
-        <select value={kind} onChange={(e) => setKind(e.target.value as ApiKeyKind)}>
-          <option value="cda">CDA — Delivery (read published)</option>
-          <option value="cpa">CPA — Preview (read drafts)</option>
-          <option value="cma">CMA — Management (full author/publish)</option>
-        </select>
-        <input
-          placeholder="Name (optional)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button type="submit" disabled={busy}>
-          {busy ? 'Creating…' : 'Create key'}
-        </button>
-      </form>
+        <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
+          <Select value={kind} onValueChange={(v) => setKind(v as ApiKeyKind)}>
+            <SelectTrigger className="w-[320px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {KEY_KINDS.map((k) => (
+                <SelectItem key={k.value} value={k.value}>
+                  {k.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            className="w-48"
+            placeholder="Name (optional)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Button type="submit" disabled={busy}>
+            {busy ? 'Creating…' : 'Create key'}
+          </Button>
+        </form>
 
-      <table>
-        <thead>
-          <tr>
-            <th style={{ width: 70 }}>Kind</th>
-            <th>Name</th>
-            <th>Scopes</th>
-            <th style={{ width: 90 }}>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((k) => (
-            <tr key={k.id}>
-              <td>
-                <span className="badge published">{k.kind.toUpperCase()}</span>
-              </td>
-              <td>{k.name ?? <span className="muted">—</span>}</td>
-              <td className="muted">{k.scopes.join(', ')}</td>
-              <td>
-                <span className={`badge ${k.revoked ? 'draft' : 'published'}`}>
-                  {k.revoked ? 'revoked' : 'active'}
-                </span>
-              </td>
-            </tr>
-          ))}
-          {keys.length === 0 && (
-            <tr>
-              <td colSpan={4} className="muted">
-                No API keys yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </section>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-20">Kind</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Scopes</TableHead>
+              <TableHead className="w-24">Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {keys.map((k) => (
+              <TableRow key={k.id}>
+                <TableCell>
+                  <Badge variant="outline">{k.kind.toUpperCase()}</Badge>
+                </TableCell>
+                <TableCell>{k.name ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                <TableCell className="text-muted-foreground">{k.scopes.join(', ')}</TableCell>
+                <TableCell>
+                  <StatusBadge status={k.revoked ? 'revoked' : 'active'} />
+                </TableCell>
+              </TableRow>
+            ))}
+            {keys.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={4} className="text-muted-foreground">
+                  No API keys yet.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -190,73 +241,131 @@ function Webhooks(props: { client: ManagementClient }) {
   };
 
   return (
-    <section>
-      <h2 className="h" style={{ fontSize: 15 }}>
-        Webhooks
-      </h2>
+    <Card>
+      <CardHeader>
+        <h2 className="font-heading text-base font-medium">Webhooks</h2>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <form onSubmit={create} className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="flex-2 min-w-56"
+              placeholder="https://example.com/hooks/cms"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+            <Input
+              className="flex-1 min-w-40"
+              placeholder="Signing secret"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+            />
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Adding…' : 'Add webhook'}
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            {WEBHOOK_TOPICS.map((t) => (
+              <Label key={t} className="flex items-center gap-2 font-normal">
+                <Checkbox checked={topics.includes(t)} onCheckedChange={() => toggleTopic(t)} />
+                <span>{t}</span>
+              </Label>
+            ))}
+          </div>
+        </form>
 
-      <form onSubmit={create} style={{ marginBottom: 12 }}>
-        <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-          <input
-            placeholder="https://example.com/hooks/cms"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            style={{ flex: 2 }}
-          />
-          <input
-            placeholder="Signing secret"
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <button type="submit" disabled={busy}>
-            {busy ? 'Adding…' : 'Add webhook'}
-          </button>
-        </div>
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-          {WEBHOOK_TOPICS.map((t) => (
-            <label key={t} className="row" style={{ gap: 4, width: 'auto' }}>
-              <input
-                type="checkbox"
-                checked={topics.includes(t)}
-                onChange={() => toggleTopic(t)}
-                style={{ width: 'auto' }}
-              />
-              <span>{t}</span>
-            </label>
-          ))}
-        </div>
-      </form>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Endpoint</TableHead>
+              <TableHead>Topics</TableHead>
+              <TableHead className="w-24">Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {hooks.map((h) => (
+              <TableRow key={h.id}>
+                <TableCell className="break-all">{h.url}</TableCell>
+                <TableCell className="text-muted-foreground">{h.topics.join(', ')}</TableCell>
+                <TableCell>
+                  <StatusBadge status={h.active ? 'active' : 'paused'} />
+                </TableCell>
+              </TableRow>
+            ))}
+            {hooks.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={3} className="text-muted-foreground">
+                  No webhooks yet.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
 
-      <table>
-        <thead>
-          <tr>
-            <th>Endpoint</th>
-            <th>Topics</th>
-            <th style={{ width: 90 }}>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {hooks.map((h) => (
-            <tr key={h.id}>
-              <td style={{ wordBreak: 'break-all' }}>{h.url}</td>
-              <td className="muted">{h.topics.join(', ')}</td>
-              <td>
-                <span className={`badge ${h.active ? 'published' : 'draft'}`}>
-                  {h.active ? 'active' : 'paused'}
-                </span>
-              </td>
-            </tr>
-          ))}
-          {hooks.length === 0 && (
-            <tr>
-              <td colSpan={3} className="muted">
-                No webhooks yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </section>
+const CONN_FIELDS: {
+  key: keyof Connection;
+  label: string;
+  placeholder: string;
+  password?: boolean;
+}[] = [
+  { key: 'baseUrl', label: 'API URL', placeholder: 'same-origin (leave blank to use this host)' },
+  { key: 'token', label: 'Token', placeholder: 'CMA or admin token', password: true },
+  { key: 'space', label: 'Space', placeholder: 'space-1' },
+  { key: 'environment', label: 'Environment', placeholder: 'master' },
+];
+
+/**
+ * The API connection config that used to live in the always-visible top bar.
+ * Edits apply immediately (the client re-memoizes on change); "Test connection"
+ * verifies the space is reachable.
+ */
+function ConnectionSettings() {
+  const { conn, updateConn, client } = useClient();
+  const toast = useToast();
+  const [testing, setTesting] = useState(false);
+
+  const test = async () => {
+    setTesting(true);
+    try {
+      const cfg = await client.getSpaceConfig();
+      toast.success(`Connected to ${cfg.name} · ${cfg.locales.length} locale(s)`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="font-heading text-base font-medium">Connection</h2>
+      </CardHeader>
+      <CardContent className="max-w-xl space-y-4">
+        {CONN_FIELDS.map((f) => (
+          <div key={f.key} className="space-y-1.5">
+            <Label htmlFor={`conn-${f.key}`}>{f.label}</Label>
+            <Input
+              id={`conn-${f.key}`}
+              type={f.password ? 'password' : 'text'}
+              placeholder={f.placeholder}
+              value={conn[f.key]}
+              onChange={(e) => updateConn({ [f.key]: e.target.value })}
+            />
+          </div>
+        ))}
+        <p className="text-sm text-muted-foreground">
+          Changes apply immediately. The default editing locale is set from the topbar locale
+          switcher.
+        </p>
+        <Button type="button" variant="outline" onClick={test} disabled={testing}>
+          {testing ? 'Testing…' : 'Test connection'}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
