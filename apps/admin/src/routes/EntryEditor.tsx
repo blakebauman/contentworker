@@ -1,11 +1,15 @@
 import { PageHeader } from '@/components/PageHeader';
 import { ReferencedBy } from '@/components/ReferencedBy';
+import { Button } from '@/components/ui/button';
 import type { EntryFields } from '@cw/domain';
+import { Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Pickers } from '../components/EntryForm.js';
 import { EntryForm } from '../components/EntryForm.js';
+import { GenerateEntryDialog } from '../components/GenerateEntryDialog.js';
 import { useClient } from '../lib/client-context.js';
+import type { ModelTier } from '../lib/management.js';
 import { useToast } from '../lib/toast.js';
 import { useContentOutlet } from './content-context.js';
 
@@ -23,6 +27,9 @@ export function EntryEditor() {
 
   const [initial, setInitial] = useState<EntryFields | null>(isEdit ? null : {});
   const [pickers, setPickers] = useState<Pickers>({ entries: [], assets: [] });
+  const [genOpen, setGenOpen] = useState(false);
+  // Bumped after a generation to re-seed the form (EntryForm reads `initial` once).
+  const [formKey, setFormKey] = useState(0);
 
   // Load the existing draft (edit mode) into the form's initial values.
   useEffect(() => {
@@ -83,6 +90,17 @@ export function EntryEditor() {
       navigate(backTo);
     });
 
+  // Generate field values from a prompt and merge them into the form (throws on
+  // error so the dialog can surface it; not wrapped in `run`).
+  const generate = async (prompt: string, tier: ModelTier) => {
+    if (!selectedType) return;
+    const res = await client.generateEntry({ contentTypeApiId: selectedType.apiId, prompt, tier });
+    setInitial((prev) => ({ ...(prev ?? {}), ...res.fields }));
+    setFormKey((k) => k + 1);
+    const total = res.usage.inputTokens + res.usage.outputTokens;
+    toast.success(`Generated ${Object.keys(res.fields).length} field(s) · ${total} tokens`);
+  };
+
   if (!selectedType) {
     return <p className="text-muted-foreground">Loading…</p>;
   }
@@ -94,11 +112,16 @@ export function EntryEditor() {
         description={
           isEdit ? 'Update this entry’s draft fields.' : `Author a new ${selectedType.name} entry.`
         }
-      />
+      >
+        <Button type="button" variant="outline" onClick={() => setGenOpen(true)}>
+          <Sparkles className="size-4" /> Generate with AI
+        </Button>
+      </PageHeader>
       {initial === null ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
         <EntryForm
+          key={formKey}
           contentType={selectedType}
           initial={initial}
           locales={locales}
@@ -109,6 +132,12 @@ export function EntryEditor() {
           onCancel={() => navigate(backTo)}
         />
       )}
+      <GenerateEntryDialog
+        open={genOpen}
+        onOpenChange={setGenOpen}
+        contentTypeName={selectedType.name}
+        onGenerate={generate}
+      />
       {isEdit && entryId && (
         <div className="max-w-2xl">
           <ReferencedBy id={entryId} types={types} />

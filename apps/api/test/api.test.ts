@@ -14,8 +14,8 @@ const config: ApiConfig = {
 };
 
 function makeApp() {
-  const { ctx, rag, blob } = wire(config);
-  return createApp(ctx, config, rag, blob);
+  const { ctx, rag, blob, ai } = wire(config);
+  return createApp(ctx, config, rag, blob, ai);
 }
 
 const cma = { Authorization: 'Bearer cma', 'Content-Type': 'application/json' };

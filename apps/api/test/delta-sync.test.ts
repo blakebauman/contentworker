@@ -18,8 +18,8 @@ const M = '/spaces/s1/environments/master';
 
 describe('Delivery delta cursor (?since)', () => {
   it('returns only entries published after the cursor', async () => {
-    const { ctx, rag, blob } = wire(config);
-    const app = createApp(ctx, config, rag, blob);
+    const { ctx, rag, blob, ai } = wire(config);
+    const app = createApp(ctx, config, rag, blob, ai);
     await app.request(`${M}/content-types`, {
       method: 'POST',
       headers: cma,

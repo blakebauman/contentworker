@@ -27,8 +27,8 @@ async function gql(app: ReturnType<typeof createApp>, query: string) {
 
 describe('GraphQL Delivery (generated from content types)', () => {
   it('serves a generated schema and resolves published content', async () => {
-    const { ctx, rag, blob } = wire(config);
-    const app = createApp(ctx, config, rag, blob);
+    const { ctx, rag, blob, ai } = wire(config);
+    const app = createApp(ctx, config, rag, blob, ai);
 
     // Author + publish an article via the Management API.
     await app.request(`${M}/content-types`, {
@@ -67,8 +67,8 @@ describe('GraphQL Delivery (generated from content types)', () => {
   });
 
   it('requires the delivery scope', async () => {
-    const { ctx, rag, blob } = wire(config);
-    const app = createApp(ctx, config, rag, blob);
+    const { ctx, rag, blob, ai } = wire(config);
+    const app = createApp(ctx, config, rag, blob, ai);
     const res = await app.request('/delivery/s1/master/graphql', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }, // no token
