@@ -139,6 +139,12 @@ export class InMemoryContentStore implements ContentStore {
 
   readonly assets: AssetRepo = {
     get: async (scope, id) => this.assetData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    list: async (scope, query) => {
+      const prefix = `${scopeKey(scope)}::`;
+      const rows = [...this.assetData.entries()].filter(([k]) => k.startsWith(prefix)).map(([, v]) => v);
+      const skip = query.skip ?? 0;
+      return rows.slice(skip, skip + (query.limit ?? 100));
+    },
     create: async (scope, asset) => {
       this.assetData.set(`${scopeKey(scope)}::${asset.id}`, asset);
     },

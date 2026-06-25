@@ -10,8 +10,10 @@ import {
   getAsset,
   getContentType,
   getEntry,
+  getSpaceConfig,
   listAgentRuns,
   listApiKeys,
+  listAssets,
   listContentTypes,
   listWebhooks,
   publishAsset,
@@ -62,6 +64,11 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.json({ id: created.apiKey.id, kind: created.apiKey.kind, token: created.token }, 201);
   });
 
+  // --- space config (locales) --------------------------------------------
+  app.get(`${BASE}/space-config`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(await getSpaceConfig(ctx, scopeOf(c))),
+  );
+
   // --- content types ------------------------------------------------------
   app.get(`${BASE}/content-types`, requireScope(SCOPES.previewRead), async (c) =>
     c.json({ items: await listContentTypes(ctx, scopeOf(c)) }),
@@ -99,6 +106,11 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // --- assets -------------------------------------------------------------
+  app.get(`${BASE}/assets`, requireScope(SCOPES.previewRead), async (c) => {
+    const limit = c.req.query('limit');
+    const items = await listAssets(ctx, scopeOf(c), { limit: limit ? Number(limit) : undefined });
+    return c.json({ items });
+  });
   app.post(`${BASE}/assets`, requireScope(SCOPES.contentWrite), async (c) => {
     const created = await createAsset(ctx, blob, scopeOf(c), await c.req.json());
     return c.json(created, 201);
