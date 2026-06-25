@@ -11,6 +11,8 @@ import {
   matchesTopic,
 } from '@cw/domain';
 import type {
+  AgentRunRecord,
+  AgentRunRepo,
   AssetRepo,
   AuthRepo,
   ContentStore,
@@ -26,7 +28,7 @@ import type {
   SpaceRepo,
   WebhookRepo,
 } from '@cw/ports';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte, isNull, sum } from 'drizzle-orm';
 import { type PostgresJsDatabase, drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema.js';
@@ -198,6 +200,7 @@ function makeEntryRepo(db: Db): EntryRepo {
       if (query.contentTypeApiId) {
         conditions.push(eq(schema.entryPublished.contentTypeApiId, query.contentTypeApiId));
       }
+      if (query.since) conditions.push(gt(schema.entryPublished.publishedAt, new Date(query.since)));
       const rows = await db
         .select()
         .from(schema.entryPublished)
@@ -434,6 +437,54 @@ function makeWebhookRepo(db: Db): WebhookRepo {
   };
 }
 
+function makeAgentRunRepo(db: Db): AgentRunRepo {
+  return {
+    async record(scope, run) {
+      await db.insert(schema.agentRuns).values({
+        id: run.id,
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        workflow: run.workflow,
+        entryId: run.entryId,
+        status: run.status,
+        decisions: [...run.decisions],
+        inputTokens: run.inputTokens,
+        outputTokens: run.outputTokens,
+        createdAt: new Date(run.createdAt),
+      });
+    },
+    async list(scope, query) {
+      const conds = [eq(schema.agentRuns.spaceId, scope.spaceId)];
+      if (query.workflow) conds.push(eq(schema.agentRuns.workflow, query.workflow));
+      const rows = await db
+        .select()
+        .from(schema.agentRuns)
+        .where(and(...conds))
+        .orderBy(desc(schema.agentRuns.createdAt))
+        .limit(query.limit ?? 100);
+      return rows.map(toAgentRun);
+    },
+    async usage(scope, query) {
+      const conds = [eq(schema.agentRuns.spaceId, scope.spaceId)];
+      if (query.workflow) conds.push(eq(schema.agentRuns.workflow, query.workflow));
+      if (query.since) conds.push(gte(schema.agentRuns.createdAt, new Date(query.since)));
+      const [row] = await db
+        .select({
+          runs: count(),
+          inputTokens: sum(schema.agentRuns.inputTokens),
+          outputTokens: sum(schema.agentRuns.outputTokens),
+        })
+        .from(schema.agentRuns)
+        .where(and(...conds));
+      return {
+        runs: Number(row?.runs ?? 0),
+        inputTokens: Number(row?.inputTokens ?? 0),
+        outputTokens: Number(row?.outputTokens ?? 0),
+      };
+    },
+  };
+}
+
 function makeAuthRepo(db: Db): AuthRepo {
   return {
     async createApiKey(key) {
@@ -526,6 +577,7 @@ export function createPostgresStore(
     references: makeReferenceRepo(db),
     webhooks: makeWebhookRepo(db),
     auth: makeAuthRepo(db),
+    agentRuns: makeAgentRunRepo(db),
     outbox: makeOutboxRepo(db),
     async withTransaction<T>(fn: (tx: ContentStoreTx) => Promise<T>): Promise<T> {
       return db.transaction(async (txdb) => {
@@ -566,6 +618,18 @@ const toEntry = (r: EntryRow): Entry => ({
   status: r.status,
   currentVersion: r.currentVersion,
   publishedVersion: r.publishedVersion,
+});
+
+type AgentRunRow = typeof schema.agentRuns.$inferSelect;
+const toAgentRun = (r: AgentRunRow): AgentRunRecord => ({
+  id: r.id,
+  workflow: r.workflow,
+  entryId: r.entryId,
+  status: r.status,
+  decisions: r.decisions,
+  inputTokens: r.inputTokens,
+  outputTokens: r.outputTokens,
+  createdAt: r.createdAt.toISOString(),
 });
 
 type ApiKeyRow = typeof schema.apiKeys.$inferSelect;

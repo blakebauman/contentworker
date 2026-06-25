@@ -10,7 +10,8 @@
   "dependencies": {
     "@cw/adapter-store-postgres": "workspace:*",
     "drizzle-orm": "^0.38.3",
-    "postgres": "^3.4.5"
+    "postgres": "^3.4.5",
+    "@cw/telemetry": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

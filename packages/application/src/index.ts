@@ -11,5 +11,6 @@ export * from './preview.js';
 export * from './webhooks.js';
 export * from './generation.js';
 export * from './rag.js';
+export * from './agent-audit.js';
 export * from './events/relay.js';
 export * from './events/dispatch.js';

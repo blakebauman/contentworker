@@ -12,6 +12,8 @@ import {
   matchesTopic,
 } from '@cw/domain';
 import type {
+  AgentRunRecord,
+  AgentRunRepo,
   AssetRepo,
   AuthRepo,
   ContentStore,
@@ -123,6 +125,9 @@ export class InMemoryContentStore implements ContentStore {
       if (query.contentTypeApiId) {
         rows = rows.filter((r) => r.contentTypeApiId === query.contentTypeApiId);
       }
+      if (query.since) rows = rows.filter((r) => r.publishedAt > (query.since as string));
+      // Order by publishedAt so a `since` cursor advances deterministically.
+      rows.sort((a, b) => (a.publishedAt < b.publishedAt ? -1 : a.publishedAt > b.publishedAt ? 1 : 0));
       const skip = query.skip ?? 0;
       const limit = query.limit ?? 100;
       return rows.slice(skip, skip + limit);
@@ -211,6 +216,31 @@ export class InMemoryContentStore implements ContentStore {
     revoke: async (id) => {
       const existing = this.apiKeyData.get(id);
       if (existing) this.apiKeyData.set(id, { ...existing, revoked: true });
+    },
+  };
+
+  private readonly agentRunData = new Map<string, AgentRunRecord[]>();
+
+  readonly agentRuns: AgentRunRepo = {
+    record: async (scope, run) => {
+      const list = this.agentRunData.get(scope.spaceId) ?? [];
+      list.push(run);
+      this.agentRunData.set(scope.spaceId, list);
+    },
+    list: async (scope, query) => {
+      let rows = [...(this.agentRunData.get(scope.spaceId) ?? [])];
+      if (query.workflow) rows = rows.filter((r) => r.workflow === query.workflow);
+      rows.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // newest first
+      return rows.slice(0, query.limit ?? 100);
+    },
+    usage: async (scope, query) => {
+      let rows = this.agentRunData.get(scope.spaceId) ?? [];
+      if (query.workflow) rows = rows.filter((r) => r.workflow === query.workflow);
+      if (query.since) rows = rows.filter((r) => r.createdAt >= (query.since as string));
+      return rows.reduce(
+        (acc, r) => ({ runs: acc.runs + 1, inputTokens: acc.inputTokens + r.inputTokens, outputTokens: acc.outputTokens + r.outputTokens }),
+        { runs: 0, inputTokens: 0, outputTokens: 0 },
+      );
     },
   };
 
