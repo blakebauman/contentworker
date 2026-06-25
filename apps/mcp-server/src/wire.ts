@@ -12,16 +12,48 @@ import type {
   Clock,
   ContentStore,
   EmbeddingsProvider,
+  GenerateRequest,
   Hasher,
   IdGenerator,
 } from '@cw/ports';
-import { InMemoryContentStore, InMemoryVectorStore, LocalEmbeddingsProvider } from '@cw/test-kit';
+import {
+  InMemoryContentStore,
+  InMemoryVectorStore,
+  LocalEmbeddingsProvider,
+  StubAIProvider,
+} from '@cw/test-kit';
 import { v7 as uuidv7 } from 'uuid';
 
 const clock: Clock = { now: () => new Date() };
 // UUIDv7 (time-ordered) — consistent with the rest of the platform's PKs.
 const ids: IdGenerator = { newId: () => uuidv7() };
 const hasher: Hasher = { hash: (v) => createHash('sha256').update(v).digest('hex') };
+
+/**
+ * AIProvider for the generate_draft tool — same policy as the HTTP API: Azure or
+ * Anthropic when configured, otherwise a dev stub returning schema-shaped
+ * placeholders so the tool works offline (no key, no network).
+ */
+function makeAI(env: NodeJS.ProcessEnv): AIProvider {
+  if (env.AI_PROVIDER === 'azure-openai') return createAzureOpenAIProvider();
+  if (env.ANTHROPIC_API_KEY) return createAnthropicProvider();
+  return new StubAIProvider(devGenerate);
+}
+
+/** Placeholder generation from the requested JSON schema (dev/no-key fallback). */
+function devGenerate(req: GenerateRequest): unknown {
+  const props =
+    (req.outputSchema as { properties?: Record<string, { type?: string; description?: string }> })
+      ?.properties ?? {};
+  const out: Record<string, unknown> = {};
+  for (const [key, def] of Object.entries(props)) {
+    if (def.type === 'integer' || def.type === 'number') out[key] = 0;
+    else if (def.type === 'boolean') out[key] = false;
+    else if (/ISO-8601|date/i.test(def.description ?? '')) out[key] = '2024-01-01';
+    else out[key] = `Sample ${def.description ?? key}`;
+  }
+  return out;
+}
 
 export interface McpDeps {
   readonly ctx: AppContext;
@@ -42,8 +74,7 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
     ? createPostgresStore(env.DATABASE_URL)
     : seededInMemory(env);
 
-  const provider = env.AI_PROVIDER ?? 'anthropic';
-  const ai = provider === 'azure-openai' ? createAzureOpenAIProvider() : createAnthropicProvider();
+  const ai = makeAI(env);
 
   const embeddings: EmbeddingsProvider =
     env.EMBEDDINGS_PROVIDER === 'azure-openai'

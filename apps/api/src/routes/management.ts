@@ -28,13 +28,29 @@ import {
   updateEntry,
   updateWebhook,
 } from '@cw/application';
-import { SCOPES, type Scope } from '@cw/domain';
+import { type ApiKey, SCOPES, type Scope, type Webhook } from '@cw/domain';
 import { Hono } from 'hono';
 import { type AuthDeps, type AuthVars, principalMiddleware, requireScope } from '../auth.js';
 
 const scopeOf = (c: { req: { param: (k: string) => string } }): Scope => ({
   spaceId: c.req.param('space'),
   environmentId: c.req.param('env'),
+});
+
+// Public projections that strip secrets before they leave the server: API keys
+// never expose their stored hash, webhooks never expose their signing secret.
+const apiKeySummary = (k: ApiKey) => ({
+  id: k.id,
+  kind: k.kind,
+  name: k.name,
+  scopes: k.scopes,
+  revoked: k.revoked,
+});
+const webhookSummary = (h: Webhook) => ({
+  id: h.id,
+  url: h.url,
+  topics: h.topics,
+  active: h.active,
 });
 
 const BASE = '/spaces/:space/environments/:env';
@@ -59,9 +75,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
 
   // --- API key management (admin) ----------------------------------------
-  app.get('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) =>
-    c.json({ items: await listApiKeys(ctx, c.req.param('space')) }),
-  );
+  app.get('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) => {
+    const keys = await listApiKeys(ctx, c.req.param('space'));
+    return c.json({ items: keys.map(apiKeySummary) });
+  });
   app.post('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) => {
     const body = await c.req.json();
     const created = await createApiKey(ctx, hasher, { spaceId: c.req.param('space'), ...body });
@@ -162,14 +179,17 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // --- webhooks (admin) ---------------------------------------------------
-  app.get(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) =>
-    c.json({ items: await listWebhooks(ctx, scopeOf(c)) }),
-  );
+  app.get(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) => {
+    const hooks = await listWebhooks(ctx, scopeOf(c));
+    return c.json({ items: hooks.map(webhookSummary) });
+  });
   app.post(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) =>
-    c.json(await createWebhook(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(webhookSummary(await createWebhook(ctx, scopeOf(c), await c.req.json())), 201),
   );
   app.put(`${BASE}/webhooks/:id`, requireScope(SCOPES.spaceAdmin), async (c) =>
-    c.json(await updateWebhook(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+    c.json(
+      webhookSummary(await updateWebhook(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+    ),
   );
   app.delete(`${BASE}/webhooks/:id`, requireScope(SCOPES.spaceAdmin), async (c) => {
     await deleteWebhook(ctx, scopeOf(c), c.req.param('id'));
