@@ -1,3 +1,4 @@
+import { EmptyState } from '@/components/EmptyState';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -16,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { FileText } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { EntryDiff } from '../components/EntryDiff.js';
@@ -141,102 +143,112 @@ export function EntriesList() {
         </div>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-8" />
-            <TableHead>{selectedType.displayField}</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="w-[320px]">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {entries.map((e) => (
-            <TableRow key={e.id}>
-              <TableCell>
-                <Checkbox
-                  aria-label={`Select ${e.id}`}
-                  checked={picked.has(e.id)}
-                  onCheckedChange={() => togglePick(e.id)}
-                />
-              </TableCell>
-              <TableCell>
-                {String(
-                  (e.fields[selectedType.displayField] as Record<string, unknown>)?.[conn.locale] ??
-                    '—',
-                )}
-              </TableCell>
-              <TableCell>
-                <StatusBadge status={e.status} />
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigate(`/content/${selectedType.apiId}/${e.id}`)}
-                    disabled={busy}
-                  >
-                    Edit
-                  </Button>
-                  {e.status !== 'draft' && (
+      {entries.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="No entries yet"
+          description={`Create the first ${selectedType.name} entry to get started.`}
+        >
+          <Button
+            type="button"
+            onClick={() => navigate(`/content/${selectedType.apiId}/new`)}
+            disabled={busy}
+          >
+            Create entry
+          </Button>
+        </EmptyState>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-8" />
+              <TableHead>{selectedType.displayField}</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="w-[320px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {entries.map((e) => (
+              <TableRow key={e.id}>
+                <TableCell>
+                  <Checkbox
+                    aria-label={`Select ${e.id}`}
+                    checked={picked.has(e.id)}
+                    onCheckedChange={() => togglePick(e.id)}
+                  />
+                </TableCell>
+                <TableCell>
+                  {String(
+                    (e.fields[selectedType.displayField] as Record<string, unknown>)?.[
+                      conn.locale
+                    ] ?? '—',
+                  )}
+                </TableCell>
+                <TableCell>
+                  <StatusBadge status={e.status} />
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
-                      onClick={() => setDiffEntry(diffEntry?.id === e.id ? null : e)}
+                      onClick={() => navigate(`/content/${selectedType.apiId}/${e.id}`)}
                       disabled={busy}
                     >
-                      Diff
+                      Edit
                     </Button>
-                  )}
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() =>
-                      setStatus(
-                        e.id,
-                        'published',
-                        (id) => client.publishEntry(id),
-                        'Entry published',
-                      )
-                    }
-                    disabled={busy}
-                  >
-                    Publish
-                  </Button>
-                  {e.status === 'published' && (
+                    {e.status !== 'draft' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDiffEntry(diffEntry?.id === e.id ? null : e)}
+                        disabled={busy}
+                      >
+                        Diff
+                      </Button>
+                    )}
                     <Button
                       type="button"
-                      variant="ghost"
                       size="sm"
                       onClick={() =>
                         setStatus(
                           e.id,
-                          'draft',
-                          (id) => client.unpublishEntry(id),
-                          'Entry unpublished',
+                          'published',
+                          (id) => client.publishEntry(id),
+                          'Entry published',
                         )
                       }
                       disabled={busy}
                     >
-                      Unpublish
+                      Publish
                     </Button>
-                  )}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-          {entries.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={4} className="text-muted-foreground">
-                No entries yet.
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
+                    {e.status === 'published' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setStatus(
+                            e.id,
+                            'draft',
+                            (id) => client.unpublishEntry(id),
+                            'Entry unpublished',
+                          )
+                        }
+                        disabled={busy}
+                      >
+                        Unpublish
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
 
       <Sheet open={!!diffEntry} onOpenChange={(o) => !o && setDiffEntry(null)}>
         <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
