@@ -1,5 +1,6 @@
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
+import { WebhookDeliveriesSheet } from '@/components/WebhookDeliveriesSheet';
 import { WebhookDialog } from '@/components/WebhookDialog';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -278,6 +279,7 @@ function Webhooks(props: { client: ManagementClient }) {
   const [topics, setTopics] = useState<WebhookTopic[]>(['*']);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<WebhookSummary | null>(null);
+  const [deliveriesFor, setDeliveriesFor] = useState<WebhookSummary | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -384,7 +386,7 @@ function Webhooks(props: { client: ManagementClient }) {
               <TableHead>Endpoint</TableHead>
               <TableHead>Topics</TableHead>
               <TableHead className="w-24">Status</TableHead>
-              <TableHead className="w-44" />
+              <TableHead className="w-64" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -397,6 +399,14 @@ function Webhooks(props: { client: ManagementClient }) {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeliveriesFor(h)}
+                    >
+                      Deliveries
+                    </Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => toggleActive(h)}>
                       {h.active ? 'Pause' : 'Resume'}
                     </Button>
@@ -425,6 +435,14 @@ function Webhooks(props: { client: ManagementClient }) {
           onOpenChange={(o) => !o && setEditing(null)}
           webhook={editing}
           onSave={saveEdit}
+        />
+      )}
+      {deliveriesFor && (
+        <WebhookDeliveriesSheet
+          key={deliveriesFor.id}
+          open
+          onOpenChange={(o) => !o && setDeliveriesFor(null)}
+          webhook={deliveriesFor}
         />
       )}
     </Card>

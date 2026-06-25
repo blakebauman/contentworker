@@ -468,6 +468,29 @@ function makeWebhookRepo(db: Db): WebhookRepo {
         error: delivery.error ?? null,
       });
     },
+    async listDeliveries(scope, webhookId, opts) {
+      const rows = await db
+        .select()
+        .from(schema.webhookDeliveries)
+        .where(
+          and(
+            eq(schema.webhookDeliveries.spaceId, scope.spaceId),
+            eq(schema.webhookDeliveries.webhookId, webhookId),
+          ),
+        )
+        .orderBy(desc(schema.webhookDeliveries.createdAt))
+        .limit(opts?.limit ?? 50);
+      return rows.map((r) => ({
+        id: r.id,
+        webhookId: r.webhookId,
+        eventId: r.eventId,
+        status: r.status,
+        statusCode: r.statusCode ?? undefined,
+        attempts: r.attempts,
+        error: r.error ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    },
   };
 }
 

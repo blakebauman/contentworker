@@ -179,6 +179,12 @@ export interface ReferenceRepo {
   findForward(scope: Scope, fromEntryId: string): Promise<ReferenceEdge[]>;
 }
 
+/** A recorded delivery attempt (a stored WebhookDelivery + id and timestamp). */
+export interface WebhookDeliveryRecord extends WebhookDelivery {
+  readonly id: number;
+  readonly createdAt: string;
+}
+
 export interface WebhookRepo {
   create(scope: Scope, webhook: Webhook): Promise<void>;
   get(scope: Scope, id: string): Promise<Webhook | null>;
@@ -189,6 +195,12 @@ export interface WebhookRepo {
   update(scope: Scope, webhook: Webhook): Promise<void>;
   delete(scope: Scope, id: string): Promise<void>;
   recordDelivery(scope: Scope, delivery: WebhookDelivery): Promise<void>;
+  /** Recent delivery attempts for a webhook, newest first. */
+  listDeliveries(
+    scope: Scope,
+    webhookId: string,
+    opts?: { limit?: number },
+  ): Promise<WebhookDeliveryRecord[]>;
 }
 
 /** A row in the transactional outbox awaiting relay to the event bus/queue. */
