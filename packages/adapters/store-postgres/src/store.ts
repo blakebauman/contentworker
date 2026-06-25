@@ -617,6 +617,14 @@ function makeSpaceRepo(db: Db): SpaceRepo {
         .values({ id: environmentId, spaceId, name })
         .onConflictDoNothing();
     },
+    async listEnvironments(spaceId) {
+      const rows = await db
+        .select()
+        .from(schema.environments)
+        .where(eq(schema.environments.spaceId, spaceId))
+        .orderBy(asc(schema.environments.createdAt));
+      return rows.map((r) => ({ id: r.id, name: r.name }));
+    },
   };
 }
 

@@ -32,6 +32,12 @@ export interface EntryView {
   readonly fields: EntryFields;
 }
 
+/** An environment (branch) within a space. */
+export interface Environment {
+  readonly id: string;
+  readonly name: string;
+}
+
 /** Space configuration — drives the localization tabs in the editor. */
 export interface SpaceConfig {
   readonly spaceId: string;
@@ -166,6 +172,14 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
   return {
     getSpaceConfig(): Promise<SpaceConfig> {
       return req('GET', `${mgmt}/space-config`);
+    },
+    /** Environments (branches) in the current space. */
+    async listEnvironments(): Promise<Environment[]> {
+      const r = await req<{ items: Environment[] }>('GET', `${spaceBase}/environments`);
+      return r.items;
+    },
+    createEnvironment(input: { id: string; name?: string }): Promise<{ id: string }> {
+      return req('POST', `${spaceBase}/environments`, input);
     },
     async listContentTypes(): Promise<ContentType[]> {
       const r = await req<{ items: ContentType[] }>('GET', `${mgmt}/content-types`);

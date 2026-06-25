@@ -54,3 +54,8 @@ export async function createEnvironment(
 ): Promise<void> {
   await ctx.store.spaces.createEnvironment(spaceId, environmentId, name ?? environmentId);
 }
+
+/** Lists a space's environments (branches). */
+export async function listEnvironments(ctx: AppContext, spaceId: string) {
+  return ctx.store.spaces.listEnvironments(spaceId);
+}

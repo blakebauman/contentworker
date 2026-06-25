@@ -1,0 +1,34 @@
+import { FixedClock, InMemoryContentStore, SequenceIdGenerator } from '@cw/test-kit';
+import { describe, expect, it } from 'vitest';
+import { type AppContext, createEnvironment, createSpace, listEnvironments } from '../src/index.js';
+
+function ctx(): AppContext {
+  return {
+    store: new InMemoryContentStore(),
+    clock: new FixedClock(),
+    ids: new SequenceIdGenerator('s'),
+  };
+}
+
+describe('environments (branches)', () => {
+  it('provisions a space with environments and lists them; adds more by name', async () => {
+    const c = ctx();
+    await createSpace(c, {
+      spaceId: 'shop',
+      name: 'Shop',
+      defaultLocale: 'en-US',
+      environments: ['master', 'staging'],
+    });
+
+    expect((await listEnvironments(c, 'shop')).map((e) => e.id)).toEqual(['master', 'staging']);
+
+    await createEnvironment(c, 'shop', 'preview', 'Preview branch');
+    const envs = await listEnvironments(c, 'shop');
+    expect(envs.map((e) => e.id)).toEqual(['master', 'staging', 'preview']);
+    expect(envs.find((e) => e.id === 'preview')?.name).toBe('Preview branch');
+
+    // Adding an existing environment is a no-op (idempotent).
+    await createEnvironment(c, 'shop', 'master');
+    expect(await listEnvironments(c, 'shop')).toHaveLength(3);
+  });
+});
