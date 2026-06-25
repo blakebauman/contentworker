@@ -1,4 +1,4 @@
-import type { Asset, ContentType, EntryFields } from '@cw/domain';
+import type { Asset, ContentType, ContentTypeDraft, EntryFields } from '@cw/domain';
 
 /** Connection settings for the Management/Preview APIs (a CMA or admin token). */
 export interface Connection {
@@ -152,6 +152,10 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     getContentType(apiId: string): Promise<ContentType> {
       return req('GET', `${mgmt}/content-types/${apiId}`);
     },
+    /** Create or update a content type (the route is idempotent on apiId). */
+    saveContentType(draft: ContentTypeDraft): Promise<ContentType> {
+      return req('POST', `${mgmt}/content-types`, draft);
+    },
     publishContentType(apiId: string): Promise<ContentType> {
       return req('POST', `${mgmt}/content-types/${apiId}/published`);
     },
@@ -202,6 +206,9 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     },
     publishAsset(id: string): Promise<Asset> {
       return req('POST', `${mgmt}/assets/${encodeURIComponent(id)}/published`);
+    },
+    unpublishAsset(id: string): Promise<Asset> {
+      return req('DELETE', `${mgmt}/assets/${encodeURIComponent(id)}/published`);
     },
     /**
      * Full upload: create the draft asset (gets a presigned PUT), upload the

@@ -10,7 +10,8 @@ import { MediaLibrary } from './components/MediaLibrary.js';
 import { Settings } from './components/Settings.js';
 import { AppShell } from './components/layout/AppShell.js';
 import { ClientProvider, useClient } from './lib/client-context.js';
-import { ContentIndex, ContentLayout } from './routes/ContentLayout.js';
+import { ContentLayout } from './routes/ContentLayout.js';
+import { ContentTypesOverview } from './routes/ContentTypesOverview.js';
 import { EntriesList } from './routes/EntriesList.js';
 import { EntryEditor } from './routes/EntryEditor.js';
 
@@ -44,7 +45,7 @@ const router = createBrowserRouter([
         path: 'content',
         element: <ContentLayout />,
         children: [
-          { index: true, element: <ContentIndex /> },
+          { index: true, element: <ContentTypesOverview /> },
           { path: ':typeId', element: <EntriesList /> },
           { path: ':typeId/new', element: <EntryEditor /> },
           { path: ':typeId/:entryId', element: <EntryEditor /> },

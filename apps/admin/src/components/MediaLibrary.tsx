@@ -84,7 +84,16 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
               <div className="truncate text-sm">{String(a.title?.[locale] ?? a.file.fileName)}</div>
               <div className="flex items-center justify-between">
                 <StatusBadge status={a.status} />
-                {a.status !== 'published' && (
+                {a.status === 'published' ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => client.unpublishAsset(a.id).then(load)}
+                  >
+                    Unpublish
+                  </Button>
+                ) : (
                   <Button
                     type="button"
                     variant="ghost"
