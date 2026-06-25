@@ -12,7 +12,7 @@ import {
   publishEntry,
 } from '../src/index.js';
 
-const scope = { spaceId: 'shop', environmentId: 'master' };
+const scope = { spaceId: 'shop', environmentId: 'main' };
 
 function makeContext(): { ctx: AppContext; store: InMemoryContentStore } {
   const store = new InMemoryContentStore();

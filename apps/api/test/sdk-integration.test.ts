@@ -11,7 +11,7 @@ const config: ApiConfig = {
   cdaKey: 'cda',
   cpaKey: 'cpa',
   adminToken: 'admin',
-  seed: { spaceId: 's1', environmentId: 'master', defaultLocale: 'en-US', locales: ['en-US'] },
+  seed: { spaceId: 's1', environmentId: 'main', defaultLocale: 'en-US', locales: ['en-US'] },
 };
 
 const json = (token: string, body?: unknown) => ({
@@ -24,7 +24,7 @@ describe('@cw/sdk-core against the live Delivery API (in-process)', () => {
   it('reads published content authored via the Management API', async () => {
     const { ctx, rag, blob, ai } = wire(config);
     const app = createApp(ctx, config, rag, blob, ai);
-    const M = '/spaces/s1/environments/master';
+    const M = '/spaces/s1/environments/main';
 
     // Author + publish via the Management API (CMA key).
     await app.request(
@@ -57,7 +57,7 @@ describe('@cw/sdk-core against the live Delivery API (in-process)', () => {
     const client = createDeliveryClient({
       baseUrl: '',
       space: 's1',
-      environment: 'master',
+      environment: 'main',
       token: 'cda',
       fetch: ((url: string | URL | Request, init?: RequestInit) =>
         app.request(String(url), init)) as typeof fetch,
@@ -78,7 +78,7 @@ describe('@cw/sdk-core against the live Delivery API (in-process)', () => {
     const client = createDeliveryClient({
       baseUrl: '',
       space: 's1',
-      environment: 'master',
+      environment: 'main',
       token: 'bogus',
       fetch: ((url: string | URL | Request, init?: RequestInit) =>
         app.request(String(url), init)) as typeof fetch,

@@ -13,7 +13,7 @@ function fakeFetch(body: unknown) {
 const base = {
   baseUrl: 'https://cms.test',
   space: 's1',
-  environment: 'master',
+  environment: 'main',
   token: 't',
   locale: 'en-US',
 };
@@ -28,7 +28,7 @@ describe('@cw/sdk-edge', () => {
     const client = createEdgeClient({ ...base, fetch: fn });
 
     const e = await client.get('e1', ['title', 'icon']);
-    expect(calls[0]).toBe('https://cms.test/delivery/s1/master/entries/e1?locale=en-US');
+    expect(calls[0]).toBe('https://cms.test/delivery/s1/main/entries/e1?locale=en-US');
     // Projected to the requested fields only — compact payload for the device.
     expect(e.fields).toEqual({ title: 'Hi', icon: 'x' });
     expect(e.fields.body).toBeUndefined();

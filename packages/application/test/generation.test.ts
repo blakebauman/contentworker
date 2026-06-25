@@ -8,7 +8,7 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import { type AppContext, createContentType, createSpace, draftEntry } from '../src/index.js';
 
-const scope = { spaceId: 'shop', environmentId: 'master' };
+const scope = { spaceId: 'shop', environmentId: 'main' };
 
 function makeContext() {
   const store = new InMemoryContentStore();

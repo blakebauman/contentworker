@@ -10,7 +10,7 @@ import {
   updateWebhook,
 } from '../src/index.js';
 
-const scope = { spaceId: 'shop', environmentId: 'master' };
+const scope = { spaceId: 'shop', environmentId: 'main' };
 
 function ctx(): AppContext {
   return {

@@ -1,12 +1,17 @@
 import { fileURLToPath } from 'node:url';
 import { makeActivities } from '@cw/agent-runtime';
 import { type AppContext, createContentType, createEntry, createSpace } from '@cw/application';
-import { FixedClock, InMemoryContentStore, SequenceIdGenerator, StubAIProvider } from '@cw/test-kit';
+import {
+  FixedClock,
+  InMemoryContentStore,
+  SequenceIdGenerator,
+  StubAIProvider,
+} from '@cw/test-kit';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-const scope = { spaceId: 'blog', environmentId: 'master' };
+const scope = { spaceId: 'blog', environmentId: 'main' };
 let testEnv: TestWorkflowEnvironment;
 
 beforeAll(async () => {
@@ -28,11 +33,28 @@ describe('Temporal agent execution (real ephemeral server)', () => {
       name: 'Post',
       displayField: 'title',
       fields: [
-        { apiId: 'title', name: 'Title', type: 'Symbol', localized: false, required: true, position: 0 },
-        { apiId: 'summary', name: 'Summary', type: 'Text', localized: false, required: false, position: 1 },
+        {
+          apiId: 'title',
+          name: 'Title',
+          type: 'Symbol',
+          localized: false,
+          required: true,
+          position: 0,
+        },
+        {
+          apiId: 'summary',
+          name: 'Summary',
+          type: 'Text',
+          localized: false,
+          required: false,
+          position: 1,
+        },
       ],
     });
-    const entry = await createEntry(ctx, scope, { contentTypeApiId: 'post', fields: { title: { 'en-US': 'Hello' } } });
+    const entry = await createEntry(ctx, scope, {
+      contentTypeApiId: 'post',
+      fields: { title: { 'en-US': 'Hello' } },
+    });
 
     const ai = new StubAIProvider(() => ({ summary: 'A short generated summary.' }));
     const worker = await Worker.create({

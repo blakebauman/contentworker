@@ -26,11 +26,11 @@ import { z } from 'zod';
 import type { McpDeps } from './wire.js';
 
 const DEFAULT_SPACE = process.env.SEED_SPACE_ID ?? 'space-1';
-const DEFAULT_ENV = process.env.SEED_ENV_ID ?? 'master';
+const DEFAULT_ENV = process.env.SEED_ENV_ID ?? 'main';
 
 const scopeArgs = {
   space: z.string().optional().describe('Space id (defaults to the server default).'),
-  environment: z.string().optional().describe('Environment id (defaults to "master").'),
+  environment: z.string().optional().describe('Environment id (defaults to "main").'),
 };
 const scopeOf = (a: { space?: string; environment?: string }): Scope => ({
   spaceId: a.space ?? DEFAULT_SPACE,

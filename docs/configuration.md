@@ -39,7 +39,7 @@ In Postgres mode these seeds are not used; create real keys via `POST …/api-ke
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `SEED_SPACE_ID` | `space-1` | Seed space id |
-| `SEED_ENV_ID` | `master` | Seed environment id |
+| `SEED_ENV_ID` | `main` | Seed environment id |
 | `SEED_DEFAULT_LOCALE` | `en-US` | Seed default locale |
 | `SEED_LOCALES` | `en-US` | Comma-separated locale list |
 

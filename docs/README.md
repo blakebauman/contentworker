@@ -26,7 +26,7 @@ These docs describe how contentworker is built and how to run, extend, and integ
 ## Conventions used in these docs
 
 - **Scope** means `{ spaceId, environmentId }` — the multi-tenant boundary carried through
-  every operation. An *environment* is a branch within a *space* (e.g. `master`, `staging`).
+  every operation. An *environment* is a branch within a *space* (e.g. `main`, `staging`).
 - **CMA / CDA / CPA** are the Content Management / Delivery / Preview API key kinds, mirroring
   Contentful's split.
 - Paths shown like `/spaces/:space/environments/:env/...` use `:param` for path segments.

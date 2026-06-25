@@ -24,7 +24,7 @@ config:
   embeddingsProvider: local
   embeddingsDim: "1536"
   seedSpaceId: space-1
-  seedEnvId: master
+  seedEnvId: main
   seedDefaultLocale: en-US
   seedLocales: en-US
   # Extra non-secret env (e.g. AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_VERSION).

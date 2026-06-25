@@ -5,7 +5,7 @@
 
 /** Identifier of a tenant boundary. A space holds many environments. */
 export type SpaceId = string;
-/** An environment is a branch within a space (e.g. "master", "staging"). */
+/** An environment is a branch within a space (e.g. "main", "staging"). */
 export type EnvironmentId = string;
 
 /**

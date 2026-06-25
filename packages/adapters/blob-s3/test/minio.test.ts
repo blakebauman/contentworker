@@ -28,7 +28,7 @@ describe.skipIf(!endpoint)('S3 BlobStore against a real MinIO', () => {
     }
 
     const blob = createS3BlobStore({ bucket, endpoint, forcePathStyle: true, region: 'us-east-1' });
-    const key = 'space-1/master/asset-1/hello.txt';
+    const key = 'space-1/main/asset-1/hello.txt';
     const body = 'hello from contentworker';
 
     // 1. Presigned upload — bytes go straight to storage.

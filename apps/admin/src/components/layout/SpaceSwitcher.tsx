@@ -38,7 +38,7 @@ export function SpaceSwitcher() {
       <Button asChild variant="outline" size="sm" title="Change space / environment">
         <Link to="/settings/connection">
           <span className="font-medium">{conn.space || 'no space'}</span>
-          <span className="text-muted-foreground">/{conn.environment || 'master'}</span>
+          <span className="text-muted-foreground">/{conn.environment || 'main'}</span>
         </Link>
       </Button>
       <Select value={conn.locale} onValueChange={(locale) => updateConn({ locale })}>

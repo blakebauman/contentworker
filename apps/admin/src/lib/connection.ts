@@ -10,7 +10,7 @@ const DEFAULT: Connection = {
   baseUrl: '',
   token: 'dev-cma-key',
   space: 'space-1',
-  environment: 'master',
+  environment: 'main',
   locale: 'en-US',
 };
 

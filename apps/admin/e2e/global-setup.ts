@@ -1,5 +1,5 @@
 const API = `http://localhost:${process.env.CW_API_PORT ?? 8799}`;
-const MGMT = `${API}/spaces/space-1/environments/master`;
+const MGMT = `${API}/spaces/space-1/environments/main`;
 const HEADERS = { authorization: 'Bearer dev-cma-key', 'content-type': 'application/json' };
 
 /** Seeds a published "article" content type so the e2e can author + publish an entry. */

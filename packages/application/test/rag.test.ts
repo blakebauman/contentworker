@@ -9,7 +9,7 @@ import {
   semanticSearch,
 } from '../src/index.js';
 
-const scope = { spaceId: 'kb', environmentId: 'master' };
+const scope = { spaceId: 'kb', environmentId: 'main' };
 
 describe('P7: RAG indexing + semantic search', () => {
   let deps: RagDeps;

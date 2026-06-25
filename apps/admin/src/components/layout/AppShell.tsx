@@ -169,7 +169,7 @@ function AccountMenu() {
         <DropdownMenuLabel>
           <div className="font-medium">{conn.space || 'no space'}</div>
           <div className="text-xs font-normal text-muted-foreground">
-            environment: {conn.environment || 'master'}
+            environment: {conn.environment || 'main'}
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

@@ -5,7 +5,7 @@ const conn: Connection = {
   baseUrl: 'https://cms.test',
   token: 'cma-tok',
   space: 's1',
-  environment: 'master',
+  environment: 'main',
   locale: 'en-US',
 };
 
@@ -26,7 +26,7 @@ describe('admin ManagementClient', () => {
     const client = createManagementClient(conn, fn);
     const types = await client.listContentTypes();
     expect(types[0]?.apiId).toBe('article');
-    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/master/content-types');
+    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/main/content-types');
     expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe(
       'Bearer cma-tok',
     );
@@ -36,7 +36,7 @@ describe('admin ManagementClient', () => {
     const { fn, calls } = fakeFetch(() => ({ items: [] }));
     const client = createManagementClient(conn, fn);
     await client.listEntries('article');
-    expect(calls[0]?.url).toBe('https://cms.test/preview/s1/master/entries?content_type=article');
+    expect(calls[0]?.url).toBe('https://cms.test/preview/s1/main/entries?content_type=article');
   });
 
   it('sends localized fields through on create (the form owns localization)', async () => {
@@ -44,7 +44,7 @@ describe('admin ManagementClient', () => {
     const client = createManagementClient(conn, fn);
     await client.createEntry('article', { title: { 'en-US': 'Hi', 'de-DE': 'Hallo' } });
     const body = JSON.parse((calls[0]?.init?.body as string) ?? '{}');
-    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/master/entries');
+    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/main/entries');
     expect(body).toEqual({
       contentTypeApiId: 'article',
       fields: { title: { 'en-US': 'Hi', 'de-DE': 'Hallo' } },
@@ -61,16 +61,14 @@ describe('admin ManagementClient', () => {
     const client = createManagementClient(conn, fn);
     const cfg = await client.getSpaceConfig();
     expect(cfg.locales).toEqual(['en-US', 'de-DE']);
-    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/master/space-config');
+    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/main/space-config');
   });
 
   it('publishes via the management entries action', async () => {
     const { fn, calls } = fakeFetch(() => ({ id: 'e1', status: 'published' }));
     const client = createManagementClient(conn, fn);
     await client.publishEntry('e1');
-    expect(calls[0]?.url).toBe(
-      'https://cms.test/spaces/s1/environments/master/entries/e1/published',
-    );
+    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/main/entries/e1/published');
     expect(calls[0]?.init?.method).toBe('POST');
   });
 
@@ -97,9 +95,9 @@ describe('admin ManagementClient', () => {
     const published = await client.uploadAsset(file);
     expect(published.status).toBe('published');
     expect(seq).toEqual([
-      'POST https://cms.test/spaces/s1/environments/master/assets',
+      'POST https://cms.test/spaces/s1/environments/main/assets',
       'PUT https://blob.test/put?sig',
-      'POST https://cms.test/spaces/s1/environments/master/assets/asset_1/published',
+      'POST https://cms.test/spaces/s1/environments/main/assets/asset_1/published',
     ]);
   });
 
@@ -108,7 +106,7 @@ describe('admin ManagementClient', () => {
     const client = createManagementClient(conn, fn);
     const assets = await client.listAssets();
     expect(assets[0]?.id).toBe('a1');
-    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/master/assets');
+    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/main/assets');
   });
 
   it('reads agent runs + usage from management, and searches via delivery', async () => {
@@ -137,9 +135,9 @@ describe('admin ManagementClient', () => {
     expect((await client.agentUsage()).inputTokens).toBe(300);
     expect((await client.search('database'))[0]?.entryId).toBe('e1');
 
-    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/master/agent-runs');
-    expect(calls[1]?.url).toBe('https://cms.test/spaces/s1/environments/master/agent-runs/usage');
-    expect(calls[2]?.url).toBe('https://cms.test/delivery/s1/master/search?q=database');
+    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/main/agent-runs');
+    expect(calls[1]?.url).toBe('https://cms.test/spaces/s1/environments/main/agent-runs/usage');
+    expect(calls[2]?.url).toBe('https://cms.test/delivery/s1/main/search?q=database');
   });
 
   it('reads the published version via delivery (for diff), rendered for the locale', async () => {
@@ -152,7 +150,7 @@ describe('admin ManagementClient', () => {
     const client = createManagementClient(conn, fn);
     const pub = await client.getPublished('e1');
     expect(pub.fields.title).toBe('Published');
-    expect(calls[0]?.url).toBe('https://cms.test/delivery/s1/master/entries/e1?locale=en-US');
+    expect(calls[0]?.url).toBe('https://cms.test/delivery/s1/main/entries/e1?locale=en-US');
   });
 
   it('manages API keys at the space base (list + mint with one-time token)', async () => {
@@ -185,7 +183,7 @@ describe('admin ManagementClient', () => {
     }));
     const client = createManagementClient(conn, fn);
     await client.createWebhook({ url: 'https://x.test', secret: 's', topics: ['entry.published'] });
-    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/master/webhooks');
+    expect(calls[0]?.url).toBe('https://cms.test/spaces/s1/environments/main/webhooks');
     expect(JSON.parse((calls[0]?.init?.body as string) ?? '{}').topics).toEqual([
       'entry.published',
     ]);

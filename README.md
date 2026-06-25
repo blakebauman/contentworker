@@ -112,7 +112,7 @@ pnpm lint
 pnpm --filter @cw/api start            # http://localhost:8787
 ```
 
-In in-memory mode the store is seeded with space `space-1`, environment `master`, locale
+In in-memory mode the store is seeded with space `space-1`, environment `main`, locale
 `en-US`, and these dev tokens: `dev-cma-key` (write), `dev-cda-key` (delivery read),
 `dev-cpa-key` (preview read), `dev-admin-token` (all scopes, all spaces).
 
@@ -141,7 +141,7 @@ Model a content type, author an entry, publish, and read it back over the Delive
 
 ```bash
 B=http://localhost:8787
-M=$B/spaces/space-1/environments/master
+M=$B/spaces/space-1/environments/main
 CMA='-H Authorization:Bearer dev-cma-key -H Content-Type:application/json'
 
 # Define + publish a content type
@@ -153,7 +153,7 @@ curl -s -X POST $M/content-types/article/published -H 'Authorization: Bearer dev
 # Author, publish, deliver
 curl -s -X POST $M/entries $CMA -d '{"contentTypeApiId":"article","fields":{"title":{"en-US":"Hello"}}}'
 curl -s -X POST $M/entries/<id>/published -H 'Authorization: Bearer dev-cma-key'
-curl -s $B/delivery/space-1/master/entries/<id> -H 'Authorization: Bearer dev-cda-key'
+curl -s $B/delivery/space-1/main/entries/<id> -H 'Authorization: Bearer dev-cda-key'
 ```
 
 The same operations are available as MCP tools (`entries_create`, `entries_publish`, …) so an

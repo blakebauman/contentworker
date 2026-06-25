@@ -10,7 +10,7 @@ const config: ApiConfig = {
   cdaKey: 'cda',
   cpaKey: 'cpa',
   adminToken: 'admin',
-  seed: { spaceId: 's1', environmentId: 'master', defaultLocale: 'en-US', locales: ['en-US'] },
+  seed: { spaceId: 's1', environmentId: 'main', defaultLocale: 'en-US', locales: ['en-US'] },
 };
 
 function makeApp() {
@@ -20,7 +20,7 @@ function makeApp() {
 
 const cma = { Authorization: 'Bearer cma', 'Content-Type': 'application/json' };
 const cda = { Authorization: 'Bearer cda' };
-const M = '/spaces/s1/environments/master';
+const M = '/spaces/s1/environments/main';
 
 describe('API vertical slice over HTTP', () => {
   it('models, authors, publishes, and delivers an entry', async () => {
@@ -59,7 +59,7 @@ describe('API vertical slice over HTTP', () => {
     const { entry } = (await entryRes.json()) as { entry: { id: string } };
 
     // Not yet on Delivery.
-    const before = await app.request(`/delivery/s1/master/entries/${entry.id}`, { headers: cda });
+    const before = await app.request(`/delivery/s1/main/entries/${entry.id}`, { headers: cda });
     expect(before.status).toBe(404);
 
     // Publish, then read back from Delivery.
@@ -69,7 +69,7 @@ describe('API vertical slice over HTTP', () => {
     });
     expect(pub.status).toBe(200);
 
-    const delivered = await app.request(`/delivery/s1/master/entries/${entry.id}`, {
+    const delivered = await app.request(`/delivery/s1/main/entries/${entry.id}`, {
       headers: cda,
     });
     expect(delivered.status).toBe(200);
@@ -107,7 +107,7 @@ describe('API vertical slice over HTTP', () => {
   it('rejects a key acting outside its space (403)', async () => {
     const app = makeApp();
     // dev keys are scoped to s1; hitting space s2 is forbidden.
-    const res = await app.request('/spaces/s2/environments/master/content-types', {
+    const res = await app.request('/spaces/s2/environments/main/content-types', {
       method: 'POST',
       headers: { Authorization: 'Bearer cma', 'Content-Type': 'application/json' },
       body: JSON.stringify({
