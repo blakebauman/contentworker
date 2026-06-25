@@ -41,6 +41,8 @@ export interface EntryQuery {
   readonly include?: number;
   readonly limit?: number;
   readonly skip?: number;
+  /** Delta cursor — only entries published after this ISO timestamp. */
+  readonly since?: string;
 }
 
 export class DeliveryError extends Error {
@@ -111,6 +113,7 @@ export function createDeliveryClient(opts: ClientOptions) {
         include: q.include,
         limit: q.limit,
         skip: q.skip,
+        since: q.since,
       });
     },
 
@@ -135,6 +138,7 @@ function toParams(q: EntryQuery): Record<string, string | number | undefined> {
     include: q.include,
     limit: q.limit,
     skip: q.skip,
+    since: q.since,
   };
 }
 

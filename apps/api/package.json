@@ -22,7 +22,10 @@
     "hono": "^4.6.14",
     "ioredis": "^5.4.2",
     "uuid": "^11.0.3",
-    "@cw/adapter-blob-s3": "workspace:*"
+    "@cw/adapter-blob-s3": "workspace:*",
+    "@cw/graphql-gen": "workspace:*",
+    "graphql": "^16.10.0",
+    "@cw/telemetry": "workspace:*"
   },
   "devDependencies": {
     "@cw/sdk-core": "workspace:*",

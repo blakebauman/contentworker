@@ -1,10 +1,12 @@
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { authenticate } from '@cw/application';
 import { type Principal, scopesForKind } from '@cw/domain';
+import { logger, startTelemetry } from '@cw/telemetry';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { buildServer } from './server.js';
 import { wire } from './wire.js';
 
+startTelemetry('cw-mcp');
 const deps = wire();
 const port = Number(process.env.PORT ?? 8788);
 
@@ -75,6 +77,5 @@ const httpServer = createServer(async (req, res) => {
 httpServer.listen(port, () => {
   const mode = process.env.DATABASE_URL ? 'postgres' : 'in-memory';
   const provider = process.env.AI_PROVIDER ?? 'anthropic';
-  // eslint-disable-next-line no-console
-  console.log(`contentworker mcp-server on http://localhost:${port}/mcp (${mode}, ai=${provider})`);
+  logger.info({ port, mode, ai: provider }, 'contentworker mcp-server listening');
 });

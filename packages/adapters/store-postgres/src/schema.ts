@@ -169,6 +169,23 @@ export const apiKeys = pgTable(
   ],
 );
 
+export const agentRuns = pgTable(
+  'agent_runs',
+  {
+    id: text('id').primaryKey(),
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    workflow: text('workflow').notNull(),
+    entryId: text('entry_id').notNull(),
+    status: text('status').notNull(),
+    decisions: jsonb('decisions').$type<string[]>().notNull(),
+    inputTokens: integer('input_tokens').notNull(),
+    outputTokens: integer('output_tokens').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('agent_runs_by_space').on(t.spaceId, t.createdAt)],
+);
+
 export const webhooks = pgTable('webhooks', {
   id: text('id').primaryKey(),
   spaceId: text('space_id').notNull(),

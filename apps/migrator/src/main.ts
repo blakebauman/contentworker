@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { logger } from '@cw/telemetry';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
@@ -18,13 +19,13 @@ async function main() {
 
   const sql = postgres(url, { max: 1 });
   const db = drizzle(sql);
-  console.log(`Running migrations from ${migrationsFolder} ...`);
+  logger.info({ migrationsFolder }, 'running migrations');
   await migrate(db, { migrationsFolder });
   await sql.end();
-  console.log('Migrations complete.');
+  logger.info('migrations complete');
 }
 
 main().catch((err) => {
-  console.error('Migration failed:', err);
+  logger.error({ err }, 'migration failed');
   process.exit(1);
 });

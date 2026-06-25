@@ -1,4 +1,5 @@
 import {
+  agentUsage,
   createApiKey,
   createAsset,
   createContentType,
@@ -9,6 +10,7 @@ import {
   getAsset,
   getContentType,
   getEntry,
+  listAgentRuns,
   listApiKeys,
   listContentTypes,
   listWebhooks,
@@ -109,6 +111,19 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   app.delete(`${BASE}/assets/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await unpublishAsset(ctx, scopeOf(c), c.req.param('id'))),
+  );
+
+  // --- agent runs / cost ledger (admin) ----------------------------------
+  app.get(`${BASE}/agent-runs`, requireScope(SCOPES.spaceAdmin), async (c) => {
+    const limit = c.req.query('limit');
+    const items = await listAgentRuns(ctx, scopeOf(c), {
+      workflow: c.req.query('workflow'),
+      limit: limit ? Number(limit) : undefined,
+    });
+    return c.json({ items });
+  });
+  app.get(`${BASE}/agent-runs/usage`, requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json(await agentUsage(ctx, scopeOf(c), { workflow: c.req.query('workflow'), since: c.req.query('since') })),
   );
 
   // --- webhooks (admin) ---------------------------------------------------

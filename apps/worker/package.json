@@ -20,7 +20,8 @@
     "@cw/ports": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "ioredis": "^5.4.2",
-    "uuid": "^11.0.3"
+    "uuid": "^11.0.3",
+    "@cw/telemetry": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

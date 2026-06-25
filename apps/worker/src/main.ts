@@ -12,14 +12,18 @@ import {
   EVENTS_TOPIC,
   type RagDeps,
   dispatchEvent,
+  recordAgentRun,
   relayOutbox,
 } from '@cw/application';
 import type { DomainEvent } from '@cw/domain';
 import type { AIProvider, Clock, EmbeddingsProvider, IdGenerator } from '@cw/ports';
+import { logger, startTelemetry, withSpan } from '@cw/telemetry';
 import { LocalEmbeddingsProvider } from '@cw/test-kit';
 import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
 import { createWebhookSender } from './webhook-sender.js';
+
+startTelemetry('cw-worker');
 
 const databaseUrl = process.env.DATABASE_URL;
 const redisUrl = process.env.REDIS_URL;
@@ -73,36 +77,38 @@ async function main() {
   // then run the enrich agent on newly-published entries.
   queue.process(EVENTS_TOPIC, async (payload) => {
     const ev = payload as DomainEvent;
-    try {
-      await dispatchEvent(ctx, { sender, cache, rag }, ev);
-      if (agents && ev.type === 'entry.published') {
-        const r = await agents.run('enrich', { scope: ev.scope, entryId: ev.entryId, autoApply });
-        console.log(`worker: enrich ${ev.entryId} → ${r.status} (${r.decisions.join('; ')})`);
+    const entryId = 'entryId' in ev ? ev.entryId : undefined;
+    await withSpan('event.dispatch', async () => {
+      try {
+        await dispatchEvent(ctx, { sender, cache, rag }, ev);
+        if (agents && ev.type === 'entry.published') {
+          const r = await withSpan('agent.enrich', () => agents.run('enrich', { scope: ev.scope, entryId: ev.entryId, autoApply }), { 'entry.id': ev.entryId });
+          await recordAgentRun(ctx, ev.scope, { workflow: 'enrich', entryId: ev.entryId, status: r.status, decisions: r.decisions, usage: r.usage });
+          logger.info({ entryId: ev.entryId, status: r.status, decisions: r.decisions, usage: r.usage }, 'enrich complete');
+        }
+        logger.info({ type: ev.type, entryId }, 'event dispatched');
+      } catch (err) {
+        logger.error({ type: ev.type, entryId, err }, 'dispatch error');
+        throw err; // let BullMQ retry/dead-letter
       }
-      console.log(`worker: dispatched ${ev.type} ${'entryId' in ev ? ev.entryId : ''}`);
-    } catch (err) {
-      console.error('worker: dispatch error', ev?.type, err);
-      throw err; // let BullMQ retry/dead-letter
-    }
+    }, { 'event.type': ev.type, ...(entryId ? { 'entry.id': entryId } : {}) });
   });
-  console.log(
-    `worker: consuming ${EVENTS_TOPIC}${rag ? ' (+RAG)' : ''}${agents ? ` (+enrich agent, autoApply=${autoApply})` : ''}`,
-  );
+  logger.info({ topic: EVENTS_TOPIC, rag: !!rag, enrich: !!agents, autoApply }, 'worker consuming events');
 
   // Outbox relay loop: drain pending events onto the queue.
   const tick = async () => {
     try {
       const n = await relayOutbox(ctx, queue);
-      if (n > 0) console.log(`worker: relayed ${n} event(s)`);
+      if (n > 0) logger.info({ relayed: n }, 'outbox relayed');
     } catch (err) {
-      console.error('worker: relay error', err);
+      logger.error({ err }, 'relay error');
     }
   };
   setInterval(tick, RELAY_INTERVAL_MS);
-  console.log(`worker: relaying outbox every ${RELAY_INTERVAL_MS}ms`);
+  logger.info({ intervalMs: RELAY_INTERVAL_MS }, 'worker relaying outbox');
 }
 
 main().catch((err) => {
-  console.error('worker failed to start', err);
+  logger.error({ err }, 'worker failed to start');
   process.exit(1);
 });

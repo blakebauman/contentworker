@@ -43,6 +43,13 @@
       "when": 1782369275565,
       "tag": "0005_add_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782395546158,
+      "tag": "0006_add_agent_runs",
+      "breakpoints": true
     }
   ]
 }

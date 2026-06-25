@@ -1,59 +1,143 @@
 # contentworker
 
-A composable, **API-first, AI-agentic-first** headless CMS — like Contentful. Write
-structured content once, deliver it anywhere (web, mobile, wearables/kiosks/IoT, email).
+A composable, **API-first, AI-agentic-first** headless CMS — think Contentful, but with
+the AI surface treated as a first-class client rather than a bolt-on. Model structured
+content once and deliver it anywhere (web, mobile, wearables, kiosks, IoT, email).
+
 Built **cloud-agnostic** for Kubernetes (EKS/GKE/AKS) on a strict **ports & adapters**
-core, so swapping clouds is a config change, not a code change.
+core, so swapping clouds — Postgres vendor, object store, AI provider — is a config change,
+not a code change.
 
-Full architecture and the phased roadmap live in
-[the plan](/Users/blake/.claude/plans/like-contentful-design-and-melodic-glade.md).
+---
 
-## What's built (P0 + P1 — the tracer-bullet vertical slice)
+## Highlights
 
-The end-to-end spine works: **model a content type → author an entry → publish →
-read it back** over the Delivery API, with the publish writing a denormalized read
-model and appending an `entry.published` event to a transactional outbox.
+- **Hexagonal core.** The domain depends on nothing; the application layer depends only on
+  port interfaces; concrete adapters (Postgres, Redis, S3, Anthropic, Azure OpenAI, pgvector)
+  are bound exactly once, in each app's composition root.
+- **One set of use-cases, three callers.** The HTTP API, the MCP server (for AI agents), and
+  the background worker all invoke the *same* application use-cases — so an AI agent can never
+  perform an operation a human API client couldn't, and every write goes through the same
+  validation and RBAC.
+- **Structured content model.** 11 field types, per-field validation, localization with
+  fallback chains, references with referential integrity, and assets with direct-to-S3 uploads.
+- **Contentful-style API split.** Management (CMA), Delivery (CDA), and Preview (CPA) surfaces,
+  each gated by scoped, hashed API keys, mountable together or as independently-scaled services.
+  Delivery is available as both REST and a **per-space GraphQL** schema generated from your model.
+- **Event-driven backbone.** Publishing writes a denormalized read model *and* appends a domain
+  event to a transactional outbox in one transaction; a worker relays it to a queue and fans it
+  out to webhooks, cache invalidation, vector re-indexing, and optional AI enrichment.
+- **AI built in.** Tiered model selection (`flagship`/`balanced`/`fast`), schema-validated
+  content generation, pgvector semantic search/RAG, an MCP tool surface, and durable
+  enrich/moderate agents that run in-process for dev and on **Temporal** (the `agent-worker`) in
+  production — behind one `AgentRuntime` interface, so the workflow logic is shared, not duplicated.
+- **Multi-tenant by construction.** Every operation carries a `Scope` of `{ spaceId, environmentId }`;
+  a single database and cache serve many isolated spaces and branch-like environments.
+
+---
+
+## Documentation
+
+Detailed docs live in [`docs/`](./docs):
+
+| Doc | What's in it |
+| --- | --- |
+| [Architecture](./docs/architecture.md) | The hexagonal layers, the dependency rule, package map, request/event flows |
+| [Domain model](./docs/domain-model.md) | Field types, validation, entry state machine, locales, references, assets, events |
+| [API reference](./docs/api-reference.md) | Every HTTP endpoint with method, path, required scope, and shape |
+| [Auth & RBAC](./docs/auth-and-rbac.md) | API key kinds, scopes, principals, the `authorize` decision |
+| [AI, agents & search](./docs/ai-agents-and-search.md) | Generation, RAG/embeddings, the MCP tools, the enrich/moderate agent runtime |
+| [Events & webhooks](./docs/events-and-webhooks.md) | The outbox→relay→dispatch pipeline, webhook signing, cache invalidation |
+| [SDKs](./docs/sdks.md) | The core, web (React), and edge delivery clients |
+| [Deployment](./docs/deployment.md) | Docker, docker-compose, the Helm chart, and per-cloud values |
+| [Configuration](./docs/configuration.md) | The full environment-variable reference |
+| [Development](./docs/development.md) | Workspace commands, testing, conventions, adding a use-case |
+
+For Claude Code specifically, see [`CLAUDE.md`](./CLAUDE.md).
+
+---
+
+## Repository layout
 
 ```
 packages/
-  domain/                 framework-agnostic core: content types, fields, entry
-                          publish state machine, field validation, domain events
-  ports/                  interfaces only — ContentStore + infra/AI seams
-  application/            use-cases orchestrating domain + ports
-  test-kit/               in-memory ContentStore + deterministic clock/id fakes
-  adapters/store-postgres/ Drizzle schema + repos + generated SQL migration
+  domain/                   framework-agnostic core: content types, fields, entry publish
+                            state machine, validation, RBAC, locales, domain events
+  ports/                    interfaces only — ContentStore (DB seam) + infra/AI seams
+  application/              use-cases orchestrating domain + ports over an AppContext
+  agent-runtime/            engine-agnostic durable agents (enrich/moderate) + workflow logic
+  graphql-gen/              builds a GraphQL Delivery schema from published content types
+  test-kit/                 in-memory ContentStore + deterministic clock/id/blob/vector fakes
+  adapters/
+    store-postgres/         Drizzle schema + repos + committed SQL migrations
+    redis/                  delivery cache (tag invalidation) + BullMQ queue
+    blob-s3/                presigned S3/R2/GCS/MinIO/Azure uploads & downloads
+    ai-anthropic/           Anthropic Claude AIProvider (default)
+    ai-azure-openai/        Azure OpenAI AIProvider + EmbeddingsProvider
+    vector-pgvector/        pgvector VectorStore (HNSW cosine)
+  sdk/
+    core/                   framework-agnostic Delivery client
+    web/                    React hooks over the core client
+    edge/                   tiny single-locale client for IoT/kiosks
 apps/
-  api/                    Hono Management + Delivery APIs; composition root (wire.ts)
-  migrator/               drizzle migrate runner (K8s Job)
+  api/                      Hono Management + Delivery + Preview APIs; composition root in wire.ts
+  worker/                   outbox relay + event dispatch + optional enrich agent
+  agent-worker/             Temporal worker hosting the durable enrich/moderate workflows
+  mcp-server/               stateless streamable-HTTP MCP server for AI agents
+  migrator/                 Drizzle migration runner (K8s Job)
+infra/
+  helm/contentworker/       cloud-agnostic Helm chart + per-cloud values (aws/gcp/azure/local)
 ```
 
-**The dependency rule:** `domain` depends on nothing; `application` on domain + ports;
-adapters on ports; only `apps/*` bind concrete adapters to ports (in `apps/api/src/wire.ts`).
-Every capability — and later the MCP tools, generation, and agents — calls the *same*
-use-cases, so an AI agent can never do something a human API client can't.
+**The dependency rule:** `domain` → (nothing); `application` → `domain` + `ports`; `adapters`
+→ `ports`; only `apps/*` bind concrete adapters to ports. IDs are **UUIDv7** (time-ordered →
+sequential Postgres PK inserts, good B-tree locality), always minted via the injected
+`IdGenerator`.
 
-IDs are **UUIDv7** (time-ordered → sequential Postgres PK inserts, good B-tree locality).
+---
 
-## Run it
+## Quick start
+
+Requires **Node ≥ 22** and **pnpm 10**.
 
 ```bash
 pnpm install
 
 # Run the full test + typecheck suite
 pnpm -r test
-pnpm -r --filter '!@cw/migrator' run typecheck   # migrator has no test target
+pnpm -r --filter '!@cw/migrator' run typecheck
+pnpm lint
 
-# Boot the API on an in-memory store (no Postgres needed)
+# Boot the API on an in-memory store (no Postgres/Redis needed)
 pnpm --filter @cw/api start            # http://localhost:8787
-
-# Against Postgres: generate/apply migrations, then point the API at it
-export DATABASE_URL=postgres://localhost:5432/contentworker
-pnpm --filter @cw/adapter-store-postgres generate   # SQL is committed under drizzle/
-pnpm --filter @cw/migrator start
-DATABASE_URL=$DATABASE_URL pnpm --filter @cw/api start
 ```
 
-### Example flow
+In in-memory mode the store is seeded with space `space-1`, environment `master`, locale
+`en-US`, and these dev tokens: `dev-cma-key` (write), `dev-cda-key` (delivery read),
+`dev-cpa-key` (preview read), `dev-admin-token` (all scopes, all spaces).
+
+### Against Postgres + Redis
+
+```bash
+export DATABASE_URL=postgres://localhost:5432/contentworker
+export REDIS_URL=redis://localhost:6379
+pnpm --filter @cw/migrator start                       # apply migrations
+pnpm --filter @cw/api start &                           # serve the APIs
+pnpm --filter @cw/worker start                          # relay outbox + dispatch events
+```
+
+### Whole stack in Docker
+
+```bash
+docker compose up --build                               # Postgres + Redis + migrator + api + worker
+# API → http://localhost:8787
+```
+
+---
+
+## End-to-end example
+
+Model a content type, author an entry, publish, and read it back over the Delivery API:
 
 ```bash
 B=http://localhost:8787
@@ -72,9 +156,20 @@ curl -s -X POST $M/entries/<id>/published -H 'Authorization: Bearer dev-cma-key'
 curl -s $B/delivery/space-1/master/entries/<id> -H 'Authorization: Bearer dev-cda-key'
 ```
 
-## Roadmap
+The same operations are available as MCP tools (`entries_create`, `entries_publish`, …) so an
+AI agent drives the CMS through the identical use-cases. See
+[AI, agents & search](./docs/ai-agents-and-search.md).
 
-P2 platform width (locales, full field types, RBAC, Preview) · P3 assets + references ·
-P4 async backbone (BullMQ, outbox relay, webhooks) · P5 search + GraphQL · P6–P8 the AI
-agentic layer (MCP server, generation, pgvector RAG, Temporal agents) · P9 channel SDKs ·
-P10 Helm + multi-cloud. See the plan for details.
+---
+
+## Status & roadmap
+
+The end-to-end spine works: model → author → publish → deliver, with localization, references,
+assets, RBAC, async event dispatch, webhooks, semantic search, REST **and GraphQL** delivery, AI
+generation, the MCP server, and the agent runtime (in-process plus a **Temporal** agent-worker)
+in place, plus a Helm chart for multi-cloud deployment.
+
+Phased plan: P0–P1 tracer-bullet slice · P2 platform width (locales, field types, RBAC, Preview)
+· P3 assets + references · P4 async backbone (BullMQ, outbox relay, webhooks) · P5 search +
+GraphQL · P6–P8 the AI agentic layer (MCP, generation, pgvector RAG, Temporal agents) · P9
+channel SDKs · P10 Helm + multi-cloud.

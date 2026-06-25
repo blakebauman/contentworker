@@ -31,7 +31,33 @@ export interface ContentStore {
   readonly references: ReferenceRepo;
   readonly webhooks: WebhookRepo;
   readonly auth: AuthRepo;
+  readonly agentRuns: AgentRunRepo;
   readonly outbox: OutboxRepo;
+}
+
+/** An audit record of one agent workflow execution, including token usage. */
+export interface AgentRunRecord {
+  readonly id: string;
+  readonly workflow: string;
+  readonly entryId: string;
+  readonly status: string;
+  readonly decisions: readonly string[];
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly createdAt: string;
+}
+
+/** Aggregated token usage — the cost ledger view. */
+export interface AgentUsageSummary {
+  readonly runs: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+export interface AgentRunRepo {
+  record(scope: Scope, run: AgentRunRecord): Promise<void>;
+  list(scope: Scope, query: { workflow?: string; limit?: number }): Promise<AgentRunRecord[]>;
+  usage(scope: Scope, query: { workflow?: string; since?: string }): Promise<AgentUsageSummary>;
 }
 
 /** The denormalized published snapshot of an asset, served by the Delivery API. */
@@ -114,6 +140,8 @@ export interface EntryQuery {
   readonly contentTypeApiId?: string;
   readonly limit?: number;
   readonly skip?: number;
+  /** Delta cursor — only entries published strictly after this ISO timestamp. */
+  readonly since?: string;
 }
 
 export interface EntryRepo {

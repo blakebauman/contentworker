@@ -1,0 +1,29 @@
+import type { AgentRunResult, AgentRuntime, WorkflowInput, WorkflowName } from '@cw/agent-runtime';
+import type { IdGenerator } from '@cw/ports';
+import type { Client } from '@temporalio/client';
+
+/**
+ * Durable `AgentRuntime` backed by Temporal. Starts a workflow and awaits its
+ * result; because it implements the same `AgentRuntime` interface as
+ * `InProcessAgentRuntime`, callers (e.g. the worker's enrich-on-publish hook)
+ * swap executors with no logic change. Survives crashes via Temporal's
+ * deterministic replay.
+ */
+export class TemporalAgentRuntime implements AgentRuntime {
+  constructor(
+    private readonly client: Client,
+    private readonly taskQueue: string,
+    private readonly ids: IdGenerator,
+  ) {}
+
+  async run(workflow: WorkflowName, input: WorkflowInput): Promise<AgentRunResult> {
+    const handle = await this.client.workflow.start(workflow, {
+      taskQueue: this.taskQueue,
+      workflowId: `agent-${workflow}-${input.entryId}-${this.ids.newId()}`,
+      args: [input],
+    });
+    return handle.result();
+  }
+}
+
+export const AGENT_TASK_QUEUE = 'contentworker-agents';
