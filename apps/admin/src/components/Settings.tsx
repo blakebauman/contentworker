@@ -1,6 +1,17 @@
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -119,6 +130,16 @@ function ApiKeys(props: { client: ManagementClient }) {
     }
   };
 
+  const revoke = async (id: string) => {
+    try {
+      await client.revokeApiKey(id);
+      await load();
+      toast.success('Key revoked');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -179,6 +200,7 @@ function ApiKeys(props: { client: ManagementClient }) {
               <TableHead>Name</TableHead>
               <TableHead>Scopes</TableHead>
               <TableHead className="w-24">Status</TableHead>
+              <TableHead className="w-24" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -196,11 +218,19 @@ function ApiKeys(props: { client: ManagementClient }) {
                 <TableCell>
                   <StatusBadge status={k.revoked ? 'revoked' : 'active'} />
                 </TableCell>
+                <TableCell className="text-right">
+                  {!k.revoked && (
+                    <RevokeKeyButton
+                      name={k.name ?? k.kind.toUpperCase()}
+                      onConfirm={() => revoke(k.id)}
+                    />
+                  )}
+                </TableCell>
               </TableRow>
             ))}
             {keys.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="text-muted-foreground">
+                <TableCell colSpan={5} className="text-muted-foreground">
                   No API keys yet.
                 </TableCell>
               </TableRow>
@@ -209,6 +239,32 @@ function ApiKeys(props: { client: ManagementClient }) {
         </Table>
       </CardContent>
     </Card>
+  );
+}
+
+/** Destructive "Revoke" action behind a confirm dialog — revoking is permanent. */
+function RevokeKeyButton(props: { name: string; onConfirm: () => void }) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button type="button" variant="ghost" size="sm" className="text-destructive">
+          Revoke
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Revoke “{props.name}”?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This immediately and permanently disables the key. Any client using its token will stop
+            working. This can’t be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={props.onConfirm}>Revoke key</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

@@ -10,6 +10,7 @@ import {
   getAsset,
   getContentType,
   getEntry,
+  getReverseReferences,
   getSpaceConfig,
   listAgentRuns,
   listApiKeys,
@@ -19,6 +20,7 @@ import {
   publishAsset,
   publishContentType,
   publishEntry,
+  revokeApiKey,
   unpublishAsset,
   unpublishEntry,
   updateEntry,
@@ -63,6 +65,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     // Return the raw token once; only its hash is stored.
     return c.json({ id: created.apiKey.id, kind: created.apiKey.kind, token: created.token }, 201);
   });
+  app.delete('/spaces/:space/api-keys/:id', requireScope(SCOPES.spaceAdmin), async (c) => {
+    await revokeApiKey(ctx, c.req.param('space'), c.req.param('id'));
+    return c.body(null, 204);
+  });
 
   // --- space config (locales) --------------------------------------------
   app.get(`${BASE}/space-config`, requireScope(SCOPES.previewRead), async (c) =>
@@ -93,6 +99,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
   app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) =>
     c.json(await getEntry(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  // "What links here": entries/assets that reference this entry.
+  app.get(`${BASE}/entries/:id/reverse-references`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await getReverseReferences(ctx, scopeOf(c), c.req.param('id')) }),
   );
   app.put(`${BASE}/entries/:id`, requireScope(SCOPES.contentWrite), async (c) => {
     const body = await c.req.json();
