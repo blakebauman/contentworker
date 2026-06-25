@@ -1,7 +1,7 @@
-import { ForbiddenError, SCOPES, UnauthorizedError, authorize } from '@cw/domain';
+import { ForbiddenError, NotFoundError, SCOPES, UnauthorizedError, authorize } from '@cw/domain';
 import { FixedClock, InMemoryContentStore, SequenceIdGenerator } from '@cw/test-kit';
 import { describe, expect, it } from 'vitest';
-import { type AppContext, authenticate, createApiKey } from '../src/index.js';
+import { type AppContext, authenticate, createApiKey, revokeApiKey } from '../src/index.js';
 
 // A trivial deterministic hasher for tests.
 const hasher = { hash: (v: string) => `h:${v}` };
@@ -39,6 +39,16 @@ describe('RBAC: API keys + authorization', () => {
     expect(apiKey.name).toBeUndefined();
     const principal = await authenticate(c, hasher, token);
     expect(principal.kind).toBe('cda');
+  });
+
+  it('revokes a key so its token no longer authenticates', async () => {
+    const c = ctx();
+    const { apiKey, token } = await createApiKey(c, hasher, { spaceId: 's1', kind: 'cma' });
+    await expect(authenticate(c, hasher, token)).resolves.toBeTruthy();
+    await revokeApiKey(c, 's1', apiKey.id);
+    await expect(authenticate(c, hasher, token)).rejects.toBeInstanceOf(UnauthorizedError);
+    // Revoking a key from another space (or a missing key) is a 404.
+    await expect(revokeApiKey(c, 's2', apiKey.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('rejects unknown / missing tokens with UnauthorizedError', async () => {

@@ -1,4 +1,4 @@
-import type { Asset, ContentType, ContentTypeDraft, EntryFields } from '@cw/domain';
+import type { Asset, ContentType, ContentTypeDraft, EntryFields, ReferenceEdge } from '@cw/domain';
 
 /** Connection settings for the Management/Preview APIs (a CMA or admin token). */
 export interface Connection {
@@ -167,6 +167,14 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     getEntry(id: string): Promise<PreviewEntry> {
       return req('GET', `${preview}/entries/${encodeURIComponent(id)}`);
     },
+    /** Entries/assets that reference this entry ("what links here"). */
+    async reverseReferences(id: string): Promise<ReferenceEdge[]> {
+      const r = await req<{ items: ReferenceEdge[] }>(
+        'GET',
+        `${mgmt}/entries/${encodeURIComponent(id)}/reverse-references`,
+      );
+      return r.items;
+    },
     /** Reads the published (delivery) version of an entry, rendered for the connection locale. */
     getPublished(id: string): Promise<DeliveredEntry> {
       return req(
@@ -253,6 +261,9 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     /** Mints a key; the returned `token` is shown once and never retrievable again. */
     createApiKey(input: { kind: ApiKeyKind; name?: string }): Promise<CreatedApiKey> {
       return req('POST', `${spaceBase}/api-keys`, input);
+    },
+    revokeApiKey(id: string): Promise<void> {
+      return req('DELETE', `${spaceBase}/api-keys/${encodeURIComponent(id)}`);
     },
 
     // --- settings: webhooks (environment-scoped) -------------------------

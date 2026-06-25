@@ -1,4 +1,5 @@
 import { PageHeader } from '@/components/PageHeader';
+import { ReferencedBy } from '@/components/ReferencedBy';
 import type { EntryFields } from '@cw/domain';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -107,6 +108,11 @@ export function EntryEditor() {
           onSave={save}
           onCancel={() => navigate(backTo)}
         />
+      )}
+      {isEdit && entryId && (
+        <div className="max-w-2xl">
+          <ReferencedBy id={entryId} types={types} />
+        </div>
       )}
     </div>
   );
