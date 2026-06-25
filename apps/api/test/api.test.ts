@@ -122,6 +122,27 @@ describe('API vertical slice over HTTP', () => {
     expect(res.status).toBe(403);
   });
 
+  it('never leaks api key hashes or webhook secrets in responses', async () => {
+    const app = makeApp();
+
+    // API key list must not expose the stored hash.
+    const keys = (await (await app.request('/spaces/s1/api-keys', { headers: cma })).json()).items;
+    expect(keys.length).toBeGreaterThan(0);
+    for (const k of keys) expect(k).not.toHaveProperty('hashedToken');
+
+    // Creating + listing webhooks must not echo the signing secret.
+    const created = await (
+      await app.request(`${M}/webhooks`, {
+        method: 'POST',
+        headers: cma,
+        body: JSON.stringify({ url: 'https://h.example/x', topics: ['*'], secret: 'shh' }),
+      })
+    ).json();
+    expect(created).not.toHaveProperty('secret');
+    const hooks = (await (await app.request(`${M}/webhooks`, { headers: cma })).json()).items;
+    for (const h of hooks) expect(h).not.toHaveProperty('secret');
+  });
+
   it('admin token can provision; CMA key cannot create spaces', async () => {
     const app = makeApp();
     const denied = await app.request('/spaces', {
