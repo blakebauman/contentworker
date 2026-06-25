@@ -29,9 +29,11 @@ A web console for editors/admins, talking to the Management/Preview APIs.
   reveal + scope display; webhook create/list with topic selection.
   _(Space/env management + role editing TODO.)_
 - [~] **M7 — Polish.** Toast notifications (success/error) with an aria-live
-  region replacing inline error bars across all views; React component testing
-  introduced (jsdom + Testing Library). _(Remaining: OIDC/JWT auth instead of raw
-  tokens — needs an auth-provider decision; optimistic updates; Playwright e2e.)_
+  region replacing inline error bars across all views; optimistic publish/
+  unpublish/bulk with rollback-on-error; React component tests (jsdom + Testing
+  Library) and Playwright e2e (author→publish + settings, against the in-memory
+  API via a Vite proxy). _(Remaining: OIDC/JWT auth instead of raw tokens — needs
+  an auth-provider decision.)_
 
 ## Platform / SDK
 
