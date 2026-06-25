@@ -647,7 +647,7 @@ const toApiKey = (r: ApiKeyRow): ApiKey => ({
   id: r.id,
   spaceId: r.spaceId,
   kind: r.kind,
-  name: r.name,
+  name: r.name ?? undefined,
   hashedToken: r.hashedToken,
   scopes: r.scopes,
   revoked: r.revoked,
