@@ -181,9 +181,13 @@ export interface ReferenceRepo {
 
 export interface WebhookRepo {
   create(scope: Scope, webhook: Webhook): Promise<void>;
+  get(scope: Scope, id: string): Promise<Webhook | null>;
   list(scope: Scope): Promise<Webhook[]>;
   /** Active webhooks subscribed to a given event type. */
   listByTopic(scope: Scope, type: EventType): Promise<Webhook[]>;
+  /** Persists the full updated webhook (the use-case merges changes first). */
+  update(scope: Scope, webhook: Webhook): Promise<void>;
+  delete(scope: Scope, id: string): Promise<void>;
   recordDelivery(scope: Scope, delivery: WebhookDelivery): Promise<void>;
 }
 

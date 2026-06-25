@@ -201,9 +201,25 @@ export class InMemoryContentStore implements ContentStore {
       list.push(webhook);
       this.webhookData.set(key, list);
     },
+    get: async (scope, id) =>
+      (this.webhookData.get(scope.spaceId) ?? []).find((w) => w.id === id) ?? null,
     list: async (scope) => this.webhookData.get(scope.spaceId) ?? [],
     listByTopic: async (scope, type) =>
       (this.webhookData.get(scope.spaceId) ?? []).filter((w) => matchesTopic(w, type)),
+    update: async (scope, webhook) => {
+      const list = this.webhookData.get(scope.spaceId) ?? [];
+      this.webhookData.set(
+        scope.spaceId,
+        list.map((w) => (w.id === webhook.id ? webhook : w)),
+      );
+    },
+    delete: async (scope, id) => {
+      const list = this.webhookData.get(scope.spaceId) ?? [];
+      this.webhookData.set(
+        scope.spaceId,
+        list.filter((w) => w.id !== id),
+      );
+    },
     recordDelivery: async (_scope, delivery) => {
       this.webhookDeliveries.push(delivery);
     },

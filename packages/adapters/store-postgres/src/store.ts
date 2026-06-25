@@ -419,6 +419,13 @@ function makeWebhookRepo(db: Db): WebhookRepo {
         headers: webhook.headers ?? null,
       });
     },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.webhooks)
+        .where(and(eq(schema.webhooks.spaceId, scope.spaceId), eq(schema.webhooks.id, id)));
+      return row ? toWebhook(row) : null;
+    },
     async list(scope) {
       const rows = await db
         .select()
@@ -432,6 +439,23 @@ function makeWebhookRepo(db: Db): WebhookRepo {
         .from(schema.webhooks)
         .where(eq(schema.webhooks.spaceId, scope.spaceId));
       return rows.map(toWebhook).filter((w) => matchesTopic(w, type));
+    },
+    async update(scope, webhook) {
+      await db
+        .update(schema.webhooks)
+        .set({
+          url: webhook.url,
+          topics: [...webhook.topics],
+          secret: webhook.secret,
+          active: webhook.active,
+          headers: webhook.headers ?? null,
+        })
+        .where(and(eq(schema.webhooks.spaceId, scope.spaceId), eq(schema.webhooks.id, webhook.id)));
+    },
+    async delete(scope, id) {
+      await db
+        .delete(schema.webhooks)
+        .where(and(eq(schema.webhooks.spaceId, scope.spaceId), eq(schema.webhooks.id, id)));
     },
     async recordDelivery(scope, delivery) {
       await db.insert(schema.webhookDeliveries).values({

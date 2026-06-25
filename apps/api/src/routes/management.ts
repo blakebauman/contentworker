@@ -7,6 +7,7 @@ import {
   createEnvironment,
   createSpace,
   createWebhook,
+  deleteWebhook,
   draftEntry,
   getAsset,
   getContentType,
@@ -25,6 +26,7 @@ import {
   unpublishAsset,
   unpublishEntry,
   updateEntry,
+  updateWebhook,
 } from '@cw/application';
 import { SCOPES, type Scope } from '@cw/domain';
 import { Hono } from 'hono';
@@ -166,6 +168,13 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.post(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) =>
     c.json(await createWebhook(ctx, scopeOf(c), await c.req.json()), 201),
   );
+  app.put(`${BASE}/webhooks/:id`, requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json(await updateWebhook(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+  );
+  app.delete(`${BASE}/webhooks/:id`, requireScope(SCOPES.spaceAdmin), async (c) => {
+    await deleteWebhook(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
 
   return app;
 }

@@ -1,5 +1,6 @@
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
+import { WebhookDialog } from '@/components/WebhookDialog';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -276,6 +277,7 @@ function Webhooks(props: { client: ManagementClient }) {
   const [secret, setSecret] = useState('');
   const [topics, setTopics] = useState<WebhookTopic[]>(['*']);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<WebhookSummary | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -288,6 +290,38 @@ function Webhooks(props: { client: ManagementClient }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const toggleActive = async (h: WebhookSummary) => {
+    try {
+      await client.updateWebhook(h.id, { active: !h.active });
+      await load();
+      toast.success(h.active ? 'Webhook paused' : 'Webhook resumed');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      await client.deleteWebhook(id);
+      await load();
+      toast.success('Webhook deleted');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const saveEdit = async (changes: {
+    url: string;
+    topics: WebhookTopic[];
+    active: boolean;
+    secret?: string;
+  }) => {
+    if (!editing) return;
+    await client.updateWebhook(editing.id, changes);
+    await load();
+    toast.success('Webhook updated');
+  };
 
   const toggleTopic = (t: WebhookTopic) =>
     setTopics((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
@@ -350,6 +384,7 @@ function Webhooks(props: { client: ManagementClient }) {
               <TableHead>Endpoint</TableHead>
               <TableHead>Topics</TableHead>
               <TableHead className="w-24">Status</TableHead>
+              <TableHead className="w-44" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -360,11 +395,22 @@ function Webhooks(props: { client: ManagementClient }) {
                 <TableCell>
                   <StatusBadge status={h.active ? 'active' : 'paused'} />
                 </TableCell>
+                <TableCell>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => toggleActive(h)}>
+                      {h.active ? 'Pause' : 'Resume'}
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(h)}>
+                      Edit
+                    </Button>
+                    <DeleteWebhookButton url={h.url} onConfirm={() => remove(h.id)} />
+                  </div>
+                </TableCell>
               </TableRow>
             ))}
             {hooks.length === 0 && (
               <TableRow>
-                <TableCell colSpan={3} className="text-muted-foreground">
+                <TableCell colSpan={4} className="text-muted-foreground">
                   No webhooks yet.
                 </TableCell>
               </TableRow>
@@ -372,7 +418,42 @@ function Webhooks(props: { client: ManagementClient }) {
           </TableBody>
         </Table>
       </CardContent>
+      {editing && (
+        <WebhookDialog
+          key={editing.id}
+          open
+          onOpenChange={(o) => !o && setEditing(null)}
+          webhook={editing}
+          onSave={saveEdit}
+        />
+      )}
     </Card>
+  );
+}
+
+/** Destructive "Delete" action behind a confirm dialog. */
+function DeleteWebhookButton(props: { url: string; onConfirm: () => void }) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button type="button" variant="ghost" size="sm" className="text-destructive">
+          Delete
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete webhook?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Stop delivering events to <span className="break-all font-mono">{props.url}</span> and
+            remove this subscription. This can’t be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={props.onConfirm}>Delete</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
