@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -82,15 +83,15 @@ export function EntryForm(props: {
   return (
     <form onSubmit={submit} className="max-w-2xl space-y-4">
       {hasLocalized && locales.length > 1 && (
-        <div className="flex flex-wrap gap-1.5">
+        // Locale switcher: a segmented row of <button>s (role=button) — component
+        // tests select a locale via getByRole('button', { name: 'de-DE' }).
+        <div className="inline-flex flex-wrap gap-1 rounded-lg border bg-muted/40 p-1">
           {locales.map((loc) => (
-            // Locale switcher stays a <button> (role=button) — component tests select
-            // it via getByRole('button', { name: 'de-DE' }).
             <Button
               type="button"
               key={loc}
               size="sm"
-              variant={loc === activeLocale ? 'default' : 'outline'}
+              variant={loc === activeLocale ? 'default' : 'ghost'}
               onClick={() => setActiveLocale(loc)}
             >
               {loc}
@@ -100,32 +101,37 @@ export function EntryForm(props: {
         </div>
       )}
 
-      {contentType.fields.map((f) => {
-        // Non-localized fields are only editable on the default-locale tab.
-        const locale = f.localized ? activeLocale : defaultLocale;
-        if (!f.localized && activeLocale !== defaultLocale) return null;
-        const id = `field-${f.apiId}`;
-        return (
-          <div className="space-y-1.5" key={f.apiId}>
-            <Label htmlFor={id}>
-              {f.name}{' '}
-              <span className="font-normal text-muted-foreground">
-                ({f.type}
-                {f.required ? ', required' : ''}
-                {f.localized ? `, ${activeLocale}` : ', not localized'})
-              </span>
-            </Label>
-            <FieldInput
-              id={id}
-              field={f}
-              value={values[f.apiId]?.[locale]}
-              pickers={props.pickers}
-              onChange={(v) => set(f.apiId, locale, v)}
-            />
-          </div>
-        );
-      })}
-      <div className="flex gap-2">
+      <Card>
+        <CardContent className="space-y-5">
+          {contentType.fields.map((f) => {
+            // Non-localized fields are only editable on the default-locale tab.
+            const locale = f.localized ? activeLocale : defaultLocale;
+            if (!f.localized && activeLocale !== defaultLocale) return null;
+            const id = `field-${f.apiId}`;
+            return (
+              <div className="space-y-1.5" key={f.apiId}>
+                <Label htmlFor={id} className="gap-1">
+                  {f.name}
+                  {f.required && <span className="text-destructive">*</span>}
+                  <span className="ml-1 font-normal text-muted-foreground">
+                    {f.type}
+                    {f.localized ? ` · ${activeLocale}` : ' · not localized'}
+                  </span>
+                </Label>
+                <FieldInput
+                  id={id}
+                  field={f}
+                  value={values[f.apiId]?.[locale]}
+                  pickers={props.pickers}
+                  onChange={(v) => set(f.apiId, locale, v)}
+                />
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <div className="flex items-center gap-2">
         <Button type="submit" disabled={props.busy}>
           Save draft
         </Button>

@@ -1,4 +1,5 @@
 import { EmptyState } from '@/components/EmptyState';
+import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -59,7 +60,10 @@ export function Dashboard(props: { client: ManagementClient }) {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+      <PageHeader
+        title="Dashboard"
+        description="Agent activity and semantic search across your published content."
+      />
 
       {/* Cost ledger */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

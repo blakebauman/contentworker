@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/PageHeader';
 import type { EntryFields } from '@cw/domain';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -87,9 +88,12 @@ export function EntryEditor() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        {isEdit ? 'Edit' : 'New'} {selectedType.name}
-      </h1>
+      <PageHeader
+        title={`${isEdit ? 'Edit' : 'New'} ${selectedType.name}`}
+        description={
+          isEdit ? 'Update this entry’s draft fields.' : `Author a new ${selectedType.name} entry.`
+        }
+      />
       {initial === null ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (

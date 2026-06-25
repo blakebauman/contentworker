@@ -1,4 +1,5 @@
 import { EmptyState } from '@/components/EmptyState';
+import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -9,6 +10,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
   TableBody,
@@ -35,6 +37,7 @@ export function EntriesList() {
   const { types } = useContentOutlet();
 
   const [entries, setEntries] = useState<PreviewEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [diffEntry, setDiffEntry] = useState<PreviewEntry | null>(null);
 
@@ -43,7 +46,13 @@ export function EntriesList() {
   const loadEntries = useCallback(
     () =>
       run(async () => {
-        if (typeId) setEntries(await client.listEntries(typeId));
+        if (!typeId) return;
+        setLoading(true);
+        try {
+          setEntries(await client.listEntries(typeId));
+        } finally {
+          setLoading(false);
+        }
       }),
     [client, run, typeId],
   );
@@ -108,42 +117,49 @@ export function EntriesList() {
     return <p className="text-muted-foreground">Select a content type to browse its entries.</p>;
   }
 
+  const count = entries.length;
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">{selectedType.name} entries</h1>
-        <div className="flex items-center gap-2">
-          {picked.size > 0 && (
-            <>
-              <span className="text-sm text-muted-foreground">{picked.size} selected</span>
-              <Button
-                type="button"
-                onClick={() => bulk((id) => client.publishEntry(id), 'Published', 'published')}
-                disabled={busy}
-              >
-                Publish selected
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => bulk((id) => client.unpublishEntry(id), 'Unpublished', 'draft')}
-                disabled={busy}
-              >
-                Unpublish selected
-              </Button>
-            </>
-          )}
-          <Button
-            type="button"
-            onClick={() => navigate(`/content/${selectedType.apiId}/new`)}
-            disabled={busy}
-          >
-            + New entry
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title={`${selectedType.name} entries`}
+        description={loading ? undefined : `${count} ${count === 1 ? 'entry' : 'entries'}`}
+      >
+        {picked.size > 0 && (
+          <>
+            <span className="text-sm text-muted-foreground">{picked.size} selected</span>
+            <Button
+              type="button"
+              onClick={() => bulk((id) => client.publishEntry(id), 'Published', 'published')}
+              disabled={busy}
+            >
+              Publish selected
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => bulk((id) => client.unpublishEntry(id), 'Unpublished', 'draft')}
+              disabled={busy}
+            >
+              Unpublish selected
+            </Button>
+          </>
+        )}
+        <Button
+          type="button"
+          onClick={() => navigate(`/content/${selectedType.apiId}/new`)}
+          disabled={busy}
+        >
+          + New entry
+        </Button>
+      </PageHeader>
 
-      {entries.length === 0 ? (
+      {loading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : entries.length === 0 ? (
         <EmptyState
           icon={FileText}
           title="No entries yet"
