@@ -46,7 +46,7 @@ export function ContentLayout() {
   };
 
   return (
-    <div className="grid grid-cols-[200px_1fr] gap-6">
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_1fr]">
       <aside className="space-y-1">
         <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Content types

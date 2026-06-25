@@ -1,5 +1,3 @@
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -35,9 +33,8 @@ export function EntryDiff(props: {
   client: ManagementClient;
   entry: PreviewEntry;
   locale: string;
-  onClose: () => void;
 }) {
-  const { client, entry, locale, onClose } = props;
+  const { client, entry, locale } = props;
   const [deltas, setDeltas] = useState<FieldDelta[]>();
   const [error, setError] = useState<string>();
 
@@ -75,44 +72,36 @@ export function EntryDiff(props: {
   const changedCount = deltas?.filter((d) => d.changed).length ?? 0;
 
   return (
-    <Card className="mt-3">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <h2 className="text-sm font-semibold">
-          Diff vs published
-          {deltas && <span className="text-muted-foreground"> · {changedCount} changed</span>}
-        </h2>
-        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-          Close
-        </Button>
-      </CardHeader>
-      <CardContent>
-        {error && <div className="p-2 text-destructive">⚠ {error}</div>}
-        {deltas && (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-40">Field</TableHead>
-                <TableHead>Published</TableHead>
-                <TableHead>Draft</TableHead>
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        {deltas ? `${changedCount} field${changedCount === 1 ? '' : 's'} changed` : 'Comparing…'}
+      </p>
+      {error && <div className="text-sm text-destructive">⚠ {error}</div>}
+      {deltas && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-32">Field</TableHead>
+              <TableHead>Published</TableHead>
+              <TableHead>Draft</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {deltas.map((d) => (
+              <TableRow key={d.apiId} className={cn(d.changed && 'bg-warning/5')}>
+                <TableCell>
+                  {d.changed && <span className="text-primary">● </span>}
+                  {d.apiId}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {show(d.published).slice(0, 200)}
+                </TableCell>
+                <TableCell>{show(d.draft).slice(0, 200)}</TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {deltas.map((d) => (
-                <TableRow key={d.apiId} className={cn(d.changed && 'bg-warning/5')}>
-                  <TableCell>
-                    {d.changed && <span className="text-primary">● </span>}
-                    {d.apiId}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {show(d.published).slice(0, 200)}
-                  </TableCell>
-                  <TableCell>{show(d.draft).slice(0, 200)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
   );
 }
