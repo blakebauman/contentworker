@@ -1,5 +1,5 @@
 import type { AppContext, RagDeps } from '@cw/application';
-import type { BlobStore } from '@cw/ports';
+import type { AIProvider, BlobStore } from '@cw/ports';
 import { Hono } from 'hono';
 import type { AuthDeps } from './auth.js';
 import { sha256Hasher } from './auth.js';
@@ -13,14 +13,20 @@ import { previewRoutes } from './routes/preview.js';
  * Builds the HTTP app. The ROLE config gates which modules mount; every module
  * resolves a Principal from the bearer token and enforces RBAC scopes per route.
  */
-export function createApp(ctx: AppContext, config: ApiConfig, rag: RagDeps, blob: BlobStore): Hono {
+export function createApp(
+  ctx: AppContext,
+  config: ApiConfig,
+  rag: RagDeps,
+  blob: BlobStore,
+  ai: AIProvider,
+): Hono {
   const app = new Hono();
   app.onError(onError);
 
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
   app.get('/readyz', (c) => c.json({ status: 'ready', role: config.role }));
 
-  const deps: AuthDeps = { ctx, hasher: sha256Hasher, adminToken: config.adminToken, rag, blob };
+  const deps: AuthDeps = { ctx, hasher: sha256Hasher, adminToken: config.adminToken, rag, blob, ai };
 
   const mountManagement = config.role === 'all' || config.role === 'management';
   const mountDelivery = config.role === 'all' || config.role === 'delivery';

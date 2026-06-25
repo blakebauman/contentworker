@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { AppContext, RagDeps } from '@cw/application';
 import { authenticate } from '@cw/application';
 import { type PermissionScope, type Principal, authorize, scopesForKind } from '@cw/domain';
-import type { BlobStore, Hasher } from '@cw/ports';
+import type { AIProvider, BlobStore, Hasher } from '@cw/ports';
 import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
@@ -22,6 +22,8 @@ export interface AuthDeps {
   readonly rag: RagDeps;
   /** Object storage for asset uploads/downloads. */
   readonly blob: BlobStore;
+  /** AI provider for entry generation. */
+  readonly ai: AIProvider;
 }
 
 const ADMIN: Principal = {

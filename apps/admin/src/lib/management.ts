@@ -72,6 +72,16 @@ export interface SearchHit {
   readonly snippet: string;
 }
 
+/** AI model tier — callers pick a tier, the backend maps it to a concrete model. */
+export type ModelTier = 'flagship' | 'balanced' | 'fast';
+
+/** Result of an AI draft: localized field values + token usage. */
+export interface GeneratedDraft {
+  readonly contentTypeApiId: string;
+  readonly fields: EntryFields;
+  readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
+}
+
 export type ApiKeyKind = 'cma' | 'cda' | 'cpa';
 
 /** An API key as listed (the raw token is never returned after creation). */
@@ -194,6 +204,14 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     },
     unpublishEntry(id: string): Promise<EntryAggregate> {
       return req('DELETE', `${mgmt}/entries/${encodeURIComponent(id)}/published`);
+    },
+    /** AI-draft field values for a content type from a natural-language prompt. */
+    generateEntry(input: {
+      contentTypeApiId: string;
+      prompt: string;
+      tier?: ModelTier;
+    }): Promise<GeneratedDraft> {
+      return req('POST', `${mgmt}/entries/generate`, input);
     },
 
     // --- assets ----------------------------------------------------------

@@ -7,6 +7,7 @@ import {
   createEnvironment,
   createSpace,
   createWebhook,
+  draftEntry,
   getAsset,
   getContentType,
   getEntry,
@@ -38,7 +39,7 @@ const BASE = '/spaces/:space/environments/:env';
 
 /** Management API (CMA): authoring + publishing, gated by RBAC scopes. */
 export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
-  const { ctx, hasher, blob } = deps;
+  const { ctx, hasher, blob, ai } = deps;
   const app = new Hono<AuthVars>();
   app.use('/spaces', principalMiddleware(deps));
   app.use('/spaces/*', principalMiddleware(deps));
@@ -97,6 +98,11 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     const view = await createEntry(ctx, scopeOf(c), await c.req.json());
     return c.json(view, 201);
   });
+  // AI-draft an entry's fields. Generated values pass the same validators a
+  // human write does, so an agent can't produce an entry a person couldn't.
+  app.post(`${BASE}/entries/generate`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await draftEntry(ctx, ai, scopeOf(c), await c.req.json())),
+  );
   app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) =>
     c.json(await getEntry(ctx, scopeOf(c), c.req.param('id'))),
   );

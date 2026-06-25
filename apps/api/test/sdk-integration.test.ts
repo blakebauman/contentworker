@@ -22,8 +22,8 @@ const json = (token: string, body?: unknown) => ({
 
 describe('@cw/sdk-core against the live Delivery API (in-process)', () => {
   it('reads published content authored via the Management API', async () => {
-    const { ctx, rag, blob } = wire(config);
-    const app = createApp(ctx, config, rag, blob);
+    const { ctx, rag, blob, ai } = wire(config);
+    const app = createApp(ctx, config, rag, blob, ai);
     const M = '/spaces/s1/environments/master';
 
     // Author + publish via the Management API (CMA key).
@@ -73,8 +73,8 @@ describe('@cw/sdk-core against the live Delivery API (in-process)', () => {
   });
 
   it('SDK with an invalid token surfaces a 401 DeliveryError', async () => {
-    const { ctx, rag, blob } = wire(config);
-    const app = createApp(ctx, config, rag, blob);
+    const { ctx, rag, blob, ai } = wire(config);
+    const app = createApp(ctx, config, rag, blob, ai);
     const client = createDeliveryClient({
       baseUrl: '',
       space: 's1',

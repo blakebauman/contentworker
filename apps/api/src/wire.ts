@@ -1,4 +1,5 @@
-import { createAzureOpenAIEmbeddings } from '@cw/adapter-ai-azure-openai';
+import { createAnthropicProvider } from '@cw/adapter-ai-anthropic';
+import { createAzureOpenAIEmbeddings, createAzureOpenAIProvider } from '@cw/adapter-ai-azure-openai';
 import { createS3BlobStore } from '@cw/adapter-blob-s3';
 import { createRedisCache } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
@@ -6,11 +7,13 @@ import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import type { AppContext, RagDeps } from '@cw/application';
 import { type ApiKeyKind, scopesForKind } from '@cw/domain';
 import type {
+  AIProvider,
   BlobStore,
   Cache,
   Clock,
   ContentStore,
   EmbeddingsProvider,
+  GenerateRequest,
   IdGenerator,
 } from '@cw/ports';
 import {
@@ -18,6 +21,7 @@ import {
   InMemoryContentStore,
   InMemoryVectorStore,
   LocalEmbeddingsProvider,
+  StubAIProvider,
 } from '@cw/test-kit';
 import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
@@ -32,7 +36,34 @@ export interface Wired {
   readonly ctx: AppContext;
   readonly rag: RagDeps;
   readonly blob: BlobStore;
+  readonly ai: AIProvider;
   close(): Promise<void>;
+}
+
+/**
+ * AIProvider for generation: Azure OpenAI or Anthropic when configured,
+ * otherwise a dev stub that returns schema-shaped placeholder values so the
+ * generate flow is demoable offline (no key, no network).
+ */
+function makeAI(): AIProvider {
+  if (process.env.AI_PROVIDER === 'azure-openai') return createAzureOpenAIProvider();
+  if (process.env.ANTHROPIC_API_KEY) return createAnthropicProvider();
+  return new StubAIProvider(devGenerate);
+}
+
+/** Placeholder generation from the requested JSON schema (dev/no-key fallback). */
+function devGenerate(req: GenerateRequest): unknown {
+  const props =
+    (req.outputSchema as { properties?: Record<string, { type?: string; description?: string }> })
+      ?.properties ?? {};
+  const out: Record<string, unknown> = {};
+  for (const [key, def] of Object.entries(props)) {
+    if (def.type === 'integer' || def.type === 'number') out[key] = 0;
+    else if (def.type === 'boolean') out[key] = false;
+    else if (/ISO-8601|date/i.test(def.description ?? '')) out[key] = '2024-01-01';
+    else out[key] = `Sample ${def.description ?? key}`;
+  }
+  return out;
 }
 
 /** S3 BlobStore when BLOB_BUCKET is set; otherwise a fake (dev/tests). */
@@ -88,6 +119,7 @@ export function wire(config: ApiConfig): Wired {
       ctx: { store, clock: systemClock, ids: uuidIds, cache },
       rag: makeRag(config.databaseUrl),
       blob: makeBlob(),
+      ai: makeAI(),
       close: async () => {
         for (const c of closers) await c();
       },
@@ -123,6 +155,7 @@ export function wire(config: ApiConfig): Wired {
     ctx,
     rag: makeRag(config.databaseUrl),
     blob: makeBlob(),
+    ai: makeAI(),
     close: async () => {
       for (const c of closers) await c();
     },

@@ -157,6 +157,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@cw/adapter-ai-anthropic':
+        specifier: workspace:*
+        version: link:../../packages/adapters/ai-anthropic
       '@cw/adapter-ai-azure-openai':
         specifier: workspace:*
         version: link:../../packages/adapters/ai-azure-openai
