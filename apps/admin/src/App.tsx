@@ -88,14 +88,27 @@ export function App() {
       return next;
     });
 
-  const bulk = (action: (id: string) => Promise<unknown>, verb: string) =>
-    run(async () => {
-      const n = picked.size;
-      for (const id of picked) await action(id);
-      setPicked(new Set());
+  // Optimistically reflect a status change in the list; the request reconciles
+  // on success and rolls back (restoring the snapshot) on failure.
+  const optimisticStatus = (ids: Set<string>, status: string) =>
+    setEntries((es) => es.map((e) => (ids.has(e.id) ? { ...e, status } : e)));
+
+  const bulk = (action: (id: string) => Promise<unknown>, verb: string, status: string) => {
+    const snapshot = entries;
+    const ids = picked;
+    optimisticStatus(ids, status);
+    setPicked(new Set());
+    return run(async () => {
+      try {
+        for (const id of ids) await action(id);
+      } catch (e) {
+        setEntries(snapshot);
+        throw e;
+      }
       if (selected) await loadEntries(selected);
-      toast.success(`${verb} ${n} ${n === 1 ? 'entry' : 'entries'}`);
+      toast.success(`${verb} ${ids.size} ${ids.size === 1 ? 'entry' : 'entries'}`);
     });
+  };
 
   // Build reference/asset picker options (all entries + all assets) for the form.
   const loadPickers = useCallback(
@@ -147,18 +160,34 @@ export function App() {
       toast.success(editingNow ? 'Draft updated' : 'Entry created');
     });
 
-  const publish = (id: string) =>
-    run(async () => {
-      await client.publishEntry(id);
+  const publish = (id: string) => {
+    const snapshot = entries;
+    optimisticStatus(new Set([id]), 'published');
+    return run(async () => {
+      try {
+        await client.publishEntry(id);
+      } catch (e) {
+        setEntries(snapshot);
+        throw e;
+      }
       if (selected) await loadEntries(selected);
       toast.success('Entry published');
     });
-  const unpublish = (id: string) =>
-    run(async () => {
-      await client.unpublishEntry(id);
+  };
+  const unpublish = (id: string) => {
+    const snapshot = entries;
+    optimisticStatus(new Set([id]), 'draft');
+    return run(async () => {
+      try {
+        await client.unpublishEntry(id);
+      } catch (e) {
+        setEntries(snapshot);
+        throw e;
+      }
       if (selected) await loadEntries(selected);
       toast.success('Entry unpublished');
     });
+  };
 
   return (
     <div className="app">
@@ -243,7 +272,9 @@ export function App() {
                           <span className="muted">{picked.size} selected</span>
                           <button
                             type="button"
-                            onClick={() => bulk((id) => client.publishEntry(id), 'Published')}
+                            onClick={() =>
+                              bulk((id) => client.publishEntry(id), 'Published', 'published')
+                            }
                             disabled={busy}
                           >
                             Publish selected
@@ -251,7 +282,9 @@ export function App() {
                           <button
                             type="button"
                             className="ghost"
-                            onClick={() => bulk((id) => client.unpublishEntry(id), 'Unpublished')}
+                            onClick={() =>
+                              bulk((id) => client.unpublishEntry(id), 'Unpublished', 'draft')
+                            }
                             disabled={busy}
                           >
                             Unpublish selected
