@@ -2,6 +2,13 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import {
   Table,
   TableBody,
   TableCell,
@@ -231,14 +238,17 @@ export function EntriesList() {
         </TableBody>
       </Table>
 
-      {diffEntry && (
-        <EntryDiff
-          client={client}
-          entry={diffEntry}
-          locale={conn.locale}
-          onClose={() => setDiffEntry(null)}
-        />
-      )}
+      <Sheet open={!!diffEntry} onOpenChange={(o) => !o && setDiffEntry(null)}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>Diff vs published</SheetTitle>
+            <SheetDescription>Draft changes since this entry was last published.</SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-4">
+            {diffEntry && <EntryDiff client={client} entry={diffEntry} locale={conn.locale} />}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
