@@ -19,6 +19,12 @@ export interface ApiConfig {
   readonly cpaKey: string;
   /** Root/admin bearer token — all scopes, all spaces (provisioning). */
   readonly adminToken: string;
+  /**
+   * Dev seeding. The in-memory store always seeds; with a real database this
+   * gates an idempotent bootstrap (space + dev keys + a demo type) so a fresh
+   * Postgres stack is usable out of the box. Never enable in production.
+   */
+  readonly seedDev: boolean;
   /** Default space/env + locales used to seed the in-memory store. */
   readonly seed: {
     spaceId: string;
@@ -42,6 +48,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     cdaKey: env.CDA_KEY ?? 'dev-cda-key',
     cpaKey: env.CPA_KEY ?? 'dev-cpa-key',
     adminToken: env.ADMIN_TOKEN ?? 'dev-admin-token',
+    seedDev: env.SEED_DEV === 'true',
     seed: {
       spaceId: env.SEED_SPACE_ID ?? 'space-1',
       environmentId: env.SEED_ENV_ID ?? 'master',

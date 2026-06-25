@@ -8,6 +8,8 @@ WORKDIR /app
 
 # Install dependencies first for better layer caching.
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
+# Root tsconfig is referenced by package tsconfigs (e.g. the admin vite build).
+COPY tsconfig.base.json turbo.json ./
 COPY packages ./packages
 COPY apps ./apps
 RUN pnpm install --prod=false

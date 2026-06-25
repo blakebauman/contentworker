@@ -52,6 +52,9 @@ services:
       <<: *app-env
       PORT: "8787"
       ROLE: all
+      # Bootstrap a usable dev space + keys + demo content (idempotent).
+      SEED_DEV: "true"
+      SEED_LOCALES: "en-US,de-DE"
     ports:
       - "8787:8787"
     depends_on:
@@ -59,6 +62,22 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+
+  # Admin SPA: built and served by vite preview, proxying API paths to `api`
+  # (same-origin, so no CORS). Open http://localhost:5173.
+  admin:
+    build: .
+    command:
+      - sh
+      - -c
+      - "pnpm --filter @cw/admin build && pnpm --filter @cw/admin exec vite preview --host 0.0.0.0"
+    environment:
+      CW_API_URL: http://api:8787
+      CW_ADMIN_PORT: "5173"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
 
   worker:
     build: .
