@@ -297,6 +297,21 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     }): Promise<WebhookSummary> {
       return req('POST', `${mgmt}/webhooks`, input);
     },
+    /** Partial update; omitted fields are left untouched (e.g. just toggle `active`). */
+    updateWebhook(
+      id: string,
+      changes: {
+        url?: string;
+        topics?: readonly WebhookTopic[];
+        secret?: string;
+        active?: boolean;
+      },
+    ): Promise<WebhookSummary> {
+      return req('PUT', `${mgmt}/webhooks/${encodeURIComponent(id)}`, changes);
+    },
+    deleteWebhook(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/webhooks/${encodeURIComponent(id)}`);
+    },
   };
 }
 
