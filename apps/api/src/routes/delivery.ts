@@ -7,7 +7,7 @@ import {
   semanticSearch,
 } from '@cw/application';
 import { SCOPES, type Scope } from '@cw/domain';
-import { buildDeliverySchema, type DeliveryResolvers, type ResolvedEntry } from '@cw/graphql-gen';
+import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '@cw/graphql-gen';
 import { type GraphQLSchema, graphql } from 'graphql';
 import { Hono } from 'hono';
 import { type AuthDeps, type AuthVars, principalMiddleware, requireScope } from '../auth.js';
@@ -80,7 +80,10 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
 
   async function schemaFor(scope: Scope): Promise<GraphQLSchema> {
     const types = await listContentTypes(ctx, scope);
-    const hash = types.map((t) => `${t.apiId}@${t.version}`).sort().join(',');
+    const hash = types
+      .map((t) => `${t.apiId}@${t.version}`)
+      .sort()
+      .join(',');
     const key = `${scope.spaceId}:${scope.environmentId}`;
     const cached = schemaCache.get(key);
     if (cached && cached.hash === hash) return cached.schema;
@@ -95,7 +98,12 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
         }
       },
       collection: (contentType, args) =>
-        listPublishedEntries(ctx, scope, { contentTypeApiId: contentType, limit: args.limit, skip: args.skip }, { locale: args.locale, include: 1 }) as Promise<ResolvedEntry[]>,
+        listPublishedEntries(
+          ctx,
+          scope,
+          { contentTypeApiId: contentType, limit: args.limit, skip: args.skip },
+          { locale: args.locale, include: 1 },
+        ) as Promise<ResolvedEntry[]>,
       asset: async (id, _locale) => {
         try {
           const a = await getPublishedAsset(ctx, scope, id);

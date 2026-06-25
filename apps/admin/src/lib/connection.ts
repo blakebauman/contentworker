@@ -4,7 +4,10 @@ import type { Connection } from './management.js';
 const KEY = 'cw-admin-connection';
 
 const DEFAULT: Connection = {
-  baseUrl: 'http://localhost:8787',
+  // Same-origin by default: the Vite dev server proxies API paths to the backend
+  // (see vite.config.ts), and in production the admin is served behind the same
+  // ingress as the API. Set an absolute URL here to point at an API elsewhere.
+  baseUrl: '',
   token: 'dev-cma-key',
   space: 'space-1',
   environment: 'master',

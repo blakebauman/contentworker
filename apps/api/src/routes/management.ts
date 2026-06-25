@@ -135,7 +135,12 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.json({ items });
   });
   app.get(`${BASE}/agent-runs/usage`, requireScope(SCOPES.spaceAdmin), async (c) =>
-    c.json(await agentUsage(ctx, scopeOf(c), { workflow: c.req.query('workflow'), since: c.req.query('since') })),
+    c.json(
+      await agentUsage(ctx, scopeOf(c), {
+        workflow: c.req.query('workflow'),
+        since: c.req.query('since'),
+      }),
+    ),
   );
 
   // --- webhooks (admin) ---------------------------------------------------
