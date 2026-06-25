@@ -12,13 +12,16 @@ const proxy = Object.fromEntries(
 // The e2e harness pins the port via CW_ADMIN_PORT; dev uses the default 5173.
 const port = Number(process.env.CW_ADMIN_PORT ?? 5173);
 const strictPort = Boolean(process.env.CW_ADMIN_PORT);
+// In Docker, native fs events don't cross the bind mount reliably, so opt into
+// polling for HMR (set VITE_USE_POLLING=true). No effect on local-host dev.
+const watch = process.env.VITE_USE_POLLING ? { usePolling: true, interval: 200 } : undefined;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   // `@/*` resolves to src/*; Vitest reads this same config so component tests
   // that import @/components/ui/* resolve too.
   resolve: { alias: { '@': path.resolve(__dirname, './src') } },
-  server: { port, strictPort, proxy },
+  server: { port, strictPort, proxy, watch },
   preview: { port, strictPort, proxy },
   // Unit/component tests live in test/; e2e/ is driven by Playwright, not Vitest.
   test: { include: ['test/**/*.test.{ts,tsx}'], environment: 'jsdom' },

@@ -1,0 +1,30 @@
+# Local dev override (auto-loaded by `docker compose up`): run the admin as a
+# Vite dev server with hot-module reload instead of the prod-style
+# `build && preview` in docker-compose.yml.
+#
+#   docker compose up --build           # admin at http://localhost:5173 with HMR
+#
+# Source is bind-mounted so edits reload live; the container keeps its own Linux
+# node_modules via anonymous volumes (host node_modules are macOS binaries and
+# must not leak in). To run the prod-style preview instead, rename/remove this
+# file or use `docker compose -f docker-compose.yml up`.
+
+services:
+  admin:
+    command:
+      - sh
+      - -c
+      - "pnpm --filter @cw/admin exec vite --host 0.0.0.0"
+    environment:
+      CW_API_URL: http://api:8787
+      CW_ADMIN_PORT: "5173"
+      # Poll the bind-mounted filesystem so HMR sees host edits (see vite.config.ts).
+      VITE_USE_POLLING: "true"
+    volumes:
+      # Bind-mount the source the dev server watches…
+      - ./apps/admin:/app/apps/admin
+      - ./packages:/app/packages
+      # …but keep the image's installed (Linux) node_modules, not the host's.
+      - /app/node_modules
+      - /app/apps/admin/node_modules
+      - /app/packages/domain/node_modules
