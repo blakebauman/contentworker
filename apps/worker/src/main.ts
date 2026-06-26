@@ -22,6 +22,7 @@ import { logger, startTelemetry, withSpan } from '@cw/telemetry';
 import { LocalEmbeddingsProvider } from '@cw/test-kit';
 import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
+import { createHttpFunctionInvoker } from './function-invoker.js';
 import { createWebhookSender } from './webhook-sender.js';
 
 startTelemetry('cw-worker');
@@ -71,6 +72,7 @@ async function main() {
   // Dedicated connection for the Live Content API fan-out (pub/sub).
   const bus = createRedisEventBus(new Redis(redisUrl as string, { maxRetriesPerRequest: null }));
   const sender = createWebhookSender();
+  const invoker = createHttpFunctionInvoker();
   const rag = makeRag(databaseUrl as string);
   const ctx: AppContext = { store, clock, ids, cache };
   const agents = makeAgents(ctx);
@@ -86,7 +88,7 @@ async function main() {
       'event.dispatch',
       async () => {
         try {
-          await dispatchEvent(ctx, { sender, cache, rag }, ev);
+          await dispatchEvent(ctx, { sender, cache, rag, invoker }, ev);
           // Fan out to Live Content API subscribers (best-effort, never blocks).
           await bus.publish(ev).catch((err) => logger.error({ err }, 'live publish error'));
           if (agents && ev.type === 'entry.published') {

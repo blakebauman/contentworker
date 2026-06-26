@@ -277,6 +277,16 @@ export interface AIAction {
   readonly createdAt: string;
 }
 
+/** A user-defined function invoked over HTTP on matching domain events. */
+export interface FunctionDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly eventPattern: string;
+  readonly url: string;
+  readonly active: boolean;
+  readonly createdAt: string;
+}
+
 /** A requested image transformation (query-param URL convention). */
 export interface ImageTransform {
   readonly width?: number;
@@ -538,6 +548,23 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       } = {},
     ): Promise<{ actionId: string; output: string; applied: boolean }> {
       return req('POST', `${mgmt}/ai-actions/${encodeURIComponent(id)}/run`, input);
+    },
+
+    // --- functions (event-triggered) -------------------------------------
+    async listFunctions(): Promise<FunctionDefinition[]> {
+      const r = await req<{ items: FunctionDefinition[] }>('GET', `${mgmt}/functions`);
+      return r.items;
+    },
+    createFunction(input: {
+      name: string;
+      eventPattern: string;
+      url: string;
+      active?: boolean;
+    }): Promise<FunctionDefinition> {
+      return req('POST', `${mgmt}/functions`, input);
+    },
+    deleteFunction(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/functions/${encodeURIComponent(id)}`);
     },
 
     // --- Live Content API (SSE) ------------------------------------------

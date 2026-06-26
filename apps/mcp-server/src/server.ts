@@ -10,11 +10,13 @@ import {
   createConcept,
   createContentType,
   createEntry,
+  createFunction,
   createRelease,
   createScheme,
   createTag,
   createTask,
   deleteEnvironmentAlias,
+  deleteFunction,
   diffVersions,
   draftEntry,
   findDuplicates,
@@ -30,6 +32,7 @@ import {
   listConcepts,
   listContentTypes,
   listEnvironmentAliases,
+  listFunctions,
   listPreviewEntries,
   listReleases,
   listTags,
@@ -357,6 +360,52 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentPublish, scopeOf(args));
       return ok(await bulkEntryAction(ctx, scopeOf(args), args.action, args.ids));
+    },
+  );
+
+  // --- functions (event-triggered, HTTP-invoked) -------------------------
+  server.tool(
+    'functions_list',
+    'List the user-defined functions registered in a space/environment.',
+    scopeArgs,
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listFunctions(ctx, scopeOf(args)));
+    },
+  );
+
+  server.tool(
+    'function_create',
+    'Register a function: an HTTP endpoint invoked on events matching ' +
+      'eventPattern (a glob on the event type, e.g. "entry.*" or "*").',
+    {
+      name: z.string(),
+      eventPattern: z.string(),
+      url: z.string(),
+      active: z.boolean().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      return ok(
+        await createFunction(ctx, scopeOf(args), {
+          name: args.name,
+          eventPattern: args.eventPattern,
+          url: args.url,
+          active: args.active,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'function_delete',
+    'Delete a registered function by id.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      await deleteFunction(ctx, scopeOf(args), args.id);
+      return ok({ deleted: args.id });
     },
   );
 

@@ -61,6 +61,17 @@ export interface WebhookSender {
   send(webhook: Webhook, payload: DomainEvent): Promise<WebhookSendResult>;
 }
 
+export interface FunctionInvokeResult {
+  readonly ok: boolean;
+  readonly statusCode?: number;
+  readonly error?: string;
+}
+
+/** Invokes a user-defined function on an event (HTTP by default; sandbox swappable). */
+export interface FunctionInvoker {
+  invoke(url: string, event: DomainEvent): Promise<FunctionInvokeResult>;
+}
+
 // ---- AI layer seams -------------------------------------------------------
 
 export type ModelTier = 'flagship' | 'balanced' | 'fast';

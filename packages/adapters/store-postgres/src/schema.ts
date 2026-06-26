@@ -245,6 +245,22 @@ export const aiActions = pgTable(
   (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
 );
 
+/** User-defined functions invoked over HTTP on matching domain events. */
+export const functions = pgTable(
+  'functions',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    eventPattern: text('event_pattern').notNull(),
+    url: text('url').notNull(),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
+);
+
 export const webhooks = pgTable('webhooks', {
   id: text('id').primaryKey(),
   spaceId: text('space_id').notNull(),

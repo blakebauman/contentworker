@@ -1,5 +1,6 @@
 import { AiActions } from '@/components/AiActions';
 import { BranchMerge } from '@/components/BranchMerge';
+import { Functions } from '@/components/Functions';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { WebhookDeliveriesSheet } from '@/components/WebhookDeliveriesSheet';
@@ -79,6 +80,7 @@ export function Settings(props: {
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
           <TabsTrigger value="environments">Environments</TabsTrigger>
           <TabsTrigger value="ai-actions">AI Actions</TabsTrigger>
+          <TabsTrigger value="functions">Functions</TabsTrigger>
           <TabsTrigger value="audit-log">Audit log</TabsTrigger>
           <TabsTrigger value="connection">Connection</TabsTrigger>
         </TabsList>
@@ -93,6 +95,9 @@ export function Settings(props: {
         </TabsContent>
         <TabsContent value="ai-actions" className="mt-4">
           <AiActions client={client} />
+        </TabsContent>
+        <TabsContent value="functions" className="mt-4">
+          <Functions client={client} />
         </TabsContent>
         <TabsContent value="audit-log" className="mt-4">
           <AuditLog client={client} />
