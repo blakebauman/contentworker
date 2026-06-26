@@ -82,6 +82,25 @@ export function compareValues(a: unknown, b: unknown): number {
 
 /** Evaluates a single operator against a resolved field value. */
 export function matchOp(op: FilterOp, fieldValue: unknown, filterValue: unknown): boolean {
+  // Array-valued fields (e.g. metadata.tags) match by membership/intersection.
+  if (Array.isArray(fieldValue)) {
+    const wanted = Array.isArray(filterValue) ? filterValue : [filterValue];
+    switch (op) {
+      case 'exists': {
+        const want = filterValue === undefined ? true : Boolean(filterValue);
+        const present = fieldValue.length > 0;
+        return want === present;
+      }
+      case 'eq':
+      case 'in':
+        return wanted.some((w) => fieldValue.includes(w));
+      case 'ne':
+      case 'nin':
+        return !wanted.some((w) => fieldValue.includes(w));
+      default:
+        return false;
+    }
+  }
   switch (op) {
     case 'exists': {
       const present = fieldValue !== undefined && fieldValue !== null;
@@ -131,7 +150,10 @@ function resolveField(
   sys: Record<string, unknown>,
   locale?: LocaleCode,
 ): unknown {
+  // `sys.*` and `metadata.*` are pseudo-fields backed by the row's sys record
+  // (which carries both, keyed by the bare name / the full `metadata.*` key).
   if (field.startsWith('sys.')) return sys[field.slice(4)];
+  if (field.startsWith('metadata.')) return sys[field];
   return comparableValue(fields[field], locale);
 }
 

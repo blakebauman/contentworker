@@ -10,6 +10,7 @@ export * from './scheduling.js';
 export * from './comments.js';
 export * from './tasks.js';
 export * from './workflows.js';
+export * from './taxonomy.js';
 export * from './render.js';
 export * from './delivery.js';
 export * from './preview.js';

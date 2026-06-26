@@ -1,0 +1,331 @@
+import { EmptyState } from '@/components/EmptyState';
+import { PageHeader } from '@/components/PageHeader';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { Concept, ConceptScheme, Tag } from '@cw/domain';
+import { Hash, Tags, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { useClient } from '../lib/client-context.js';
+import { useToast } from '../lib/toast.js';
+
+const NONE = '__none__';
+
+/** Taxonomy admin: concept schemes + hierarchical concepts, and flat tags (P14). */
+export function Taxonomy() {
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Taxonomy"
+        description="Controlled vocabulary: hierarchical concept schemes and flat tags."
+      />
+      <Tabs defaultValue="concepts">
+        <TabsList>
+          <TabsTrigger value="concepts">
+            <Hash className="size-4" />
+            Concepts
+          </TabsTrigger>
+          <TabsTrigger value="tags">
+            <Tags className="size-4" />
+            Tags
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="concepts" className="mt-4">
+          <ConceptsTab />
+        </TabsContent>
+        <TabsContent value="tags" className="mt-4">
+          <TagsTab />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+/** Orders concepts as a depth-first tree and annotates each with its depth. */
+function asTree(concepts: Concept[]): { concept: Concept; depth: number }[] {
+  const byParent = new Map<string | null, Concept[]>();
+  for (const c of concepts) {
+    const key = c.broaderId ?? null;
+    byParent.set(key, [...(byParent.get(key) ?? []), c]);
+  }
+  const out: { concept: Concept; depth: number }[] = [];
+  const walk = (parent: string | null, depth: number) => {
+    for (const c of byParent.get(parent) ?? []) {
+      out.push({ concept: c, depth });
+      walk(c.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return out;
+}
+
+function ConceptsTab() {
+  const { client, busy, run } = useClient();
+  const toast = useToast();
+  const [schemes, setSchemes] = useState<ConceptScheme[]>([]);
+  const [concepts, setConcepts] = useState<Concept[]>([]);
+  const [schemeId, setSchemeId] = useState('');
+  const [newScheme, setNewScheme] = useState('');
+  const [label, setLabel] = useState('');
+  const [broaderId, setBroaderId] = useState<string>(NONE);
+
+  const loadSchemes = useCallback(
+    () =>
+      run(async () => {
+        const list = await client.listSchemes();
+        setSchemes(list);
+        setSchemeId((cur) => cur || list[0]?.id || '');
+      }),
+    [client, run],
+  );
+  useEffect(() => {
+    loadSchemes();
+  }, [loadSchemes]);
+
+  const loadConcepts = useCallback(
+    (id: string) => run(async () => setConcepts(id ? await client.listConcepts(id) : [])),
+    [client, run],
+  );
+  useEffect(() => {
+    if (schemeId) loadConcepts(schemeId);
+  }, [schemeId, loadConcepts]);
+
+  const addScheme = () =>
+    run(async () => {
+      const created = await client.createScheme({ name: newScheme.trim() });
+      setNewScheme('');
+      toast.success('Scheme created');
+      await loadSchemes();
+      setSchemeId(created.id);
+    });
+
+  const removeScheme = (id: string) =>
+    run(async () => {
+      await client.deleteScheme(id);
+      toast.success('Scheme deleted');
+      setSchemeId('');
+      await loadSchemes();
+    });
+
+  const addConcept = () =>
+    run(async () => {
+      await client.createConcept({
+        schemeId,
+        prefLabel: label.trim(),
+        broaderId: broaderId === NONE ? null : broaderId,
+      });
+      setLabel('');
+      setBroaderId(NONE);
+      await loadConcepts(schemeId);
+    });
+
+  const removeConcept = (id: string) =>
+    run(async () => {
+      await client.deleteConcept(id);
+      await loadConcepts(schemeId);
+    });
+
+  const tree = asTree(concepts);
+
+  return (
+    <div className="grid gap-4 md:grid-cols-[260px_1fr]">
+      <Card>
+        <CardHeader>
+          <CardTitle>Schemes</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2">
+            <Input
+              value={newScheme}
+              onChange={(e) => setNewScheme(e.target.value)}
+              placeholder="New scheme"
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={!newScheme.trim() || busy}
+              onClick={addScheme}
+            >
+              Add
+            </Button>
+          </div>
+          {schemes.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No schemes yet.</p>
+          ) : (
+            <ul className="space-y-1">
+              {schemes.map((s) => (
+                <li key={s.id} className="group flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    className={`flex-1 truncate rounded-md px-2 py-1 text-left text-sm ${
+                      s.id === schemeId ? 'bg-muted font-medium' : 'hover:bg-muted/60'
+                    }`}
+                    onClick={() => setSchemeId(s.id)}
+                  >
+                    {s.name}
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 opacity-0 group-hover:opacity-100"
+                    aria-label="Delete scheme"
+                    onClick={() => removeScheme(s.id)}
+                    disabled={busy}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Concepts</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!schemeId ? (
+            <p className="text-muted-foreground text-sm">Select or create a scheme.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 space-y-1.5">
+                  <Label>Preferred label</Label>
+                  <Input
+                    value={label}
+                    onChange={(e) => setLabel(e.target.value)}
+                    placeholder="e.g. Cats"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Broader</Label>
+                  <Select value={broaderId} onValueChange={setBroaderId}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>— top level —</SelectItem>
+                      {concepts.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.prefLabel}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button type="button" disabled={!label.trim() || busy} onClick={addConcept}>
+                  Add concept
+                </Button>
+              </div>
+
+              {tree.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No concepts in this scheme yet.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {tree.map(({ concept, depth }) => (
+                    <li
+                      key={concept.id}
+                      className="group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50"
+                      style={{ paddingLeft: `${depth * 1.5 + 0.5}rem` }}
+                    >
+                      <span className="text-sm">
+                        {depth > 0 && <span className="text-muted-foreground">↳ </span>}
+                        {concept.prefLabel}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 opacity-0 group-hover:opacity-100"
+                        aria-label="Delete concept"
+                        onClick={() => removeConcept(concept.id)}
+                        disabled={busy}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function TagsTab() {
+  const { client, busy, run } = useClient();
+  const toast = useToast();
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [name, setName] = useState('');
+
+  const load = useCallback(() => run(async () => setTags(await client.listTags())), [client, run]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const add = () =>
+    run(async () => {
+      await client.createTag({ name: name.trim() });
+      setName('');
+      await load();
+    });
+
+  const remove = (id: string) =>
+    run(async () => {
+      await client.deleteTag(id);
+      toast.success('Tag deleted');
+      await load();
+    });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Tags</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex gap-2 sm:max-w-sm">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New tag" />
+          <Button type="button" disabled={!name.trim() || busy} onClick={add}>
+            Add tag
+          </Button>
+        </div>
+        {tags.length === 0 ? (
+          <EmptyState icon={Tags} title="No tags yet" description="Add a tag to label entries." />
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {tags.map((t) => (
+              <Badge key={t.id} variant="secondary" className="gap-1.5 py-1">
+                {t.name}
+                <button
+                  type="button"
+                  aria-label={`Delete ${t.name}`}
+                  onClick={() => remove(t.id)}
+                  disabled={busy}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

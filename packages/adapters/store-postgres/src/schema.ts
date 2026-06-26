@@ -98,6 +98,7 @@ export const entryPublished = pgTable(
     contentTypeApiId: text('content_type_api_id').notNull(),
     version: integer('version').notNull(),
     fields: jsonb('fields').$type<EntryFields>().notNull(),
+    metadata: jsonb('metadata').$type<{ tags: string[]; concepts: string[] }>(),
     publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
   },
   (t) => [
@@ -321,6 +322,56 @@ export const entryWorkflowState = pgTable(
     entryId: text('entry_id').notNull(),
     workflowId: text('workflow_id').notNull(),
     currentStepId: text('current_step_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.entryId] })],
+);
+
+export const conceptSchemes = pgTable(
+  'concept_schemes',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
+);
+
+export const concepts = pgTable(
+  'concepts',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    schemeId: text('scheme_id').notNull(),
+    prefLabel: text('pref_label').notNull(),
+    broaderId: text('broader_id'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.spaceId, t.environmentId, t.id] }),
+    index('concepts_by_scheme').on(t.spaceId, t.environmentId, t.schemeId),
+  ],
+);
+
+export const tags = pgTable(
+  'tags',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
+);
+
+export const entryMetadata = pgTable(
+  'entry_metadata',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    entryId: text('entry_id').notNull(),
+    tags: jsonb('tags').$type<string[]>().notNull(),
+    concepts: jsonb('concepts').$type<string[]>().notNull(),
   },
   (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.entryId] })],
 );

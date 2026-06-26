@@ -13,6 +13,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import type { ContentType, EntryFields, FieldDefinition } from '@cw/domain';
 import { useMemo, useState } from 'react';
+import { RichTextEditor } from './RichTextEditor.js';
 
 const SCALAR = new Set(['Symbol', 'Text', 'Integer', 'Number', 'Boolean', 'Date']);
 // Radix Select forbids an empty-string item value; use a sentinel for "no link".
@@ -143,32 +144,6 @@ export function EntryForm(props: {
   );
 }
 
-// --- rich text: a minimal paragraph document ---------------------------------
-
-interface RichTextNode {
-  nodeType: string;
-  value?: string;
-  content?: RichTextNode[];
-}
-
-/** Flattens a rich-text document to plain text (one paragraph per line). */
-function richToText(doc: unknown): string {
-  if (!doc || typeof doc !== 'object') return '';
-  const content = (doc as RichTextNode).content ?? [];
-  return content.map((p) => (p.content ?? []).map((t) => t.value ?? '').join('')).join('\n');
-}
-
-/** Builds a rich-text document (a paragraph per line) from plain text. */
-function textToRich(text: string): RichTextNode {
-  return {
-    nodeType: 'document',
-    content: text.split('\n').map((line) => ({
-      nodeType: 'paragraph',
-      content: [{ nodeType: 'text', value: line }],
-    })),
-  };
-}
-
 function FieldInput(props: {
   id: string;
   field: FieldDefinition;
@@ -207,17 +182,9 @@ function FieldInput(props: {
     );
   }
 
-  // Rich text: a plain-text editor backed by a simple paragraph document.
+  // Rich text: a structured block editor (paragraphs/headings/quotes + embeds).
   if (field.type === 'RichText') {
-    return (
-      <Textarea
-        id={id}
-        rows={6}
-        placeholder="Rich text…"
-        value={richToText(value)}
-        onChange={(e) => onChange(e.target.value === '' ? undefined : textToRich(e.target.value))}
-      />
-    );
+    return <RichTextEditor id={id} value={value} pickers={pickers} onChange={onChange} />;
   }
 
   if (field.type === 'Boolean') {

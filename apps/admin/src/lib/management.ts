@@ -1,9 +1,12 @@
 import type {
   Asset,
   Comment,
+  Concept,
+  ConceptScheme,
   ContentType,
   ContentTypeDraft,
   EntryFields,
+  EntryMetadata,
   EntryWorkflowState,
   FilterOp,
   ReferenceEdge,
@@ -13,6 +16,7 @@ import type {
   ScheduledAction,
   ScheduledActionType,
   ScheduledEntityType,
+  Tag,
   Task,
   WorkflowDefinition,
   WorkflowStep,
@@ -557,6 +561,63 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
         `${mgmt}/entries/${encodeURIComponent(entryId)}/workflow/transition`,
         input,
       );
+    },
+
+    // --- taxonomy: concept schemes ---------------------------------------
+    async listSchemes(): Promise<ConceptScheme[]> {
+      const r = await req<{ items: ConceptScheme[] }>('GET', `${mgmt}/taxonomy/schemes`);
+      return r.items;
+    },
+    createScheme(input: { name: string }): Promise<ConceptScheme> {
+      return req('POST', `${mgmt}/taxonomy/schemes`, input);
+    },
+    deleteScheme(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/taxonomy/schemes/${encodeURIComponent(id)}`);
+    },
+
+    // --- taxonomy: concepts (hierarchical) -------------------------------
+    async listConcepts(schemeId?: string): Promise<Concept[]> {
+      const qs = schemeId ? `?scheme=${encodeURIComponent(schemeId)}` : '';
+      const r = await req<{ items: Concept[] }>('GET', `${mgmt}/taxonomy/concepts${qs}`);
+      return r.items;
+    },
+    createConcept(input: {
+      schemeId: string;
+      prefLabel: string;
+      broaderId?: string | null;
+    }): Promise<Concept> {
+      return req('POST', `${mgmt}/taxonomy/concepts`, input);
+    },
+    setConceptBroader(id: string, broaderId: string | null): Promise<Concept> {
+      return req('PUT', `${mgmt}/taxonomy/concepts/${encodeURIComponent(id)}/broader`, {
+        broaderId,
+      });
+    },
+    deleteConcept(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/taxonomy/concepts/${encodeURIComponent(id)}`);
+    },
+
+    // --- taxonomy: tags --------------------------------------------------
+    async listTags(): Promise<Tag[]> {
+      const r = await req<{ items: Tag[] }>('GET', `${mgmt}/taxonomy/tags`);
+      return r.items;
+    },
+    createTag(input: { name: string }): Promise<Tag> {
+      return req('POST', `${mgmt}/taxonomy/tags`, input);
+    },
+    deleteTag(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/taxonomy/tags/${encodeURIComponent(id)}`);
+    },
+
+    // --- entry taxonomy associations -------------------------------------
+    getEntryMetadata(entryId: string): Promise<EntryMetadata> {
+      return req('GET', `${mgmt}/entries/${encodeURIComponent(entryId)}/metadata`);
+    },
+    setEntryMetadata(
+      entryId: string,
+      input: { tags?: readonly string[]; concepts?: readonly string[] },
+    ): Promise<EntryMetadata> {
+      return req('PUT', `${mgmt}/entries/${encodeURIComponent(entryId)}/metadata`, input);
     },
   };
 }

@@ -17,6 +17,8 @@ export interface DeliveredEntry {
   readonly contentType: string;
   readonly fields: Record<string, unknown>;
   readonly publishedAt: string;
+  /** Taxonomy associations (tags + concepts), when the entry has any. */
+  readonly metadata?: { readonly tags: readonly string[]; readonly concepts: readonly string[] };
 }
 
 const MAX_INCLUDE = 5;
@@ -107,6 +109,9 @@ async function render(
     contentType: snapshot.contentTypeApiId,
     fields,
     publishedAt: snapshot.publishedAt,
+    ...(snapshot.metadata
+      ? { metadata: { tags: snapshot.metadata.tags, concepts: snapshot.metadata.concepts } }
+      : {}),
   };
 }
 

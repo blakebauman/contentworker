@@ -22,6 +22,7 @@ import {
   Search,
   Settings as SettingsIcon,
   Sun,
+  Tags,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
@@ -36,6 +37,7 @@ const NAV = [
   { to: '/content', label: 'Content', icon: FileText },
   { to: '/releases', label: 'Releases', icon: Rocket },
   { to: '/workflows', label: 'Workflows', icon: GitBranch },
+  { to: '/taxonomy', label: 'Taxonomy', icon: Tags },
   { to: '/media', label: 'Media', icon: Image },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];

@@ -2,10 +2,13 @@ import type {
   ApiKey,
   Asset,
   Comment,
+  Concept,
+  ConceptScheme,
   ContentType,
   DomainEvent,
   Entry,
   EntryFields,
+  EntryMetadata,
   EntryVersion,
   EntryWorkflowState,
   EventType,
@@ -18,6 +21,7 @@ import type {
   ReleaseItem,
   ScheduledAction,
   Scope,
+  Tag,
   Task,
   Webhook,
   WebhookDelivery,
@@ -46,7 +50,30 @@ export interface ContentStore {
   readonly comments: CommentRepo;
   readonly tasks: TaskRepo;
   readonly workflows: WorkflowRepo;
+  readonly taxonomy: TaxonomyRepo;
   readonly outbox: OutboxRepo;
+}
+
+export interface TaxonomyRepo {
+  // Concept schemes (vocabularies).
+  createScheme(scope: Scope, scheme: ConceptScheme): Promise<void>;
+  listSchemes(scope: Scope): Promise<ConceptScheme[]>;
+  getScheme(scope: Scope, id: string): Promise<ConceptScheme | null>;
+  deleteScheme(scope: Scope, id: string): Promise<void>;
+  // Concepts (hierarchical terms within a scheme).
+  createConcept(scope: Scope, concept: Concept): Promise<void>;
+  getConcept(scope: Scope, id: string): Promise<Concept | null>;
+  /** All concepts, or just those in `schemeId` when given. */
+  listConcepts(scope: Scope, schemeId?: string): Promise<Concept[]>;
+  deleteConcept(scope: Scope, id: string): Promise<void>;
+  // Tags (flat labels).
+  createTag(scope: Scope, tag: Tag): Promise<void>;
+  getTag(scope: Scope, id: string): Promise<Tag | null>;
+  listTags(scope: Scope): Promise<Tag[]>;
+  deleteTag(scope: Scope, id: string): Promise<void>;
+  // Per-entry associations.
+  getEntryMetadata(scope: Scope, entryId: string): Promise<EntryMetadata | null>;
+  setEntryMetadata(scope: Scope, entryId: string, metadata: EntryMetadata): Promise<void>;
 }
 
 export interface CommentRepo {
@@ -217,6 +244,8 @@ export interface PublishedEntry {
   readonly version: number;
   readonly fields: EntryFields;
   readonly publishedAt: string;
+  /** Taxonomy associations captured at publish time (tags + concepts). */
+  readonly metadata?: EntryMetadata;
 }
 
 export interface EntryQuery {

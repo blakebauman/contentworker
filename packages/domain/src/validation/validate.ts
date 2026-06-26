@@ -1,6 +1,7 @@
 import type { ContentType } from '../content-type/content-type.js';
 import type { FieldDefinition, FieldValidations } from '../content-type/field.js';
 import { type FieldIssue, ValidationError } from '../errors.js';
+import { validateRichText } from '../rich-text/rich-text.js';
 import type { EntryFields, LocaleCode } from '../types.js';
 
 export interface ValidationContext {
@@ -128,9 +129,10 @@ function validateValue(
     case 'JSON':
       if (typeof value !== 'object' || value === null) push('Expected a JSON object');
       break;
-    case 'RichText':
-      if (typeof value !== 'object' || value === null) push('Expected a rich-text document');
+    case 'RichText': {
+      for (const issue of validateRichText(value)) push(issue);
       break;
+    }
     case 'Link':
       if (!isLink(value)) push('Expected a link { id, linkType }');
       break;
