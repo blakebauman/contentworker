@@ -15,6 +15,7 @@ import {
   getContentType,
   getPreviewEntry,
   getRelease,
+  listAuditLog,
   listComments,
   listConcepts,
   listContentTypes,
@@ -562,6 +563,24 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           entityId: args.entityId,
           scheduledFor: args.scheduledFor,
         }),
+      );
+    },
+  );
+
+  // --- audit log (governance) --------------------------------------------
+  server.tool(
+    'audit_log_list',
+    'List a space’s append-only audit trail (mutating actions), newest first.',
+    {
+      space: z.string().optional(),
+      environment: z.string().optional(),
+      limit: z.number().int().positive().optional(),
+    },
+    async (args) => {
+      const spaceId = args.space ?? DEFAULT_SPACE;
+      guard(SCOPES.spaceAdmin, { spaceId, environmentId: DEFAULT_ENV });
+      return ok(
+        await listAuditLog(ctx, spaceId, { environmentId: args.environment, limit: args.limit }),
       );
     },
   );

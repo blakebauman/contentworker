@@ -202,6 +202,23 @@ export const agentRuns = pgTable(
   (t) => [index('agent_runs_by_space').on(t.spaceId, t.createdAt)],
 );
 
+/** Append-only governance audit trail. */
+export const auditLog = pgTable(
+  'audit_log',
+  {
+    id: text('id').primaryKey(),
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id'),
+    actor: text('actor').notNull(),
+    action: text('action').notNull(),
+    targetType: text('target_type'),
+    targetId: text('target_id'),
+    status: integer('status').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('audit_log_by_space').on(t.spaceId, t.at)],
+);
+
 export const webhooks = pgTable('webhooks', {
   id: text('id').primaryKey(),
   spaceId: text('space_id').notNull(),

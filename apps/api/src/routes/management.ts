@@ -41,6 +41,7 @@ import {
   listAgentRuns,
   listApiKeys,
   listAssets,
+  listAuditLog,
   listComments,
   listConcepts,
   listContentTypes,
@@ -82,6 +83,7 @@ import { type Context, Hono } from 'hono';
 import {
   type AuthDeps,
   type AuthVars,
+  auditMiddleware,
   environmentMiddleware,
   principalMiddleware,
   requireScope,
@@ -120,6 +122,8 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.use('/spaces/*', principalMiddleware(deps));
   // Resolve environment aliases for any scoped (:env) route.
   app.use('/spaces/:space/environments/:env/*', environmentMiddleware(deps));
+  // Record successful mutations to the append-only audit trail.
+  app.use('/spaces/:space/*', auditMiddleware(deps));
 
   // --- provisioning (admin) ----------------------------------------------
   // Authenticated principals see the spaces they can reach: admin → all,
@@ -179,6 +183,16 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       return c.body(null, 204);
     },
   );
+
+  // --- audit log (governance, admin) -------------------------------------
+  app.get('/spaces/:space/audit-log', requireScope(SCOPES.spaceAdmin), async (c) => {
+    const limit = c.req.query('limit');
+    const items = await listAuditLog(ctx, c.req.param('space'), {
+      environmentId: c.req.query('environment'),
+      limit: limit ? Number(limit) : undefined,
+    });
+    return c.json({ items });
+  });
 
   // --- branch compare/merge (environments) -------------------------------
   app.get('/spaces/:space/compare', requireScope(SCOPES.previewRead), async (c) =>

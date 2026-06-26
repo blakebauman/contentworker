@@ -51,6 +51,7 @@ export interface ContentStore {
   readonly tasks: TaskRepo;
   readonly workflows: WorkflowRepo;
   readonly taxonomy: TaxonomyRepo;
+  readonly audit: AuditRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -126,6 +127,31 @@ export interface AgentRunRepo {
   record(scope: Scope, run: AgentRunRecord): Promise<void>;
   list(scope: Scope, query: { workflow?: string; limit?: number }): Promise<AgentRunRecord[]>;
   usage(scope: Scope, query: { workflow?: string; since?: string }): Promise<AgentUsageSummary>;
+}
+
+/** An append-only governance record of a mutating action. */
+export interface AuditEntry {
+  readonly id: string;
+  readonly spaceId: string;
+  /** The environment the action targeted, when it was scoped to one. */
+  readonly environmentId?: string;
+  /** Who acted — the principal kind / api-key id (no user model yet). */
+  readonly actor: string;
+  /** What happened, e.g. `POST /spaces/:space/environments/:env/entries/:id/published`. */
+  readonly action: string;
+  /** The kind of entity affected (e.g. `entry`, `release`, `environment-alias`). */
+  readonly targetType?: string;
+  readonly targetId?: string;
+  /** Result status code of the action. */
+  readonly status: number;
+  readonly at: string;
+}
+
+/** Append-only audit trail. Entries are never updated or deleted. */
+export interface AuditRepo {
+  append(entry: AuditEntry): Promise<void>;
+  /** Lists a space's audit entries, newest first. */
+  list(spaceId: string, query: { environmentId?: string; limit?: number }): Promise<AuditEntry[]>;
 }
 
 /** The denormalized published snapshot of an asset, served by the Delivery API. */
