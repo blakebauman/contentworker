@@ -23,6 +23,8 @@ import {
   runEntryQuery,
 } from '@cw/domain';
 import type {
+  AIActionDefinition,
+  AIActionRepo,
   AgentRunRecord,
   AgentRunRepo,
   AssetRepo,
@@ -546,6 +548,24 @@ export class InMemoryContentStore implements ContentStore {
       let rows = this.auditData.filter((e) => e.spaceId === spaceId);
       if (query.environmentId) rows = rows.filter((e) => e.environmentId === query.environmentId);
       return [...rows].reverse().slice(0, query.limit ?? 100);
+    },
+  };
+
+  private readonly aiActionData = new Map<string, AIActionDefinition>();
+
+  readonly aiActions: AIActionRepo = {
+    create: async (scope, action) => {
+      this.aiActionData.set(`${scopeKey(scope)}::${action.id}`, action);
+    },
+    get: async (scope, id) => this.aiActionData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    list: async (scope) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.aiActionData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v);
+    },
+    delete: async (scope, id) => {
+      this.aiActionData.delete(`${scopeKey(scope)}::${id}`);
     },
   };
 

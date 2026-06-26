@@ -52,7 +52,34 @@ export interface ContentStore {
   readonly workflows: WorkflowRepo;
   readonly taxonomy: TaxonomyRepo;
   readonly audit: AuditRepo;
+  readonly aiActions: AIActionRepo;
   readonly outbox: OutboxRepo;
+}
+
+/**
+ * A persisted, templated, governed AI operation (Contentful "AI Actions"). The
+ * prompt template interpolates `{{variables}}`; an optional `targetField` says
+ * which entry field a run writes into. Scoped per environment like content.
+ */
+export interface AIActionDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  /** Prompt template with `{{variable}}` placeholders. */
+  readonly promptTemplate: string;
+  /** Declared variable names the template expects. */
+  readonly variables: readonly string[];
+  /** Optional entry field the run writes its output into. */
+  readonly targetField?: string;
+  readonly tier: 'flagship' | 'balanced' | 'fast';
+  readonly createdAt: string;
+}
+
+export interface AIActionRepo {
+  create(scope: Scope, action: AIActionDefinition): Promise<void>;
+  get(scope: Scope, id: string): Promise<AIActionDefinition | null>;
+  list(scope: Scope): Promise<AIActionDefinition[]>;
+  delete(scope: Scope, id: string): Promise<void>;
 }
 
 export interface TaxonomyRepo {

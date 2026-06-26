@@ -227,6 +227,24 @@ export const auditLog = pgTable(
   (t) => [index('audit_log_by_space').on(t.spaceId, t.at)],
 );
 
+/** Persisted, templated AI operations (Contentful "AI Actions"), env-scoped. */
+export const aiActions = pgTable(
+  'ai_actions',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    promptTemplate: text('prompt_template').notNull(),
+    variables: jsonb('variables').$type<string[]>().notNull(),
+    targetField: text('target_field'),
+    tier: text('tier').$type<'flagship' | 'balanced' | 'fast'>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
+);
+
 export const webhooks = pgTable('webhooks', {
   id: text('id').primaryKey(),
   spaceId: text('space_id').notNull(),

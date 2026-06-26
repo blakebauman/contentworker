@@ -22,6 +22,7 @@ export * from './preview.js';
 export * from './webhooks.js';
 export * from './generation.js';
 export * from './content-ai.js';
+export * from './ai-actions.js';
 export * from './rag.js';
 export * from './agent-audit.js';
 export * from './events/relay.js';

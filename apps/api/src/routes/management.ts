@@ -6,6 +6,7 @@ import {
   autofillField,
   cancelScheduledAction,
   compareEnvironments,
+  createAIAction,
   createApiKey,
   createAsset,
   createConcept,
@@ -19,6 +20,7 @@ import {
   createTask,
   createWebhook,
   defineWorkflow,
+  deleteAIAction,
   deleteComment,
   deleteConcept,
   deleteEnvironmentAlias,
@@ -42,6 +44,7 @@ import {
   getSpaceConfig,
   getVersion,
   getWorkflow,
+  listAIActions,
   listAgentRuns,
   listApiKeys,
   listAssets,
@@ -73,6 +76,7 @@ import {
   resolveTask,
   restoreVersion,
   revokeApiKey,
+  runAIAction,
   scheduleAction,
   setAssetMetadata,
   setConceptBroader,
@@ -406,6 +410,29 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   app.delete(`${BASE}/assets/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await unpublishAsset(ctx, scopeOf(c), c.req.param('id'))),
+  );
+
+  // --- AI Actions (templated, governed AI operations) --------------------
+  app.get(`${BASE}/ai-actions`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listAIActions(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/ai-actions`, requireScope(SCOPES.contentManage), async (c) =>
+    c.json(await createAIAction(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.delete(`${BASE}/ai-actions/:id`, requireScope(SCOPES.contentManage), async (c) => {
+    await deleteAIAction(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+  app.post(`${BASE}/ai-actions/:id/run`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(
+      await runAIAction(
+        ctx,
+        ai,
+        scopeOf(c),
+        c.req.param('id'),
+        await c.req.json().catch(() => ({})),
+      ),
+    ),
   );
 
   // --- agent runs / cost ledger (admin) ----------------------------------

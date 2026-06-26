@@ -265,6 +265,18 @@ export interface AuditEntry {
   readonly at: string;
 }
 
+/** A persisted, templated AI Action (Contentful "AI Actions"). */
+export interface AIAction {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly promptTemplate: string;
+  readonly variables: readonly string[];
+  readonly targetField?: string;
+  readonly tier: ModelTier;
+  readonly createdAt: string;
+}
+
 /** A requested image transformation (Imgix/Sanity URL-API convention). */
 export interface ImageTransform {
   readonly width?: number;
@@ -479,6 +491,35 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       );
       return r.items;
     },
+    // --- AI Actions (templated, governed) --------------------------------
+    async listAIActions(): Promise<AIAction[]> {
+      const r = await req<{ items: AIAction[] }>('GET', `${mgmt}/ai-actions`);
+      return r.items;
+    },
+    createAIAction(input: {
+      name: string;
+      promptTemplate: string;
+      description?: string;
+      targetField?: string;
+      tier?: ModelTier;
+    }): Promise<AIAction> {
+      return req('POST', `${mgmt}/ai-actions`, input);
+    },
+    deleteAIAction(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/ai-actions/${encodeURIComponent(id)}`);
+    },
+    runAIAction(
+      id: string,
+      input: {
+        entryId?: string;
+        variables?: Record<string, string>;
+        locale?: string;
+        apply?: boolean;
+      } = {},
+    ): Promise<{ actionId: string; output: string; applied: boolean }> {
+      return req('POST', `${mgmt}/ai-actions/${encodeURIComponent(id)}/run`, input);
+    },
+
     // --- AI content operations over an entry -----------------------------
     /** Translates an entry's localized text fields; `apply` saves a draft. */
     translateEntry(
