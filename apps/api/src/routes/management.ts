@@ -32,11 +32,13 @@ import {
   deleteWorkflow,
   diffVersions,
   draftEntry,
+  findDuplicates,
   generateAltText,
   getAsset,
   getAssetUsage,
   getContentType,
   getEntry,
+  getEntryEmbedding,
   getEntryMetadata,
   getEntryWorkflowState,
   getRelease,
@@ -71,6 +73,7 @@ import {
   publishEntry,
   publishRelease,
   reassignTask,
+  relatedEntries,
   removeEntryFromRelease,
   reopenTask,
   resolveTask,
@@ -130,7 +133,7 @@ const BASE = '/spaces/:space/environments/:env';
 
 /** Management API (CMA): authoring + publishing, gated by RBAC scopes. */
 export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
-  const { ctx, hasher, blob, ai } = deps;
+  const { ctx, hasher, blob, ai, rag } = deps;
   const app = new Hono<AuthVars>();
   app.use('/spaces', principalMiddleware(deps));
   app.use('/spaces/*', principalMiddleware(deps));
@@ -316,6 +319,32 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         c.req.param('id'),
         await c.req.json().catch(() => ({})),
       ),
+    ),
+  );
+  // --- content semantics (vector-backed) ---------------------------------
+  app.get(`${BASE}/entries/:id/related`, requireScope(SCOPES.searchRead), async (c) => {
+    const topK = c.req.query('top_k');
+    return c.json({
+      items: await relatedEntries(rag, ctx, scopeOf(c), c.req.param('id'), {
+        topK: topK ? Number(topK) : undefined,
+        locale: c.req.query('locale'),
+      }),
+    });
+  });
+  app.get(`${BASE}/entries/:id/duplicates`, requireScope(SCOPES.searchRead), async (c) => {
+    const threshold = c.req.query('threshold');
+    return c.json({
+      items: await findDuplicates(rag, ctx, scopeOf(c), c.req.param('id'), {
+        threshold: threshold ? Number(threshold) : undefined,
+        locale: c.req.query('locale'),
+      }),
+    });
+  });
+  app.get(`${BASE}/entries/:id/embedding`, requireScope(SCOPES.searchRead), async (c) =>
+    c.json(
+      await getEntryEmbedding(rag, ctx, scopeOf(c), c.req.param('id'), {
+        locale: c.req.query('locale'),
+      }),
     ),
   );
   app.post(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>

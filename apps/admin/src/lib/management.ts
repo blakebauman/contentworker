@@ -491,6 +491,26 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       );
       return r.items;
     },
+    // --- content semantics (vector-backed) -------------------------------
+    /** Entries semantically related to a given entry. */
+    async relatedEntries(id: string, topK?: number): Promise<SearchHit[]> {
+      const qs = topK ? `?top_k=${topK}` : '';
+      const r = await req<{ items: SearchHit[] }>(
+        'GET',
+        `${mgmt}/entries/${encodeURIComponent(id)}/related${qs}`,
+      );
+      return r.items;
+    },
+    /** Near-duplicate entries for a given entry (high similarity). */
+    async findDuplicates(id: string, threshold?: number): Promise<SearchHit[]> {
+      const qs = threshold ? `?threshold=${threshold}` : '';
+      const r = await req<{ items: SearchHit[] }>(
+        'GET',
+        `${mgmt}/entries/${encodeURIComponent(id)}/duplicates${qs}`,
+      );
+      return r.items;
+    },
+
     // --- AI Actions (templated, governed) --------------------------------
     async listAIActions(): Promise<AIAction[]> {
       const r = await req<{ items: AIAction[] }>('GET', `${mgmt}/ai-actions`);
