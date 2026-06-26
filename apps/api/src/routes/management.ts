@@ -1,4 +1,5 @@
 import {
+  addComment,
   addEntryToRelease,
   agentUsage,
   cancelScheduledAction,
@@ -9,33 +10,47 @@ import {
   createEnvironment,
   createRelease,
   createSpace,
+  createTask,
   createWebhook,
+  defineWorkflow,
+  deleteComment,
   deleteRelease,
+  deleteTask,
   deleteWebhook,
+  deleteWorkflow,
   draftEntry,
   getAsset,
   getContentType,
   getEntry,
+  getEntryWorkflowState,
   getRelease,
   getReverseReferences,
   getSpaceConfig,
+  getWorkflow,
   listAgentRuns,
   listApiKeys,
   listAssets,
+  listComments,
   listContentTypes,
   listEnvironments,
   listReleases,
   listScheduledActions,
   listSpaces,
+  listTasks,
   listWebhookDeliveries,
   listWebhooks,
+  listWorkflows,
   publishAsset,
   publishContentType,
   publishEntry,
   publishRelease,
+  reassignTask,
   removeEntryFromRelease,
+  reopenTask,
+  resolveTask,
   revokeApiKey,
   scheduleAction,
+  transitionEntry,
   unpublishAsset,
   unpublishEntry,
   updateEntry,
@@ -273,6 +288,89 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   app.delete(`${BASE}/scheduled-actions/:id`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await cancelScheduledAction(ctx, scopeOf(c), c.req.param('id'))),
+  );
+
+  // --- comments (on entries) ---------------------------------------------
+  app.get(`${BASE}/entries/:id/comments`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listComments(ctx, scopeOf(c), c.req.param('id')) }),
+  );
+  app.post(`${BASE}/entries/:id/comments`, requireScope(SCOPES.contentWrite), async (c) => {
+    const body = await c.req.json();
+    const created = await addComment(ctx, scopeOf(c), {
+      entryId: c.req.param('id'),
+      body: body.body,
+      author: body.author ?? c.get('principal').kind,
+      parentId: body.parentId,
+    });
+    return c.json(created, 201);
+  });
+  app.delete(`${BASE}/comments/:id`, requireScope(SCOPES.contentWrite), async (c) => {
+    await deleteComment(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+
+  // --- tasks (on entries) ------------------------------------------------
+  app.get(`${BASE}/entries/:id/tasks`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listTasks(ctx, scopeOf(c), c.req.param('id')) }),
+  );
+  app.post(`${BASE}/entries/:id/tasks`, requireScope(SCOPES.contentWrite), async (c) => {
+    const body = await c.req.json();
+    const created = await createTask(ctx, scopeOf(c), {
+      entryId: c.req.param('id'),
+      body: body.body,
+      assignee: body.assignee,
+    });
+    return c.json(created, 201);
+  });
+  // PUT applies one change: resolve/reopen (status) or reassign (assignee).
+  app.put(`${BASE}/tasks/:id`, requireScope(SCOPES.contentWrite), async (c) => {
+    const body = await c.req.json();
+    const id = c.req.param('id');
+    const scope = scopeOf(c);
+    if (body.status === 'resolved') return c.json(await resolveTask(ctx, scope, id));
+    if (body.status === 'open') return c.json(await reopenTask(ctx, scope, id));
+    if ('assignee' in body)
+      return c.json(await reassignTask(ctx, scope, id, body.assignee ?? null));
+    return c.json({ error: 'Provide status or assignee' }, 400);
+  });
+  app.delete(`${BASE}/tasks/:id`, requireScope(SCOPES.contentWrite), async (c) => {
+    await deleteTask(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+
+  // --- workflows ---------------------------------------------------------
+  app.get(`${BASE}/workflows`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listWorkflows(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/workflows`, requireScope(SCOPES.contentManage), async (c) =>
+    c.json(await defineWorkflow(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.get(`${BASE}/workflows/:id`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(await getWorkflow(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  app.delete(`${BASE}/workflows/:id`, requireScope(SCOPES.contentManage), async (c) => {
+    await deleteWorkflow(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+  app.get(`${BASE}/entries/:id/workflow`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(await getEntryWorkflowState(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  // The transition's required scope is data-driven by the target step, so the
+  // base guard is only previewRead; transitionEntry enforces the step's scope.
+  app.post(
+    `${BASE}/entries/:id/workflow/transition`,
+    requireScope(SCOPES.previewRead),
+    async (c) => {
+      const body = await c.req.json();
+      return c.json(
+        await transitionEntry(
+          ctx,
+          scopeOf(c),
+          { entryId: c.req.param('id'), workflowId: body.workflowId, toStepId: body.toStepId },
+          c.get('principal').scopes,
+        ),
+      );
+    },
   );
 
   return app;

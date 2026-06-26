@@ -1,11 +1,13 @@
 import type {
   ApiKey,
   Asset,
+  Comment,
   ContentType,
   DomainEvent,
   Entry,
   EntryFields,
   EntryVersion,
+  EntryWorkflowState,
   EventType,
   LocaleCode,
   LocalizedValue,
@@ -16,8 +18,10 @@ import type {
   ReleaseItem,
   ScheduledAction,
   Scope,
+  Task,
   Webhook,
   WebhookDelivery,
+  WorkflowDefinition,
 } from '@cw/domain';
 
 /**
@@ -39,7 +43,37 @@ export interface ContentStore {
   readonly agentRuns: AgentRunRepo;
   readonly releases: ReleaseRepo;
   readonly scheduledActions: ScheduledActionRepo;
+  readonly comments: CommentRepo;
+  readonly tasks: TaskRepo;
+  readonly workflows: WorkflowRepo;
   readonly outbox: OutboxRepo;
+}
+
+export interface CommentRepo {
+  create(scope: Scope, comment: Comment): Promise<void>;
+  get(scope: Scope, id: string): Promise<Comment | null>;
+  /** Comments on an entry, oldest first. */
+  listForEntry(scope: Scope, entryId: string): Promise<Comment[]>;
+  delete(scope: Scope, id: string): Promise<void>;
+}
+
+export interface TaskRepo {
+  create(scope: Scope, task: Task): Promise<void>;
+  get(scope: Scope, id: string): Promise<Task | null>;
+  /** Tasks on an entry, oldest first. */
+  listForEntry(scope: Scope, entryId: string): Promise<Task[]>;
+  save(scope: Scope, task: Task): Promise<void>;
+  delete(scope: Scope, id: string): Promise<void>;
+}
+
+export interface WorkflowRepo {
+  saveDefinition(scope: Scope, def: WorkflowDefinition): Promise<void>;
+  getDefinition(scope: Scope, id: string): Promise<WorkflowDefinition | null>;
+  listDefinitions(scope: Scope): Promise<WorkflowDefinition[]>;
+  deleteDefinition(scope: Scope, id: string): Promise<void>;
+  /** The workflow position of an entry (null if it has not entered one). */
+  getState(scope: Scope, entryId: string): Promise<EntryWorkflowState | null>;
+  saveState(scope: Scope, state: EntryWorkflowState): Promise<void>;
 }
 
 /** An audit record of one agent workflow execution, including token usage. */
