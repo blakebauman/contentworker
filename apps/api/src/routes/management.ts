@@ -2,6 +2,7 @@ import {
   addComment,
   addEntryToRelease,
   agentUsage,
+  autoTagAsset,
   cancelScheduledAction,
   compareEnvironments,
   createApiKey,
@@ -28,6 +29,7 @@ import {
   deleteWorkflow,
   diffVersions,
   draftEntry,
+  generateAltText,
   getAsset,
   getAssetUsage,
   getContentType,
@@ -341,6 +343,28 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         scopeOf(c),
         c.req.param('id'),
         parseImageTransform(c.req.query()),
+      ),
+    ),
+  );
+  app.post(`${BASE}/assets/:id/alt-text`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(
+      await generateAltText(
+        ctx,
+        ai,
+        scopeOf(c),
+        c.req.param('id'),
+        await c.req.json().catch(() => ({})),
+      ),
+    ),
+  );
+  app.post(`${BASE}/assets/:id/auto-tag`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(
+      await autoTagAsset(
+        ctx,
+        ai,
+        scopeOf(c),
+        c.req.param('id'),
+        await c.req.json().catch(() => ({})),
       ),
     ),
   );

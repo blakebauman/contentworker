@@ -97,6 +97,30 @@ export function AssetDetailSheet(props: {
     }
   };
 
+  const suggestAlt = async () => {
+    try {
+      const { altText: suggestion } = await client.generateAltText(asset.id, { locale });
+      setAltText(suggestion);
+      toast.success('Alt text suggested — review and save');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const suggestTags = async () => {
+    try {
+      const { tagIds: matched, newTags } = await client.autoTagAsset(asset.id);
+      setTagIds((ids) => Array.from(new Set([...ids, ...matched])));
+      toast.success(
+        newTags.length
+          ? `Tagged. New tag ideas: ${newTags.join(', ')} (add in Taxonomy)`
+          : 'Tags suggested — review and save',
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const save = async () => {
     setBusy(true);
     try {
@@ -224,7 +248,14 @@ export function AssetDetailSheet(props: {
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="asset-alt">Alt text ({locale})</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="asset-alt">Alt text ({locale})</Label>
+              {isImage && (
+                <Button type="button" variant="ghost" size="xs" onClick={suggestAlt}>
+                  ✨ Generate
+                </Button>
+              )}
+            </div>
             <Textarea
               id="asset-alt"
               value={altText}
@@ -235,7 +266,14 @@ export function AssetDetailSheet(props: {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Tags</Label>
+            <div className="flex items-center justify-between">
+              <Label>Tags</Label>
+              {isImage && (
+                <Button type="button" variant="ghost" size="xs" onClick={suggestTags}>
+                  ✨ Auto-tag
+                </Button>
+              )}
+            </div>
             {allTags.length === 0 ? (
               <p className="text-muted-foreground text-sm">No tags defined in this space yet.</p>
             ) : (

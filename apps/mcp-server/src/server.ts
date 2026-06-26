@@ -1,6 +1,7 @@
 import {
   addComment,
   addEntryToRelease,
+  autoTagAsset,
   compareEnvironments,
   createConcept,
   createContentType,
@@ -12,6 +13,7 @@ import {
   deleteEnvironmentAlias,
   diffVersions,
   draftEntry,
+  generateAltText,
   getAssetUsage,
   getContentType,
   getPreviewEntry,
@@ -632,6 +634,40 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.previewRead, scopeOf(args));
       return ok(await getAssetUsage(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  server.tool(
+    'asset_generate_alt_text',
+    'Suggest accessibility/SEO alt text for an image asset; set apply=true to ' +
+      'write it to the asset metadata. Recorded in the agent cost ledger.',
+    {
+      id: z.string(),
+      locale: z.string().optional(),
+      context: z.string().optional().describe('extra context about how the image is used'),
+      apply: z.boolean().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await generateAltText(ctx, ai, scopeOf(args), args.id, {
+          locale: args.locale,
+          context: args.context,
+          apply: args.apply,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'asset_auto_tag',
+    'Suggest taxonomy tags for an image asset (matching the existing vocabulary ' +
+      'and proposing new names); set apply=true to create + assign them.',
+    { id: z.string(), apply: z.boolean().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(await autoTagAsset(ctx, ai, scopeOf(args), args.id, { apply: args.apply }));
     },
   );
 
