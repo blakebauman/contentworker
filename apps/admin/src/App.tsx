@@ -1,3 +1,4 @@
+import { lazy } from 'react';
 import {
   Navigate,
   RouterProvider,
@@ -5,18 +6,39 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
-import { Dashboard } from './components/Dashboard.js';
-import { MediaLibrary } from './components/MediaLibrary.js';
-import { Settings } from './components/Settings.js';
 import { AppShell } from './components/layout/AppShell.js';
 import { ClientProvider, useClient } from './lib/client-context.js';
-import { ContentLayout } from './routes/ContentLayout.js';
-import { ContentTypesOverview } from './routes/ContentTypesOverview.js';
-import { EntriesList } from './routes/EntriesList.js';
-import { EntryEditor } from './routes/EntryEditor.js';
-import { Releases } from './routes/Releases.js';
-import { Taxonomy } from './routes/Taxonomy.js';
-import { Workflows } from './routes/Workflows.js';
+
+// Route components are code-split so the initial bundle stays small — heavy
+// dependencies (charts on the dashboard, the rich-text/AI editor, media grid)
+// load only when their route is first visited. AppShell renders the Suspense
+// boundary around the routed <Outlet/>.
+const Dashboard = lazy(() =>
+  import('./components/Dashboard.js').then((m) => ({ default: m.Dashboard })),
+);
+const MediaLibrary = lazy(() =>
+  import('./components/MediaLibrary.js').then((m) => ({ default: m.MediaLibrary })),
+);
+const Settings = lazy(() =>
+  import('./components/Settings.js').then((m) => ({ default: m.Settings })),
+);
+const ContentLayout = lazy(() =>
+  import('./routes/ContentLayout.js').then((m) => ({ default: m.ContentLayout })),
+);
+const ContentTypesOverview = lazy(() =>
+  import('./routes/ContentTypesOverview.js').then((m) => ({ default: m.ContentTypesOverview })),
+);
+const EntriesList = lazy(() =>
+  import('./routes/EntriesList.js').then((m) => ({ default: m.EntriesList })),
+);
+const EntryEditor = lazy(() =>
+  import('./routes/EntryEditor.js').then((m) => ({ default: m.EntryEditor })),
+);
+const Releases = lazy(() => import('./routes/Releases.js').then((m) => ({ default: m.Releases })));
+const Taxonomy = lazy(() => import('./routes/Taxonomy.js').then((m) => ({ default: m.Taxonomy })));
+const Workflows = lazy(() =>
+  import('./routes/Workflows.js').then((m) => ({ default: m.Workflows })),
+);
 
 // Thin route wrappers bind the shared client/connection to the leaf components.
 function DashboardRoute() {
