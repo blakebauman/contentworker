@@ -311,6 +311,7 @@ function makeAssetRepo(db: Db): AssetRepo {
       file: asset.file,
       title: asset.title,
       description: asset.description,
+      metadata: asset.metadata,
       updatedAt: new Date(),
     };
     await db
@@ -323,6 +324,7 @@ function makeAssetRepo(db: Db): AssetRepo {
           file: values.file,
           title: values.title,
           description: values.description,
+          metadata: values.metadata,
           updatedAt: values.updatedAt,
         },
       });
@@ -340,6 +342,7 @@ function makeAssetRepo(db: Db): AssetRepo {
             file: row.file,
             title: row.title,
             description: row.description,
+            metadata: row.metadata,
           }
         : null;
     },
@@ -357,6 +360,7 @@ function makeAssetRepo(db: Db): AssetRepo {
         file: r.file,
         title: r.title,
         description: r.description,
+        metadata: r.metadata,
       }));
     },
     create: upsertDraft,
@@ -369,6 +373,7 @@ function makeAssetRepo(db: Db): AssetRepo {
         file: s.file,
         title: s.title,
         description: s.description,
+        metadata: s.metadata,
         publishedAt: new Date(s.publishedAt),
       };
       await db
@@ -384,6 +389,7 @@ function makeAssetRepo(db: Db): AssetRepo {
             file: values.file,
             title: values.title,
             description: values.description,
+            metadata: values.metadata,
             publishedAt: values.publishedAt,
           },
         });
@@ -1445,6 +1451,7 @@ const toPublishedAsset = (r: PubAssetRow): PublishedAsset => ({
   file: r.file,
   title: r.title,
   description: r.description,
+  metadata: r.metadata,
   publishedAt: r.publishedAt.toISOString(),
 });
 

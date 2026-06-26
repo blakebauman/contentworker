@@ -160,6 +160,7 @@ export interface PublishedAsset {
   readonly file: Asset['file'];
   readonly title: LocalizedValue;
   readonly description: LocalizedValue;
+  readonly metadata: Asset['metadata'];
   readonly publishedAt: string;
 }
 

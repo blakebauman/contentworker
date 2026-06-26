@@ -29,6 +29,7 @@ import {
   diffVersions,
   draftEntry,
   getAsset,
+  getAssetUsage,
   getContentType,
   getEntry,
   getEntryMetadata,
@@ -69,6 +70,7 @@ import {
   restoreVersion,
   revokeApiKey,
   scheduleAction,
+  setAssetMetadata,
   setConceptBroader,
   setEntryMetadata,
   setEnvironmentAlias,
@@ -323,6 +325,12 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
   app.get(`${BASE}/assets/:id`, requireScope(SCOPES.previewRead), async (c) =>
     c.json(await getAsset(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  app.patch(`${BASE}/assets/:id/metadata`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await setAssetMetadata(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+  );
+  app.get(`${BASE}/assets/:id/usage`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await getAssetUsage(ctx, scopeOf(c), c.req.param('id')) }),
   );
   app.post(`${BASE}/assets/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await publishAsset(ctx, scopeOf(c), c.req.param('id'))),

@@ -1,3 +1,4 @@
+import { AssetDetailSheet } from '@/components/AssetDetailSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -15,6 +16,7 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
   const toast = useToast();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Asset | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -69,11 +71,16 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
           {assets.map((a) => (
-            <Card key={a.id} size="sm" className="gap-2 p-2">
+            <Card
+              key={a.id}
+              size="sm"
+              className="cursor-pointer gap-2 p-2 transition-colors hover:border-primary/50"
+              onClick={() => setSelected(a)}
+            >
               {a.file.contentType.startsWith('image/') ? (
                 <img
                   src={a.file.url}
-                  alt={a.file.fileName}
+                  alt={String(a.metadata.altText?.[locale] ?? a.file.fileName)}
                   className="h-28 w-full rounded-md object-cover"
                 />
               ) : (
@@ -89,7 +96,10 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
                     type="button"
                     variant="ghost"
                     size="xs"
-                    onClick={() => client.unpublishAsset(a.id).then(load)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      client.unpublishAsset(a.id).then(load);
+                    }}
                   >
                     Unpublish
                   </Button>
@@ -98,7 +108,10 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
                     type="button"
                     variant="ghost"
                     size="xs"
-                    onClick={() => client.publishAsset(a.id).then(load)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      client.publishAsset(a.id).then(load);
+                    }}
                   >
                     Publish
                   </Button>
@@ -108,6 +121,13 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
           ))}
         </div>
       )}
+      <AssetDetailSheet
+        asset={selected}
+        locale={locale}
+        open={selected !== null}
+        onOpenChange={(open) => !open && setSelected(null)}
+        onSaved={load}
+      />
     </div>
   );
 }

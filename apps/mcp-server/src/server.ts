@@ -12,9 +12,11 @@ import {
   deleteEnvironmentAlias,
   diffVersions,
   draftEntry,
+  getAssetUsage,
   getContentType,
   getPreviewEntry,
   getRelease,
+  listAssets,
   listAuditLog,
   listComments,
   listConcepts,
@@ -33,6 +35,7 @@ import {
   restoreVersion,
   scheduleAction,
   semanticSearch,
+  setAssetMetadata,
   setEntryMetadata,
   setEnvironmentAlias,
   transitionEntry,
@@ -582,6 +585,52 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
       return ok(
         await listAuditLog(ctx, spaceId, { environmentId: args.environment, limit: args.limit }),
       );
+    },
+  );
+
+  // --- assets / media intelligence ---------------------------------------
+  server.tool(
+    'assets_list',
+    'List assets (media library) in a space/environment.',
+    { limit: z.number().int().positive().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listAssets(ctx, scopeOf(args), { limit: args.limit }));
+    },
+  );
+
+  server.tool(
+    'asset_set_metadata',
+    'Update an asset’s editorial metadata: localized alt text, focal point ' +
+      '(x/y in 0..1 for smart cropping), taxonomy tag ids, and custom fields.',
+    {
+      id: z.string(),
+      altText: z.record(z.string()).optional().describe('locale -> alt text'),
+      tags: z.array(z.string()).optional().describe('taxonomy tag ids'),
+      focalPoint: z.object({ x: z.number(), y: z.number() }).optional(),
+      fields: z.record(z.any()).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await setAssetMetadata(ctx, scopeOf(args), args.id, {
+          altText: args.altText,
+          tags: args.tags,
+          focalPoint: args.focalPoint,
+          fields: args.fields,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'asset_usage',
+    'List the entries that reference an asset (where it is used).',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await getAssetUsage(ctx, scopeOf(args), args.id));
     },
   );
 
