@@ -1,4 +1,11 @@
-import type { Asset, ContentType, ContentTypeDraft, EntryFields, ReferenceEdge } from '@cw/domain';
+import type {
+  Asset,
+  ContentType,
+  ContentTypeDraft,
+  EntryFields,
+  FilterOp,
+  ReferenceEdge,
+} from '@cw/domain';
 
 /** Connection settings for the Management/Preview APIs (a CMA or admin token). */
 export interface Connection {
@@ -30,6 +37,55 @@ export interface PreviewEntry {
 export interface EntryView {
   readonly entry: EntryAggregate;
   readonly fields: EntryFields;
+}
+
+/** One field-level predicate. `field` is a content field apiId or a `sys.*`
+ *  pseudo-field (e.g. `sys.status`); the client adds the `fields.` namespace. */
+export interface EntryFilter {
+  readonly field: string;
+  readonly op: FilterOp;
+  readonly value?: string | readonly string[] | boolean;
+}
+
+/** A sort key over a content field apiId or a `sys.*` pseudo-field. */
+export interface EntryOrder {
+  readonly field: string;
+  readonly direction: 'asc' | 'desc';
+}
+
+/** Contentful-style query options for the entries list (filters/order/search). */
+export interface EntryListQuery {
+  readonly filters?: readonly EntryFilter[];
+  readonly order?: readonly EntryOrder[];
+  readonly search?: string;
+  readonly limit?: number;
+  readonly skip?: number;
+}
+
+/** Namespaces a field path for the query string: `sys.*` stays, else `fields.*`. */
+function fieldPath(field: string): string {
+  return field.startsWith('sys.') || field.startsWith('metadata.') ? field : `fields.${field}`;
+}
+
+/** Serializes an `EntryListQuery` into Contentful-style query params. */
+export function entryQueryParams(query: EntryListQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const f of query.filters ?? []) {
+    const path = fieldPath(f.field);
+    const key = f.op === 'eq' ? path : `${path}[${f.op}]`;
+    const value = Array.isArray(f.value) ? f.value.join(',') : String(f.value ?? '');
+    params.set(key, value);
+  }
+  if (query.order?.length) {
+    params.set(
+      'order',
+      query.order.map((o) => `${o.direction === 'desc' ? '-' : ''}${fieldPath(o.field)}`).join(','),
+    );
+  }
+  if (query.search) params.set('query', query.search);
+  if (query.limit != null) params.set('limit', String(query.limit));
+  if (query.skip != null) params.set('skip', String(query.skip));
+  return params;
 }
 
 /** A space the principal can access (id + display name). */
@@ -215,9 +271,16 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     publishContentType(apiId: string): Promise<ContentType> {
       return req('POST', `${mgmt}/content-types/${apiId}/published`);
     },
-    async listEntries(contentType?: string): Promise<PreviewEntry[]> {
-      const qs = contentType ? `?content_type=${encodeURIComponent(contentType)}` : '';
-      const r = await req<{ items: PreviewEntry[] }>('GET', `${preview}/entries${qs}`);
+    /** Lists draft/current entries (Preview API), with optional field filters,
+     *  ordering, and full-text search applied server-side. */
+    async listEntries(contentType?: string, query: EntryListQuery = {}): Promise<PreviewEntry[]> {
+      const params = entryQueryParams(query);
+      if (contentType) params.set('content_type', contentType);
+      const qs = params.toString();
+      const r = await req<{ items: PreviewEntry[] }>(
+        'GET',
+        `${preview}/entries${qs ? `?${qs}` : ''}`,
+      );
       return r.items;
     },
     getEntry(id: string): Promise<PreviewEntry> {
