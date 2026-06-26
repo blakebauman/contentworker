@@ -45,6 +45,11 @@ export async function getSpaceConfig(ctx: AppContext, scope: Scope): Promise<Spa
   return config;
 }
 
+/** All spaces (admin view). */
+export async function listSpaces(ctx: AppContext): Promise<SpaceConfig[]> {
+  return ctx.store.spaces.list();
+}
+
 /** Adds an environment (branch) to an existing space. */
 export async function createEnvironment(
   ctx: AppContext,

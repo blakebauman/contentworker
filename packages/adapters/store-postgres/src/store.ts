@@ -591,6 +591,16 @@ function makeSpaceRepo(db: Db): SpaceRepo {
         fallbacks: row.fallbacks ?? undefined,
       };
     },
+    async list() {
+      const rows = await db.select().from(schema.spaces).orderBy(asc(schema.spaces.createdAt));
+      return rows.map((row) => ({
+        spaceId: row.id,
+        name: row.name,
+        defaultLocale: row.defaultLocale,
+        locales: row.locales,
+        fallbacks: row.fallbacks ?? undefined,
+      }));
+    },
     async create(config) {
       await db
         .insert(schema.spaces)
