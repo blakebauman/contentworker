@@ -173,3 +173,12 @@ Phased plan: P0–P1 tracer-bullet slice · P2 platform width (locales, field ty
 · P3 assets + references · P4 async backbone (BullMQ, outbox relay, webhooks) · P5 search +
 GraphQL · P6–P8 the AI agentic layer (MCP, generation, pgvector RAG, Temporal agents) · P9
 channel SDKs · P10 Helm + multi-cloud.
+
+**P11–P18 — complete ✅.** The breadth phases on top of that spine: P11 field-level delivery query
+language (filters/order/projection/full-text) · P12 scheduled publishing + atomic releases with a
+perspective param · P13 editorial workflow, tasks, comments, roles/teams · P14 structured rich text
++ taxonomy (concepts/tags) · P15 version history (diff/restore), environment aliases & branch
+compare/merge, audit log · P16 image-transform pipeline + asset metadata, usage tracking, AI
+alt-text/auto-tagging · P17 the AI Content OS (full generation suite, governed AI Actions framework,
+content semantics + duplicate detection, audit/curate/repurpose agents) · P18 extensibility & real-time
+(streaming Live Content API, event-triggered Functions, App Framework UI extensions, Bulk API).

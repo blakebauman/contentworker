@@ -477,6 +477,14 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     }): Promise<GeneratedDraft> {
       return req('POST', `${mgmt}/entries/generate`, input);
     },
+    /** Map free-form prose into a content type's structured fields (Canvas authoring). */
+    canvasEntry(input: {
+      contentTypeApiId: string;
+      prose: string;
+      tier?: ModelTier;
+    }): Promise<GeneratedDraft> {
+      return req('POST', `${mgmt}/entries/canvas`, input);
+    },
 
     // --- assets ----------------------------------------------------------
     async listAssets(): Promise<Asset[]> {
