@@ -479,6 +479,20 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       );
       return r.items;
     },
+    /** Suggests alt text for an image; `apply` writes it to the asset metadata. */
+    generateAltText(
+      id: string,
+      input: { locale?: string; context?: string; apply?: boolean } = {},
+    ): Promise<{ altText: string; locale: string; applied: boolean }> {
+      return req('POST', `${mgmt}/assets/${encodeURIComponent(id)}/alt-text`, input);
+    },
+    /** Suggests taxonomy tags for an image; `apply` creates + assigns them. */
+    autoTagAsset(
+      id: string,
+      input: { apply?: boolean } = {},
+    ): Promise<{ tagIds: string[]; newTags: string[]; applied: boolean }> {
+      return req('POST', `${mgmt}/assets/${encodeURIComponent(id)}/auto-tag`, input);
+    },
     /** Resolves a transformed-image URL for an asset (focal-point-aware). */
     transformAsset(
       id: string,
