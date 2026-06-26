@@ -145,7 +145,7 @@ export function Dashboard(props: { client: ManagementClient }) {
               {runs.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell>{r.workflow}</TableCell>
-                  <TableCell className="text-muted-foreground">{r.entryId}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.entryId || '—'}</TableCell>
                   <TableCell>
                     <StatusBadge status={r.status} />
                   </TableCell>

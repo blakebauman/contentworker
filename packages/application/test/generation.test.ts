@@ -6,7 +6,14 @@ import {
   StubAIProvider,
 } from '@cw/test-kit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { type AppContext, createContentType, createSpace, draftEntry } from '../src/index.js';
+import {
+  type AppContext,
+  agentUsage,
+  createContentType,
+  createSpace,
+  draftEntry,
+  listAgentRuns,
+} from '../src/index.js';
 
 const scope = { spaceId: 'shop', environmentId: 'main' };
 
@@ -89,5 +96,20 @@ describe('P6: AI generation over the content model', () => {
       tier: 'flagship',
     });
     expect(ai.requests[0]?.tier).toBe('flagship');
+  });
+
+  it('records a generation as an agent run for the cost ledger', async () => {
+    await seedArticle(ctx);
+    const ai = new StubAIProvider(() => ({ title: 'T', wordCount: 1 }));
+    await draftEntry(ctx, ai, scope, { contentTypeApiId: 'article', prompt: 'x' });
+
+    const runs = await listAgentRuns(ctx, scope);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.workflow).toBe('generate');
+    const usage = await agentUsage(ctx, scope);
+    expect(usage.runs).toBe(1);
+    // StubAIProvider reports 10 in / 20 out.
+    expect(usage.inputTokens).toBe(10);
+    expect(usage.outputTokens).toBe(20);
   });
 });

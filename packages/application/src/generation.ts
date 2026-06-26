@@ -8,6 +8,7 @@ import {
   assertEntryFieldsValid,
 } from '@cw/domain';
 import type { AIProvider, ModelTier } from '@cw/ports';
+import { recordAgentRun } from './agent-audit.js';
 import type { AppContext } from './context.js';
 
 /** Field types we ask the model to generate for a draft (scalars only). */
@@ -112,6 +113,16 @@ export async function draftEntry(
   assertEntryFieldsValid(ct, fields, {
     defaultLocale: config.defaultLocale,
     locales: config.locales,
+  });
+
+  // Audit the generation so its token cost shows in the dashboard ledger. Both
+  // the HTTP route and the MCP tool reach this, so all generations are logged.
+  await recordAgentRun(ctx, scope, {
+    workflow: 'generate',
+    entryId: '',
+    status: 'completed',
+    decisions: [`Drafted ${ct.name} from a prompt`],
+    usage: result.usage,
   });
 
   return { contentTypeApiId: ct.apiId, fields, usage: result.usage };
