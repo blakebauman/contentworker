@@ -26,6 +26,8 @@ import type {
   AgentRunRecord,
   AgentRunRepo,
   AssetRepo,
+  AuditEntry,
+  AuditRepo,
   AuthRepo,
   CommentRepo,
   ContentStore,
@@ -531,6 +533,19 @@ export class InMemoryContentStore implements ContentStore {
       this.entryMetadataData.get(`${scopeKey(scope)}::${entryId}`) ?? null,
     setEntryMetadata: async (scope, entryId, metadata) => {
       this.entryMetadataData.set(`${scopeKey(scope)}::${entryId}`, metadata);
+    },
+  };
+
+  private readonly auditData: AuditEntry[] = [];
+
+  readonly audit: AuditRepo = {
+    append: async (entry) => {
+      this.auditData.push(entry);
+    },
+    list: async (spaceId, query) => {
+      let rows = this.auditData.filter((e) => e.spaceId === spaceId);
+      if (query.environmentId) rows = rows.filter((e) => e.environmentId === query.environmentId);
+      return [...rows].reverse().slice(0, query.limit ?? 100);
     },
   };
 

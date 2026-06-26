@@ -252,6 +252,18 @@ export interface MergeResult {
   readonly mergedEntries: readonly string[];
 }
 
+export interface AuditEntry {
+  readonly id: string;
+  readonly spaceId: string;
+  readonly environmentId?: string;
+  readonly actor: string;
+  readonly action: string;
+  readonly targetType?: string;
+  readonly targetId?: string;
+  readonly status: number;
+  readonly at: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -342,6 +354,20 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       entries?: string[];
     }): Promise<MergeResult> {
       return req('POST', `${spaceBase}/merge`, input);
+    },
+    /** Reads the space's append-only audit trail, newest first (requires space:admin). */
+    async listAuditLog(
+      query: { environment?: string; limit?: number } = {},
+    ): Promise<AuditEntry[]> {
+      const params = new URLSearchParams();
+      if (query.environment) params.set('environment', query.environment);
+      if (query.limit) params.set('limit', String(query.limit));
+      const qs = params.toString();
+      const r = await req<{ items: AuditEntry[] }>(
+        'GET',
+        `${spaceBase}/audit-log${qs ? `?${qs}` : ''}`,
+      );
+      return r.items;
     },
     async listContentTypes(): Promise<ContentType[]> {
       const r = await req<{ items: ContentType[] }>('GET', `${mgmt}/content-types`);

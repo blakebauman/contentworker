@@ -24,6 +24,7 @@ import type {
   AgentRunRecord,
   AgentRunRepo,
   AssetRepo,
+  AuditRepo,
   AuthRepo,
   CommentRepo,
   ContentStore,
@@ -631,6 +632,45 @@ function makeAgentRunRepo(db: Db): AgentRunRepo {
         inputTokens: Number(row?.inputTokens ?? 0),
         outputTokens: Number(row?.outputTokens ?? 0),
       };
+    },
+  };
+}
+
+function makeAuditRepo(db: Db): AuditRepo {
+  return {
+    async append(entry) {
+      await db.insert(schema.auditLog).values({
+        id: entry.id,
+        spaceId: entry.spaceId,
+        environmentId: entry.environmentId ?? null,
+        actor: entry.actor,
+        action: entry.action,
+        targetType: entry.targetType ?? null,
+        targetId: entry.targetId ?? null,
+        status: entry.status,
+        at: new Date(entry.at),
+      });
+    },
+    async list(spaceId, query) {
+      const conds = [eq(schema.auditLog.spaceId, spaceId)];
+      if (query.environmentId) conds.push(eq(schema.auditLog.environmentId, query.environmentId));
+      const rows = await db
+        .select()
+        .from(schema.auditLog)
+        .where(and(...conds))
+        .orderBy(desc(schema.auditLog.at))
+        .limit(query.limit ?? 100);
+      return rows.map((r) => ({
+        id: r.id,
+        spaceId: r.spaceId,
+        environmentId: r.environmentId ?? undefined,
+        actor: r.actor,
+        action: r.action,
+        targetType: r.targetType ?? undefined,
+        targetId: r.targetId ?? undefined,
+        status: r.status,
+        at: r.at.toISOString(),
+      }));
     },
   };
 }
@@ -1316,6 +1356,7 @@ export function createPostgresStore(
     webhooks: makeWebhookRepo(db),
     auth: makeAuthRepo(db),
     agentRuns: makeAgentRunRepo(db),
+    audit: makeAuditRepo(db),
     releases: makeReleaseRepo(db),
     scheduledActions: makeScheduledActionRepo(db),
     comments: makeCommentRepo(db),

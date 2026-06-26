@@ -5,6 +5,7 @@ export * from './content-types.js';
 export * from './entries.js';
 export * from './versioning.js';
 export * from './branching.js';
+export * from './audit.js';
 export * from './assets.js';
 export * from './publishing.js';
 export * from './releases.js';

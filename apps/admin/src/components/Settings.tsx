@@ -43,6 +43,7 @@ import { useClient } from '../lib/client-context.js';
 import {
   type ApiKeyKind,
   type ApiKeySummary,
+  type AuditEntry,
   type Connection,
   type CreatedApiKey,
   type Environment,
@@ -76,6 +77,7 @@ export function Settings(props: {
           <TabsTrigger value="api-keys">API keys</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
           <TabsTrigger value="environments">Environments</TabsTrigger>
+          <TabsTrigger value="audit-log">Audit log</TabsTrigger>
           <TabsTrigger value="connection">Connection</TabsTrigger>
         </TabsList>
         <TabsContent value="api-keys" className="mt-4">
@@ -86,6 +88,9 @@ export function Settings(props: {
         </TabsContent>
         <TabsContent value="environments" className="mt-4">
           <Environments client={client} />
+        </TabsContent>
+        <TabsContent value="audit-log" className="mt-4">
+          <AuditLog client={client} />
         </TabsContent>
         <TabsContent value="connection" className="mt-4">
           <ConnectionSettings />
@@ -271,6 +276,81 @@ function Environments(props: { client: ManagementClient }) {
 
       <BranchMerge client={client} environments={environments} />
     </div>
+  );
+}
+
+/** Append-only audit trail of mutating API actions (governance; space:admin). */
+function AuditLog(props: { client: ManagementClient }) {
+  const { client } = props;
+  const toast = useToast();
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setEntries(await client.listAuditLog({ limit: 200 }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [client, toast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-2">
+        <div>
+          <h2 className="font-heading font-medium text-base">Audit log</h2>
+          <p className="text-muted-foreground text-sm">
+            Every mutating API action in this space, newest first.
+          </p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
+          Refresh
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <p className="text-muted-foreground text-sm">Loading…</p>
+        ) : entries.length === 0 ? (
+          <p className="text-muted-foreground text-sm">No audit entries yet.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Actor</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Target</TableHead>
+                <TableHead className="w-16 text-right">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.map((e) => (
+                <TableRow key={e.id}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
+                    {new Date(e.at).toLocaleString()}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{e.actor}</Badge>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{e.action}</TableCell>
+                  <TableCell className="font-mono text-muted-foreground text-xs">
+                    {e.targetId ?? '—'}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{e.status}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
