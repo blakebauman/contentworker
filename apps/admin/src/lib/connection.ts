@@ -17,7 +17,20 @@ const DEFAULT: Connection = {
 function load(): Connection {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...DEFAULT, ...(JSON.parse(raw) as Partial<Connection>) } : DEFAULT;
+    if (!raw) return DEFAULT;
+    const saved = { ...DEFAULT, ...(JSON.parse(raw) as Partial<Connection>) };
+    // One-time migration: the default environment was renamed "master" → "main".
+    // A connection persisted before that still points at "master"; flip + re-save it.
+    if (saved.environment === 'master') {
+      const migrated = { ...saved, environment: 'main' };
+      try {
+        localStorage.setItem(KEY, JSON.stringify(migrated));
+      } catch {
+        /* ignore */
+      }
+      return migrated;
+    }
+    return saved;
   } catch {
     return DEFAULT;
   }
