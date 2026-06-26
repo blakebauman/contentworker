@@ -8,6 +8,7 @@ export * from './content-type/content-type.js';
 export * from './entry/entry.js';
 export * from './asset/asset.js';
 export * from './reference/references.js';
+export * from './rich-text/rich-text.js';
 export * from './release/release.js';
 export * from './scheduling/scheduled-action.js';
 export * from './collaboration/comment.js';

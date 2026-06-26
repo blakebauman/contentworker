@@ -1,5 +1,6 @@
 import type { ContentType } from '../content-type/content-type.js';
 import type { LinkType } from '../content-type/field.js';
+import { extractRichTextTargets } from '../rich-text/rich-text.js';
 import type { EntryFields } from '../types.js';
 
 /**
@@ -43,7 +44,7 @@ export function extractReferences(
   };
 
   for (const field of contentType.fields) {
-    if (field.type !== 'Link' && field.type !== 'Array') continue;
+    if (field.type !== 'Link' && field.type !== 'Array' && field.type !== 'RichText') continue;
     const localized = fields[field.apiId];
     if (!localized) continue;
 
@@ -56,6 +57,10 @@ export function extractReferences(
           const link = asLink(item);
           if (link) add(field.apiId, link);
         }
+      } else if (field.type === 'RichText') {
+        // Embedded/linked entries and assets inside the document body count as
+        // references too — so integrity and reverse-lookup cover rich text.
+        for (const target of extractRichTextTargets(value)) add(field.apiId, target);
       }
     }
   }
