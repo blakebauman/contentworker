@@ -540,6 +540,44 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       return req('POST', `${mgmt}/ai-actions/${encodeURIComponent(id)}/run`, input);
     },
 
+    // --- Live Content API (SSE) ------------------------------------------
+    /**
+     * Subscribes to the Live Content API, invoking `onEvent` per published-content
+     * change until `signal` aborts. Uses fetch streaming (EventSource can't send
+     * the bearer token); keepalive `ping` frames are filtered out.
+     */
+    async subscribeLive(
+      onEvent: (e: { type: string; data: unknown }) => void,
+      signal: AbortSignal,
+    ): Promise<void> {
+      const res = await fetchImpl(`${delivery}/live`, { headers, signal });
+      if (!res.ok || !res.body) throw new ApiError(res.status, `live failed: ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split('\n\n');
+        buf = frames.pop() ?? '';
+        for (const frame of frames) {
+          let type = 'message';
+          let data = '';
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event:')) type = line.slice(6).trim();
+            else if (line.startsWith('data:')) data += line.slice(5).trim();
+          }
+          if (type === 'ping' || !data) continue;
+          try {
+            onEvent({ type, data: JSON.parse(data) });
+          } catch {
+            onEvent({ type, data });
+          }
+        }
+      }
+    },
+
     // --- bulk operations -------------------------------------------------
     /** Publishes or unpublishes many entries in one call. */
     bulkEntryAction(

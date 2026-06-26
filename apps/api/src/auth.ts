@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { AppContext, RagDeps } from '@cw/application';
 import { authenticate, recordAudit, resolveEnvironment } from '@cw/application';
 import { type PermissionScope, type Principal, authorize, scopesForKind } from '@cw/domain';
-import type { AIProvider, BlobStore, Hasher } from '@cw/ports';
+import type { AIProvider, BlobStore, EventBus, Hasher } from '@cw/ports';
 import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
@@ -28,6 +28,8 @@ export interface AuthDeps {
   readonly blob: BlobStore;
   /** AI provider for entry generation. */
   readonly ai: AIProvider;
+  /** Domain-event source for the Live Content API (SSE). */
+  readonly bus: EventBus;
 }
 
 const ADMIN: Principal = {

@@ -2,6 +2,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ConnectionAccessCard } from '@/components/dashboard/ConnectionAccessCard';
+import { LiveActivityCard } from '@/components/dashboard/LiveActivityCard';
 import { ThroughputCard } from '@/components/dashboard/ThroughputCard';
 import { UsageByWorkflowCard } from '@/components/dashboard/UsageByWorkflowCard';
 import { UsageTrendCard } from '@/components/dashboard/UsageTrendCard';
@@ -71,7 +72,10 @@ export function Dashboard(props: { client: ManagementClient }) {
         <ConnectionAccessCard />
       </div>
 
-      <UsageByWorkflowCard runs={runs} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <UsageByWorkflowCard runs={runs} />
+        <LiveActivityCard />
+      </div>
 
       {/* Semantic search */}
       <form className="flex items-center gap-2" onSubmit={runSearch}>

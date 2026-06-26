@@ -4,7 +4,7 @@ import {
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
 import { createS3BlobStore } from '@cw/adapter-blob-s3';
-import { createRedisCache } from '@cw/adapter-redis';
+import { createRedisCache, createRedisEventBus } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import type { AppContext, RagDeps } from '@cw/application';
@@ -16,12 +16,14 @@ import type {
   Clock,
   ContentStore,
   EmbeddingsProvider,
+  EventBus,
   GenerateRequest,
   IdGenerator,
 } from '@cw/ports';
 import {
   FakeBlobStore,
   InMemoryContentStore,
+  InMemoryEventBus,
   InMemoryVectorStore,
   LocalEmbeddingsProvider,
   StubAIProvider,
@@ -40,6 +42,8 @@ export interface Wired {
   readonly rag: RagDeps;
   readonly blob: BlobStore;
   readonly ai: AIProvider;
+  /** Live Content API source: Redis pub/sub when configured, else in-memory. */
+  readonly bus: EventBus;
   close(): Promise<void>;
 }
 
@@ -109,9 +113,15 @@ export function wire(config: ApiConfig): Wired {
   // A cache is only attached when Redis is configured — the worker invalidates
   // it on publish. In pure in-memory dev (no worker), reads stay uncached/fresh.
   let cache: Cache | undefined;
+  // The Live Content API subscribes to this bus; the worker publishes to it.
+  // Redis pub/sub connects the two processes; in-memory is a single-process stub.
+  let bus: EventBus = new InMemoryEventBus();
   if (config.redisUrl) {
     const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null });
     cache = createRedisCache(redis);
+    const redisBus = createRedisEventBus(redis);
+    bus = redisBus;
+    closers.push(() => redisBus.close());
     closers.push(async () => void redis.disconnect());
   }
 
@@ -123,6 +133,7 @@ export function wire(config: ApiConfig): Wired {
       rag: makeRag(config.databaseUrl),
       blob: makeBlob(),
       ai: makeAI(),
+      bus,
       close: async () => {
         for (const c of closers) await c();
       },
@@ -159,6 +170,7 @@ export function wire(config: ApiConfig): Wired {
     rag: makeRag(config.databaseUrl),
     blob: makeBlob(),
     ai: makeAI(),
+    bus,
     close: async () => {
       for (const c of closers) await c();
     },
