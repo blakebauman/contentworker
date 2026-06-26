@@ -1,18 +1,23 @@
 import {
   addComment,
   addEntryToRelease,
+  createConcept,
   createContentType,
   createEntry,
   createRelease,
+  createScheme,
+  createTag,
   createTask,
   draftEntry,
   getContentType,
   getPreviewEntry,
   getRelease,
   listComments,
+  listConcepts,
   listContentTypes,
   listPreviewEntries,
   listReleases,
+  listTags,
   listTasks,
   publishContentType,
   publishEntry,
@@ -20,6 +25,7 @@ import {
   resolveTask,
   scheduleAction,
   semanticSearch,
+  setEntryMetadata,
   transitionEntry,
   unpublishEntry,
   updateEntry,
@@ -411,6 +417,89 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           { entryId: args.entryId, workflowId: args.workflowId, toStepId: args.toStepId },
           principal.scopes,
         ),
+      );
+    },
+  );
+
+  // --- taxonomy ----------------------------------------------------------
+  server.tool(
+    'taxonomy_list_tags',
+    'List the flat tags defined in a space/environment.',
+    scopeArgs,
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listTags(ctx, scopeOf(args)));
+    },
+  );
+
+  server.tool(
+    'taxonomy_create_tag',
+    'Create a flat tag.',
+    { name: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      return ok(await createTag(ctx, scopeOf(args), { name: args.name }));
+    },
+  );
+
+  server.tool(
+    'taxonomy_create_scheme',
+    'Create a concept scheme (a controlled vocabulary).',
+    { name: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      return ok(await createScheme(ctx, scopeOf(args), { name: args.name }));
+    },
+  );
+
+  server.tool(
+    'taxonomy_list_concepts',
+    'List concepts, optionally limited to one scheme.',
+    { scheme: z.string().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listConcepts(ctx, scopeOf(args), args.scheme));
+    },
+  );
+
+  server.tool(
+    'taxonomy_create_concept',
+    'Create a concept within a scheme, optionally nested under a broader concept.',
+    {
+      schemeId: z.string(),
+      prefLabel: z.string(),
+      broaderId: z.string().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      return ok(
+        await createConcept(ctx, scopeOf(args), {
+          schemeId: args.schemeId,
+          prefLabel: args.prefLabel,
+          broaderId: args.broaderId,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'entries_set_metadata',
+    "Set an entry's taxonomy associations (tag ids + concept ids). Takes effect " +
+      'on the next publish.',
+    {
+      entryId: z.string(),
+      tags: z.array(z.string()).optional(),
+      concepts: z.array(z.string()).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await setEntryMetadata(ctx, scopeOf(args), args.entryId, {
+          tags: args.tags,
+          concepts: args.concepts,
+        }),
       );
     },
   );

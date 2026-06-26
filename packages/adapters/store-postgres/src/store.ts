@@ -2,9 +2,11 @@ import {
   type ApiKey,
   type Asset,
   type Comment,
+  type Concept,
   type ContentType,
   type DomainEvent,
   type Entry,
+  type EntryMetadata,
   type EntryVersion,
   type ReferenceEdge,
   type Release,
@@ -39,6 +41,7 @@ import type {
   ScopedScheduledAction,
   SpaceRepo,
   TaskRepo,
+  TaxonomyRepo,
   WebhookRepo,
   WorkflowRepo,
 } from '@cw/ports';
@@ -194,6 +197,9 @@ function makeEntryRepo(db: Db): EntryRepo {
         contentTypeApiId: snapshot.contentTypeApiId,
         version: snapshot.version,
         fields: snapshot.fields,
+        metadata: snapshot.metadata
+          ? { tags: [...snapshot.metadata.tags], concepts: [...snapshot.metadata.concepts] }
+          : null,
         publishedAt: new Date(snapshot.publishedAt),
       };
       await db
@@ -209,6 +215,7 @@ function makeEntryRepo(db: Db): EntryRepo {
             contentTypeApiId: values.contentTypeApiId,
             version: values.version,
             fields: values.fields,
+            metadata: values.metadata,
             publishedAt: values.publishedAt,
           },
         });
@@ -253,7 +260,13 @@ function makeEntryRepo(db: Db): EntryRepo {
         published,
         query,
         (r) => r.fields,
-        (r) => ({ id: r.entryId, contentType: r.contentTypeApiId, publishedAt: r.publishedAt }),
+        (r) => ({
+          id: r.entryId,
+          contentType: r.contentTypeApiId,
+          publishedAt: r.publishedAt,
+          'metadata.tags': r.metadata?.tags ?? [],
+          'metadata.concepts': r.metadata?.concepts ?? [],
+        }),
       );
       if (!query.select) return filtered;
       return filtered.map((r) => ({
@@ -1088,6 +1101,135 @@ function makeWorkflowRepo(db: Db): WorkflowRepo {
   };
 }
 
+function makeTaxonomyRepo(db: Db): TaxonomyRepo {
+  const toConcept = (r: typeof schema.concepts.$inferSelect): Concept => ({
+    id: r.id,
+    schemeId: r.schemeId,
+    prefLabel: r.prefLabel,
+    broaderId: r.broaderId,
+  });
+  return {
+    async createScheme(scope, scheme) {
+      await db
+        .insert(schema.conceptSchemes)
+        .values({ spaceId: scope.spaceId, environmentId: scope.environmentId, ...scheme })
+        .onConflictDoUpdate({
+          target: [
+            schema.conceptSchemes.spaceId,
+            schema.conceptSchemes.environmentId,
+            schema.conceptSchemes.id,
+          ],
+          set: { name: scheme.name },
+        });
+    },
+    async listSchemes(scope) {
+      return db
+        .select()
+        .from(schema.conceptSchemes)
+        .where(scopeFilter(schema.conceptSchemes, scope));
+    },
+    async getScheme(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.conceptSchemes)
+        .where(and(scopeFilter(schema.conceptSchemes, scope), eq(schema.conceptSchemes.id, id)));
+      return row ?? null;
+    },
+    async deleteScheme(scope, id) {
+      await db
+        .delete(schema.conceptSchemes)
+        .where(and(scopeFilter(schema.conceptSchemes, scope), eq(schema.conceptSchemes.id, id)));
+    },
+    async createConcept(scope, concept) {
+      await db
+        .insert(schema.concepts)
+        .values({ spaceId: scope.spaceId, environmentId: scope.environmentId, ...concept })
+        .onConflictDoUpdate({
+          target: [schema.concepts.spaceId, schema.concepts.environmentId, schema.concepts.id],
+          set: {
+            schemeId: concept.schemeId,
+            prefLabel: concept.prefLabel,
+            broaderId: concept.broaderId,
+          },
+        });
+    },
+    async getConcept(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.concepts)
+        .where(and(scopeFilter(schema.concepts, scope), eq(schema.concepts.id, id)));
+      return row ? toConcept(row) : null;
+    },
+    async listConcepts(scope, schemeId) {
+      const conds = [scopeFilter(schema.concepts, scope)];
+      if (schemeId) conds.push(eq(schema.concepts.schemeId, schemeId));
+      const rows = await db
+        .select()
+        .from(schema.concepts)
+        .where(and(...conds));
+      return rows.map(toConcept);
+    },
+    async deleteConcept(scope, id) {
+      await db
+        .delete(schema.concepts)
+        .where(and(scopeFilter(schema.concepts, scope), eq(schema.concepts.id, id)));
+    },
+    async createTag(scope, tag) {
+      await db
+        .insert(schema.tags)
+        .values({ spaceId: scope.spaceId, environmentId: scope.environmentId, ...tag })
+        .onConflictDoUpdate({
+          target: [schema.tags.spaceId, schema.tags.environmentId, schema.tags.id],
+          set: { name: tag.name },
+        });
+    },
+    async getTag(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.tags)
+        .where(and(scopeFilter(schema.tags, scope), eq(schema.tags.id, id)));
+      return row ?? null;
+    },
+    async listTags(scope) {
+      return db.select().from(schema.tags).where(scopeFilter(schema.tags, scope));
+    },
+    async deleteTag(scope, id) {
+      await db
+        .delete(schema.tags)
+        .where(and(scopeFilter(schema.tags, scope), eq(schema.tags.id, id)));
+    },
+    async getEntryMetadata(scope, entryId) {
+      const [row] = await db
+        .select()
+        .from(schema.entryMetadata)
+        .where(
+          and(scopeFilter(schema.entryMetadata, scope), eq(schema.entryMetadata.entryId, entryId)),
+        );
+      return row ? { tags: row.tags, concepts: row.concepts } : null;
+    },
+    async setEntryMetadata(scope, entryId, metadata: EntryMetadata) {
+      const values = {
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        entryId,
+        tags: [...metadata.tags],
+        concepts: [...metadata.concepts],
+      };
+      await db
+        .insert(schema.entryMetadata)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [
+            schema.entryMetadata.spaceId,
+            schema.entryMetadata.environmentId,
+            schema.entryMetadata.entryId,
+          ],
+          set: { tags: values.tags, concepts: values.concepts },
+        });
+    },
+  };
+}
+
 export function createPostgresStore(
   connectionString: string,
 ): ContentStore & { close(): Promise<void> } {
@@ -1107,6 +1249,7 @@ export function createPostgresStore(
     comments: makeCommentRepo(db),
     tasks: makeTaskRepo(db),
     workflows: makeWorkflowRepo(db),
+    taxonomy: makeTaxonomyRepo(db),
     outbox: makeOutboxRepo(db),
     async withTransaction<T>(fn: (tx: ContentStoreTx) => Promise<T>): Promise<T> {
       return db.transaction(async (txdb) => {
@@ -1206,6 +1349,7 @@ const toPublished = (r: PubRow): PublishedEntry => ({
   version: r.version,
   fields: r.fields,
   publishedAt: r.publishedAt.toISOString(),
+  ...(r.metadata ? { metadata: r.metadata } : {}),
 });
 
 const entryRow = (scope: Scope, entry: Entry) => ({

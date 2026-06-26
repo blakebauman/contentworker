@@ -14,6 +14,7 @@ export * from './scheduling/scheduled-action.js';
 export * from './collaboration/comment.js';
 export * from './collaboration/task.js';
 export * from './collaboration/workflow.js';
+export * from './taxonomy/taxonomy.js';
 export * from './webhook/webhook.js';
 export * from './auth/auth.js';
 export * from './validation/validate.js';

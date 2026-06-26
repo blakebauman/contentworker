@@ -38,12 +38,17 @@ export async function publishEntryTx(
 
   await tx.entries.saveAggregate(scope, published);
 
+  // Capture the entry's taxonomy associations in the published snapshot so the
+  // Delivery API can serve and filter on them without a second lookup.
+  const metadata = (await ctx.store.taxonomy.getEntryMetadata(scope, id)) ?? undefined;
+
   const snapshot: PublishedEntry = {
     entryId: published.id,
     contentTypeApiId: published.contentTypeApiId,
     version: published.currentVersion,
     fields: found.fields,
     publishedAt: ctx.clock.now().toISOString(),
+    metadata,
   };
   await tx.entries.putPublished(scope, snapshot);
   await tx.references.replaceForEntry(scope, published.id, edges);

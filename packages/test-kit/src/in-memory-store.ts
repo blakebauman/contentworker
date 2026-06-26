@@ -2,15 +2,19 @@ import {
   type ApiKey,
   type Asset,
   type Comment,
+  type Concept,
+  type ConceptScheme,
   type ContentType,
   type DomainEvent,
   type Entry,
+  type EntryMetadata,
   type EntryVersion,
   type EntryWorkflowState,
   type ReferenceEdge,
   type Release,
   type ReleaseItem,
   type Scope,
+  type Tag,
   type Task,
   type Webhook,
   type WorkflowDefinition,
@@ -40,6 +44,7 @@ import type {
   SpaceConfig,
   SpaceRepo,
   TaskRepo,
+  TaxonomyRepo,
   WebhookDeliveryRecord,
   WebhookRepo,
   WorkflowRepo,
@@ -162,7 +167,13 @@ export class InMemoryContentStore implements ContentStore {
         rows,
         query,
         (r) => r.fields,
-        (r) => ({ id: r.entryId, contentType: r.contentTypeApiId, publishedAt: r.publishedAt }),
+        (r) => ({
+          id: r.entryId,
+          contentType: r.contentTypeApiId,
+          publishedAt: r.publishedAt,
+          'metadata.tags': r.metadata?.tags ?? [],
+          'metadata.concepts': r.metadata?.concepts ?? [],
+        }),
       );
       if (!query.select) return filtered;
       return filtered.map((r) => ({
@@ -451,6 +462,55 @@ export class InMemoryContentStore implements ContentStore {
       this.workflowStateData.get(`${scopeKey(scope)}::${entryId}`) ?? null,
     saveState: async (scope, state) => {
       this.workflowStateData.set(`${scopeKey(scope)}::${state.entryId}`, state);
+    },
+  };
+
+  private readonly schemeData = new Map<string, ConceptScheme>();
+  private readonly conceptData = new Map<string, Concept>();
+  private readonly tagData = new Map<string, Tag>();
+  private readonly entryMetadataData = new Map<string, EntryMetadata>();
+
+  readonly taxonomy: TaxonomyRepo = {
+    createScheme: async (scope, scheme) => {
+      this.schemeData.set(`${scopeKey(scope)}::${scheme.id}`, scheme);
+    },
+    listSchemes: async (scope) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.schemeData.entries()].filter(([k]) => k.startsWith(prefix)).map(([, v]) => v);
+    },
+    getScheme: async (scope, id) => this.schemeData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    deleteScheme: async (scope, id) => {
+      this.schemeData.delete(`${scopeKey(scope)}::${id}`);
+    },
+    createConcept: async (scope, concept) => {
+      this.conceptData.set(`${scopeKey(scope)}::${concept.id}`, concept);
+    },
+    getConcept: async (scope, id) => this.conceptData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    listConcepts: async (scope, schemeId) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.conceptData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v)
+        .filter((c) => !schemeId || c.schemeId === schemeId);
+    },
+    deleteConcept: async (scope, id) => {
+      this.conceptData.delete(`${scopeKey(scope)}::${id}`);
+    },
+    createTag: async (scope, tag) => {
+      this.tagData.set(`${scopeKey(scope)}::${tag.id}`, tag);
+    },
+    getTag: async (scope, id) => this.tagData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    listTags: async (scope) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.tagData.entries()].filter(([k]) => k.startsWith(prefix)).map(([, v]) => v);
+    },
+    deleteTag: async (scope, id) => {
+      this.tagData.delete(`${scopeKey(scope)}::${id}`);
+    },
+    getEntryMetadata: async (scope, entryId) =>
+      this.entryMetadataData.get(`${scopeKey(scope)}::${entryId}`) ?? null,
+    setEntryMetadata: async (scope, entryId, metadata) => {
+      this.entryMetadataData.set(`${scopeKey(scope)}::${entryId}`, metadata);
     },
   };
 

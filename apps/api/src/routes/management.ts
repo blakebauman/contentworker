@@ -5,16 +5,22 @@ import {
   cancelScheduledAction,
   createApiKey,
   createAsset,
+  createConcept,
   createContentType,
   createEntry,
   createEnvironment,
   createRelease,
+  createScheme,
   createSpace,
+  createTag,
   createTask,
   createWebhook,
   defineWorkflow,
   deleteComment,
+  deleteConcept,
   deleteRelease,
+  deleteScheme,
+  deleteTag,
   deleteTask,
   deleteWebhook,
   deleteWorkflow,
@@ -22,6 +28,7 @@ import {
   getAsset,
   getContentType,
   getEntry,
+  getEntryMetadata,
   getEntryWorkflowState,
   getRelease,
   getReverseReferences,
@@ -31,11 +38,14 @@ import {
   listApiKeys,
   listAssets,
   listComments,
+  listConcepts,
   listContentTypes,
   listEnvironments,
   listReleases,
   listScheduledActions,
+  listSchemes,
   listSpaces,
+  listTags,
   listTasks,
   listWebhookDeliveries,
   listWebhooks,
@@ -50,6 +60,8 @@ import {
   resolveTask,
   revokeApiKey,
   scheduleAction,
+  setConceptBroader,
+  setEntryMetadata,
   transitionEntry,
   unpublishAsset,
   unpublishEntry,
@@ -371,6 +383,60 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         ),
       );
     },
+  );
+
+  // --- taxonomy (controlled vocabulary) ----------------------------------
+  app.get(`${BASE}/taxonomy/schemes`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listSchemes(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/taxonomy/schemes`, requireScope(SCOPES.contentManage), async (c) =>
+    c.json(await createScheme(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.delete(`${BASE}/taxonomy/schemes/:id`, requireScope(SCOPES.contentManage), async (c) => {
+    await deleteScheme(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+
+  app.get(`${BASE}/taxonomy/concepts`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listConcepts(ctx, scopeOf(c), c.req.query('scheme')) }),
+  );
+  app.post(`${BASE}/taxonomy/concepts`, requireScope(SCOPES.contentManage), async (c) =>
+    c.json(await createConcept(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.put(
+    `${BASE}/taxonomy/concepts/:id/broader`,
+    requireScope(SCOPES.contentManage),
+    async (c) => {
+      const body = await c.req.json();
+      return c.json(
+        await setConceptBroader(ctx, scopeOf(c), c.req.param('id'), body.broaderId ?? null),
+      );
+    },
+  );
+  app.delete(`${BASE}/taxonomy/concepts/:id`, requireScope(SCOPES.contentManage), async (c) => {
+    await deleteConcept(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+
+  app.get(`${BASE}/taxonomy/tags`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listTags(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/taxonomy/tags`, requireScope(SCOPES.contentManage), async (c) =>
+    c.json(await createTag(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.delete(`${BASE}/taxonomy/tags/:id`, requireScope(SCOPES.contentManage), async (c) => {
+    await deleteTag(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+
+  // --- entry taxonomy associations ---------------------------------------
+  app.get(`${BASE}/entries/:id/metadata`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(
+      (await getEntryMetadata(ctx, scopeOf(c), c.req.param('id'))) ?? { tags: [], concepts: [] },
+    ),
+  );
+  app.put(`${BASE}/entries/:id/metadata`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await setEntryMetadata(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
   );
 
   return app;

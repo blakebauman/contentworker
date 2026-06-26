@@ -52,10 +52,7 @@ export interface RichTextDocument {
 export function isRichTextDocument(value: unknown): value is RichTextDocument {
   const d = value as { nodeType?: unknown; content?: unknown };
   return (
-    typeof d === 'object' &&
-    d !== null &&
-    d.nodeType === 'document' &&
-    Array.isArray(d.content)
+    typeof d === 'object' && d !== null && d.nodeType === 'document' && Array.isArray(d.content)
   );
 }
 
@@ -65,7 +62,8 @@ function isReferenceNodeType(nodeType: string): nodeType is ReferenceNodeType {
 
 /** Validates a node tree, collecting issue messages (empty when valid). */
 export function validateRichText(value: unknown): string[] {
-  if (!isRichTextDocument(value)) return ['Expected a rich-text document { nodeType: "document", content: [] }'];
+  if (!isRichTextDocument(value))
+    return ['Expected a rich-text document { nodeType: "document", content: [] }'];
   const issues: string[] = [];
   const walk = (node: RichTextNode, path: string): void => {
     if (typeof node?.nodeType !== 'string') {
@@ -77,7 +75,11 @@ export function validateRichText(value: unknown): string[] {
     }
     if (isReferenceNodeType(node.nodeType)) {
       const target = node.data?.target;
-      if (!target || typeof target.id !== 'string' || (target.linkType !== 'Entry' && target.linkType !== 'Asset')) {
+      if (
+        !target ||
+        typeof target.id !== 'string' ||
+        (target.linkType !== 'Entry' && target.linkType !== 'Asset')
+      ) {
         issues.push(`${path}: ${node.nodeType} requires data.target { id, linkType }`);
       }
     }

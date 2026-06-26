@@ -49,7 +49,14 @@ describe('rich text document', () => {
       paragraph('intro'),
       {
         nodeType: 'blockquote',
-        content: [embeddedEntry('e2'), { nodeType: 'asset-hyperlink', data: { target: { id: 'a1', linkType: 'Asset' } }, content: [] }],
+        content: [
+          embeddedEntry('e2'),
+          {
+            nodeType: 'asset-hyperlink',
+            data: { target: { id: 'a1', linkType: 'Asset' } },
+            content: [],
+          },
+        ],
       },
     ]);
     expect(extractRichTextTargets(value)).toEqual([
@@ -65,8 +72,22 @@ describe('rich text in the content model', () => {
     name: 'Article',
     displayField: 'title',
     fields: [
-      { apiId: 'title', name: 'Title', type: 'Symbol', localized: false, required: true, position: 0 },
-      { apiId: 'body', name: 'Body', type: 'RichText', localized: false, required: false, position: 1 },
+      {
+        apiId: 'title',
+        name: 'Title',
+        type: 'Symbol',
+        localized: false,
+        required: true,
+        position: 0,
+      },
+      {
+        apiId: 'body',
+        name: 'Body',
+        type: 'RichText',
+        localized: false,
+        required: false,
+        position: 1,
+      },
     ],
   });
 
@@ -85,8 +106,6 @@ describe('rich text in the content model', () => {
       { title: { 'en-US': 'T' }, body: { 'en-US': doc([embeddedEntry('e2')]) } },
       article,
     );
-    expect(edges).toEqual([
-      { fromEntryId: 'e1', fromField: 'body', toId: 'e2', toType: 'Entry' },
-    ]);
+    expect(edges).toEqual([{ fromEntryId: 'e1', fromField: 'body', toId: 'e2', toType: 'Entry' }]);
   });
 });
