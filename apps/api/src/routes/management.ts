@@ -8,6 +8,7 @@ import {
   bulkCreateEntries,
   bulkEntryAction,
   cancelScheduledAction,
+  canvasToEntry,
   compareEnvironments,
   createAIAction,
   createApiKey,
@@ -289,6 +290,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   // human write does, so an agent can't produce an entry a person couldn't.
   app.post(`${BASE}/entries/generate`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(await draftEntry(ctx, ai, scopeOf(c), await c.req.json())),
+  );
+  // Canvas: map free-form prose into structured fields (same validation gate).
+  app.post(`${BASE}/entries/canvas`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await canvasToEntry(ctx, ai, scopeOf(c), await c.req.json())),
   );
   app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) =>
     c.json(await getEntry(ctx, scopeOf(c), c.req.param('id'))),

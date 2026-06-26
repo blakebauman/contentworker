@@ -9,9 +9,10 @@ import { VersionHistory } from '@/components/VersionHistory';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { EntryFields } from '@cw/domain';
-import { Sparkles } from 'lucide-react';
+import { PenLine, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { CanvasDialog } from '../components/CanvasDialog.js';
 import type { Pickers } from '../components/EntryForm.js';
 import { EntryForm } from '../components/EntryForm.js';
 import { GenerateEntryDialog } from '../components/GenerateEntryDialog.js';
@@ -37,6 +38,7 @@ export function EntryEditor() {
   const [pickers, setPickers] = useState<Pickers>({ entries: [], assets: [] });
   const [extensions, setExtensions] = useState<AppExtension[]>([]);
   const [genOpen, setGenOpen] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
   // Bumped after a generation/restore to re-seed the form (EntryForm reads `initial` once).
   const [formKey, setFormKey] = useState(0);
 
@@ -130,6 +132,17 @@ export function EntryEditor() {
     toast.success(`Generated ${Object.keys(res.fields).length} field(s) · ${total} tokens`);
   };
 
+  // Canvas: map free-form prose into the form's fields (throws so the dialog can
+  // surface the error; not wrapped in `run`).
+  const mapCanvas = async (prose: string, tier: ModelTier) => {
+    if (!selectedType) return;
+    const res = await client.canvasEntry({ contentTypeApiId: selectedType.apiId, prose, tier });
+    setInitial((prev) => ({ ...(prev ?? {}), ...res.fields }));
+    setFormKey((k) => k + 1);
+    const total = res.usage.inputTokens + res.usage.outputTokens;
+    toast.success(`Mapped ${Object.keys(res.fields).length} field(s) · ${total} tokens`);
+  };
+
   if (!selectedType) {
     return <p className="text-muted-foreground">Loading…</p>;
   }
@@ -142,6 +155,9 @@ export function EntryEditor() {
           isEdit ? 'Update this entry’s draft fields.' : `Author a new ${selectedType.name} entry.`
         }
       >
+        <Button type="button" variant="outline" onClick={() => setCanvasOpen(true)}>
+          <PenLine className="size-4" /> Canvas
+        </Button>
         <Button type="button" variant="outline" onClick={() => setGenOpen(true)}>
           <Sparkles className="size-4" /> Generate with AI
         </Button>
@@ -173,6 +189,12 @@ export function EntryEditor() {
         onOpenChange={setGenOpen}
         contentTypeName={selectedType.name}
         onGenerate={generate}
+      />
+      <CanvasDialog
+        open={canvasOpen}
+        onOpenChange={setCanvasOpen}
+        contentTypeName={selectedType.name}
+        onMap={mapCanvas}
       />
       {isEdit && entryId && (
         <div className="grid max-w-5xl gap-4 lg:grid-cols-2">

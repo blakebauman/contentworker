@@ -5,6 +5,7 @@ import {
   autoTagAsset,
   autofillField,
   bulkEntryAction,
+  canvasToEntry,
   compareEnvironments,
   createAIAction,
   createAppExtension,
@@ -239,6 +240,28 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
         await draftEntry(ctx, ai, scopeOf(args), {
           contentTypeApiId: args.contentType,
           prompt: args.prompt,
+          tier: args.tier,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'entry_from_canvas',
+    'Map free-form prose into structured field values for a content type (Canvas authoring). ' +
+      'Extracts/structures the prose into the model; validated before returning. Pair with entries_create.',
+    {
+      contentType: z.string(),
+      prose: z.string(),
+      tier: z.enum(['flagship', 'balanced', 'fast']).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await canvasToEntry(ctx, ai, scopeOf(args), {
+          contentTypeApiId: args.contentType,
+          prose: args.prose,
           tier: args.tier,
         }),
       );

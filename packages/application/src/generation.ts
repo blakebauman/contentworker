@@ -127,3 +127,76 @@ export async function draftEntry(
 
   return { contentTypeApiId: ct.apiId, fields, usage: result.usage };
 }
+
+export interface CanvasInput {
+  readonly contentTypeApiId: string;
+  /** Free-form prose to map into the content type's structured fields. */
+  readonly prose: string;
+  readonly tier?: ModelTier;
+}
+
+/**
+ * Maps free-form prose into a structured entry ("Canvas" authoring): the author
+ * writes naturally and the model extracts/structures the text into the content
+ * type's fields. Distinct from `draftEntry` (which generates from instructions) —
+ * here the prose IS the source content. Same schema constraint, same validation
+ * gate, and same audit ledger, so a mapped entry is one a human could have typed.
+ */
+export async function canvasToEntry(
+  ctx: AppContext,
+  ai: AIProvider,
+  scope: Scope,
+  input: CanvasInput,
+): Promise<DraftResult> {
+  if (!input.prose.trim()) {
+    throw new ValidationError([{ field: 'prose', message: 'Prose is required' }]);
+  }
+  const ct = await ctx.store.contentTypes.get(scope, input.contentTypeApiId);
+  if (!ct) throw new NotFoundError('ContentType', input.contentTypeApiId);
+  const config = await ctx.store.spaces.getConfig(scope);
+  if (!config) throw new NotFoundError('Space', scope.spaceId);
+
+  const { schema } = schemaForContentType(ct);
+  const system =
+    'You map free-form prose into a structured content entry. Extract the relevant ' +
+    'information from the prose and place it into the fields defined by the JSON schema, ' +
+    "preserving the author's wording where it maps directly to a field. Infer concise " +
+    'values for fields the prose implies but does not state outright. Return only values ' +
+    'that satisfy the schema.';
+  const prompt = `Content type: ${ct.name} (${ct.apiId}).\nProse:\n${input.prose}\nProduce values for every field in the schema.`;
+
+  const result = await ai.generate({
+    system,
+    prompt,
+    tier: input.tier ?? 'balanced',
+    maxTokens: 4096,
+    outputSchema: schema as unknown as Record<string, unknown>,
+  });
+
+  if (!result.object || typeof result.object !== 'object') {
+    throw new ValidationError([{ field: '', message: 'Model did not return structured output' }]);
+  }
+
+  const mapped = result.object as Record<string, unknown>;
+  const fields: EntryFields = {};
+  for (const [apiId, value] of Object.entries(mapped)) {
+    if (value !== null && value !== undefined) {
+      fields[apiId] = { [config.defaultLocale]: value };
+    }
+  }
+
+  assertEntryFieldsValid(ct, fields, {
+    defaultLocale: config.defaultLocale,
+    locales: config.locales,
+  });
+
+  await recordAgentRun(ctx, scope, {
+    workflow: 'generate',
+    entryId: '',
+    status: 'completed',
+    decisions: [`Mapped prose into ${ct.name} via Canvas`],
+    usage: result.usage,
+  });
+
+  return { contentTypeApiId: ct.apiId, fields, usage: result.usage };
+}
