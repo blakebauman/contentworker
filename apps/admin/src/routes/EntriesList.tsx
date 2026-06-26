@@ -1,4 +1,5 @@
 import { EmptyState } from '@/components/EmptyState';
+import { EntryFilterBar } from '@/components/EntryFilterBar';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
@@ -24,7 +25,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { EntryDiff } from '../components/EntryDiff.js';
 import { useClient } from '../lib/client-context.js';
-import type { PreviewEntry } from '../lib/management.js';
+import type { EntryListQuery, PreviewEntry } from '../lib/management.js';
 import { useToast } from '../lib/toast.js';
 import { useContentOutlet } from './content-context.js';
 
@@ -40,16 +41,17 @@ export function EntriesList() {
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [diffEntry, setDiffEntry] = useState<PreviewEntry | null>(null);
+  const [query, setQuery] = useState<EntryListQuery>({});
 
   const selectedType = types.find((t) => t.apiId === typeId);
 
   const loadEntries = useCallback(
-    () =>
+    (q: EntryListQuery) =>
       run(async () => {
         if (!typeId) return;
         setLoading(true);
         try {
-          setEntries(await client.listEntries(typeId));
+          setEntries(await client.listEntries(typeId, q));
         } finally {
           setLoading(false);
         }
@@ -57,12 +59,20 @@ export function EntriesList() {
     [client, run, typeId],
   );
 
-  // Reload when the selected content type changes; clear cross-type UI state.
+  // Reset filters and cross-type UI state when the selected content type changes.
   useEffect(() => {
-    setPicked(new Set());
-    setDiffEntry(null);
-    loadEntries();
-  }, [loadEntries]);
+    if (typeId) {
+      setPicked(new Set());
+      setDiffEntry(null);
+      setQuery({});
+    }
+  }, [typeId]);
+
+  // Re-query (debounced) whenever the type or the filter/sort/search query changes.
+  useEffect(() => {
+    const handle = setTimeout(() => loadEntries(query), 250);
+    return () => clearTimeout(handle);
+  }, [loadEntries, query]);
 
   const togglePick = (id: string) =>
     setPicked((prev) => {
@@ -88,7 +98,7 @@ export function EntriesList() {
         setEntries(snapshot);
         throw e;
       }
-      await loadEntries();
+      await loadEntries(query);
       toast.success(`${verb} ${ids.size} ${ids.size === 1 ? 'entry' : 'entries'}`);
     });
   };
@@ -108,7 +118,7 @@ export function EntriesList() {
         setEntries(snapshot);
         throw e;
       }
-      await loadEntries();
+      await loadEntries(query);
       toast.success(msg);
     });
   };
@@ -118,6 +128,7 @@ export function EntriesList() {
   }
 
   const count = entries.length;
+  const hasQuery = (query.filters?.length ?? 0) > 0 || !!query.search;
   return (
     <div className="space-y-4">
       <PageHeader
@@ -153,12 +164,24 @@ export function EntriesList() {
         </Button>
       </PageHeader>
 
+      <EntryFilterBar type={selectedType} value={query} onChange={setQuery} />
+
       {loading ? (
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : entries.length === 0 && hasQuery ? (
+        <EmptyState
+          icon={FileText}
+          title="No matching entries"
+          description="No entries match the current filters. Try loosening or clearing them."
+        >
+          <Button type="button" variant="outline" onClick={() => setQuery({})} disabled={busy}>
+            Clear filters
+          </Button>
+        </EmptyState>
       ) : entries.length === 0 ? (
         <EmptyState
           icon={FileText}
