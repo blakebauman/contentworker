@@ -6,6 +6,8 @@ import {
   type Entry,
   type EntryVersion,
   type ReferenceEdge,
+  type Release,
+  type ScheduledAction,
   type Scope,
   type Webhook,
   matchesTopic,
@@ -27,10 +29,13 @@ import type {
   PublishedAsset,
   PublishedEntry,
   ReferenceRepo,
+  ReleaseRepo,
+  ScheduledActionRepo,
+  ScopedScheduledAction,
   SpaceRepo,
   WebhookRepo,
 } from '@cw/ports';
-import { and, asc, count, desc, eq, gt, gte, isNull, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte, isNull, lte, sum } from 'drizzle-orm';
 import { type PostgresJsDatabase, drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema.js';
@@ -684,6 +689,201 @@ function makeSpaceRepo(db: Db): SpaceRepo {
 }
 
 /** Creates a Postgres-backed ContentStore. Owns the connection pool. */
+type ReleaseRow = typeof schema.releases.$inferSelect;
+const toRelease = (r: ReleaseRow): Release => ({
+  id: r.id,
+  title: r.title,
+  description: r.description ?? undefined,
+  status: r.status,
+  createdAt: r.createdAt.toISOString(),
+  publishedAt: r.publishedAt?.toISOString(),
+});
+
+function makeReleaseRepo(db: Db): ReleaseRepo {
+  return {
+    async create(scope, release) {
+      await db.insert(schema.releases).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: release.id,
+        title: release.title,
+        description: release.description ?? null,
+        status: release.status,
+        createdAt: new Date(release.createdAt),
+        publishedAt: release.publishedAt ? new Date(release.publishedAt) : null,
+      });
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.releases)
+        .where(and(scopeFilter(schema.releases, scope), eq(schema.releases.id, id)));
+      return row ? toRelease(row) : null;
+    },
+    async list(scope) {
+      const rows = await db
+        .select()
+        .from(schema.releases)
+        .where(scopeFilter(schema.releases, scope))
+        .orderBy(desc(schema.releases.createdAt));
+      return rows.map(toRelease);
+    },
+    async save(scope, release) {
+      await db
+        .update(schema.releases)
+        .set({
+          title: release.title,
+          description: release.description ?? null,
+          status: release.status,
+          publishedAt: release.publishedAt ? new Date(release.publishedAt) : null,
+        })
+        .where(and(scopeFilter(schema.releases, scope), eq(schema.releases.id, release.id)));
+    },
+    async delete(scope, id) {
+      await db
+        .delete(schema.releaseItems)
+        .where(and(scopeFilter(schema.releaseItems, scope), eq(schema.releaseItems.releaseId, id)));
+      await db
+        .delete(schema.releases)
+        .where(and(scopeFilter(schema.releases, scope), eq(schema.releases.id, id)));
+    },
+    async addItem(scope, releaseId, item) {
+      await db
+        .insert(schema.releaseItems)
+        .values({
+          spaceId: scope.spaceId,
+          environmentId: scope.environmentId,
+          releaseId,
+          entityType: item.entityType,
+          entityId: item.entityId,
+          action: item.action,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.releaseItems.spaceId,
+            schema.releaseItems.environmentId,
+            schema.releaseItems.releaseId,
+            schema.releaseItems.entityId,
+          ],
+          set: { action: item.action, entityType: item.entityType },
+        });
+    },
+    async removeItem(scope, releaseId, entityId) {
+      await db
+        .delete(schema.releaseItems)
+        .where(
+          and(
+            scopeFilter(schema.releaseItems, scope),
+            eq(schema.releaseItems.releaseId, releaseId),
+            eq(schema.releaseItems.entityId, entityId),
+          ),
+        );
+    },
+    async listItems(scope, releaseId) {
+      const rows = await db
+        .select()
+        .from(schema.releaseItems)
+        .where(
+          and(
+            scopeFilter(schema.releaseItems, scope),
+            eq(schema.releaseItems.releaseId, releaseId),
+          ),
+        );
+      return rows.map((r) => ({
+        entityType: r.entityType,
+        entityId: r.entityId,
+        action: r.action,
+      }));
+    },
+  };
+}
+
+type ScheduledRow = typeof schema.scheduledActions.$inferSelect;
+const toScheduled = (r: ScheduledRow): ScheduledAction => ({
+  id: r.id,
+  action: r.action,
+  entityType: r.entityType,
+  entityId: r.entityId,
+  scheduledFor: r.scheduledFor.toISOString(),
+  status: r.status,
+  createdAt: r.createdAt.toISOString(),
+  executedAt: r.executedAt?.toISOString(),
+  error: r.error ?? undefined,
+});
+
+function makeScheduledActionRepo(db: Db): ScheduledActionRepo {
+  const rowValues = (scope: Scope, a: ScheduledAction) => ({
+    spaceId: scope.spaceId,
+    environmentId: scope.environmentId,
+    id: a.id,
+    action: a.action,
+    entityType: a.entityType,
+    entityId: a.entityId,
+    scheduledFor: new Date(a.scheduledFor),
+    status: a.status,
+    createdAt: new Date(a.createdAt),
+    executedAt: a.executedAt ? new Date(a.executedAt) : null,
+    error: a.error ?? null,
+  });
+  return {
+    async create(scope, action) {
+      await db.insert(schema.scheduledActions).values(rowValues(scope, action));
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.scheduledActions)
+        .where(
+          and(scopeFilter(schema.scheduledActions, scope), eq(schema.scheduledActions.id, id)),
+        );
+      return row ? toScheduled(row) : null;
+    },
+    async list(scope, query) {
+      const conditions = [scopeFilter(schema.scheduledActions, scope)];
+      if (query?.status)
+        conditions.push(eq(schema.scheduledActions.status, query.status as ScheduledRow['status']));
+      const rows = await db
+        .select()
+        .from(schema.scheduledActions)
+        .where(and(...conditions))
+        .orderBy(asc(schema.scheduledActions.scheduledFor));
+      return rows.map(toScheduled);
+    },
+    async save(scope, action) {
+      await db
+        .update(schema.scheduledActions)
+        .set({
+          status: action.status,
+          executedAt: action.executedAt ? new Date(action.executedAt) : null,
+          error: action.error ?? null,
+        })
+        .where(
+          and(
+            scopeFilter(schema.scheduledActions, scope),
+            eq(schema.scheduledActions.id, action.id),
+          ),
+        );
+    },
+    async findDue(now, limit = 100): Promise<ScopedScheduledAction[]> {
+      const rows = await db
+        .select()
+        .from(schema.scheduledActions)
+        .where(
+          and(
+            eq(schema.scheduledActions.status, 'pending'),
+            lte(schema.scheduledActions.scheduledFor, new Date(now)),
+          ),
+        )
+        .orderBy(asc(schema.scheduledActions.scheduledFor))
+        .limit(limit);
+      return rows.map((r) => ({
+        scope: { spaceId: r.spaceId, environmentId: r.environmentId },
+        action: toScheduled(r),
+      }));
+    },
+  };
+}
+
 export function createPostgresStore(
   connectionString: string,
 ): ContentStore & { close(): Promise<void> } {
@@ -698,6 +898,8 @@ export function createPostgresStore(
     webhooks: makeWebhookRepo(db),
     auth: makeAuthRepo(db),
     agentRuns: makeAgentRunRepo(db),
+    releases: makeReleaseRepo(db),
+    scheduledActions: makeScheduledActionRepo(db),
     outbox: makeOutboxRepo(db),
     async withTransaction<T>(fn: (tx: ContentStoreTx) => Promise<T>): Promise<T> {
       return db.transaction(async (txdb) => {
@@ -706,6 +908,7 @@ export function createPostgresStore(
           entries: makeEntryRepo(txdb as unknown as Db),
           assets: makeAssetRepo(txdb as unknown as Db),
           references: makeReferenceRepo(txdb as unknown as Db),
+          releases: makeReleaseRepo(txdb as unknown as Db),
           outbox: makeOutboxRepo(txdb as unknown as Db),
         };
         return fn(tx);

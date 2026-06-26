@@ -12,6 +12,9 @@ import type {
   QueryFilter,
   QueryOrder,
   ReferenceEdge,
+  Release,
+  ReleaseItem,
+  ScheduledAction,
   Scope,
   Webhook,
   WebhookDelivery,
@@ -34,6 +37,8 @@ export interface ContentStore {
   readonly webhooks: WebhookRepo;
   readonly auth: AuthRepo;
   readonly agentRuns: AgentRunRepo;
+  readonly releases: ReleaseRepo;
+  readonly scheduledActions: ScheduledActionRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -97,7 +102,37 @@ export interface ContentStoreTx {
   readonly entries: EntryRepo;
   readonly assets: AssetRepo;
   readonly references: ReferenceRepo;
+  readonly releases: ReleaseRepo;
   readonly outbox: OutboxRepo;
+}
+
+export interface ReleaseRepo {
+  create(scope: Scope, release: Release): Promise<void>;
+  get(scope: Scope, id: string): Promise<Release | null>;
+  list(scope: Scope): Promise<Release[]>;
+  /** Persists the updated release aggregate (status/publishedAt). */
+  save(scope: Scope, release: Release): Promise<void>;
+  delete(scope: Scope, id: string): Promise<void>;
+  /** Adds (or replaces, by entityId) a member. */
+  addItem(scope: Scope, releaseId: string, item: ReleaseItem): Promise<void>;
+  removeItem(scope: Scope, releaseId: string, entityId: string): Promise<void>;
+  listItems(scope: Scope, releaseId: string): Promise<ReleaseItem[]>;
+}
+
+/** A due scheduled action paired with the scope it belongs to (the worker polls
+ *  across all scopes, so `findDue` carries scope with each record). */
+export interface ScopedScheduledAction {
+  readonly scope: Scope;
+  readonly action: ScheduledAction;
+}
+
+export interface ScheduledActionRepo {
+  create(scope: Scope, action: ScheduledAction): Promise<void>;
+  get(scope: Scope, id: string): Promise<ScheduledAction | null>;
+  list(scope: Scope, query?: { status?: string }): Promise<ScheduledAction[]>;
+  save(scope: Scope, action: ScheduledAction): Promise<void>;
+  /** Pending actions due at/ before `now`, across every scope, oldest first. */
+  findDue(now: string, limit?: number): Promise<ScopedScheduledAction[]>;
 }
 
 /** Space-level configuration needed for validation and locale fallback. */

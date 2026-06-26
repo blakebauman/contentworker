@@ -1,13 +1,19 @@
 import {
+  addEntryToRelease,
   createContentType,
   createEntry,
+  createRelease,
   draftEntry,
   getContentType,
   getPreviewEntry,
+  getRelease,
   listContentTypes,
   listPreviewEntries,
+  listReleases,
   publishContentType,
   publishEntry,
+  publishRelease,
+  scheduleAction,
   semanticSearch,
   unpublishEntry,
   updateEntry,
@@ -246,6 +252,95 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentPublish, scopeOf(args));
       return ok(await unpublishEntry(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  // --- releases & scheduling ---------------------------------------------
+  server.tool(
+    'releases_list',
+    'List releases (entry bundles published together) in a space/environment.',
+    scopeArgs,
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listReleases(ctx, scopeOf(args)));
+    },
+  );
+
+  server.tool(
+    'releases_get',
+    'Get a release with its member entries.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await getRelease(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  server.tool(
+    'releases_create',
+    'Create an open release to group entries for atomic publishing.',
+    { title: z.string(), description: z.string().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await createRelease(ctx, scopeOf(args), {
+          title: args.title,
+          description: args.description,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'releases_add_entry',
+    'Add an entry to an open release, choosing whether it publishes or unpublishes.',
+    {
+      releaseId: z.string(),
+      entryId: z.string(),
+      action: z.enum(['publish', 'unpublish']).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await addEntryToRelease(ctx, scopeOf(args), args.releaseId, {
+          entityId: args.entryId,
+          action: args.action,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'releases_publish',
+    'Ship a release: publish/unpublish every member atomically in one transaction.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      return ok(await publishRelease(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  server.tool(
+    'schedule_action',
+    'Schedule a publish/unpublish of an entry or release for a future ISO-8601 instant.',
+    {
+      action: z.enum(['publish', 'unpublish']),
+      entityType: z.enum(['Entry', 'Release']),
+      entityId: z.string(),
+      scheduledFor: z.string().describe('ISO-8601 instant'),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      return ok(
+        await scheduleAction(ctx, scopeOf(args), {
+          action: args.action,
+          entityType: args.entityType,
+          entityId: args.entityId,
+          scheduledFor: args.scheduledFor,
+        }),
+      );
     },
   );
 
