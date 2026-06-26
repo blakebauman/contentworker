@@ -4,6 +4,7 @@ import {
   autoTagAsset,
   autofillField,
   compareEnvironments,
+  createAIAction,
   createConcept,
   createContentType,
   createEntry,
@@ -19,6 +20,7 @@ import {
   getContentType,
   getPreviewEntry,
   getRelease,
+  listAIActions,
   listAssets,
   listAuditLog,
   listComments,
@@ -36,6 +38,7 @@ import {
   publishRelease,
   resolveTask,
   restoreVersion,
+  runAIAction,
   scheduleAction,
   semanticSearch,
   setAssetMetadata,
@@ -287,6 +290,68 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentWrite, scopeOf(args));
       return ok(await suggestEntryTags(ctx, ai, scopeOf(args), args.id, { apply: args.apply }));
+    },
+  );
+
+  // --- AI Actions (templated, governed operations) -----------------------
+  server.tool(
+    'ai_actions_list',
+    'List the reusable AI Actions defined in a space/environment.',
+    scopeArgs,
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listAIActions(ctx, scopeOf(args)));
+    },
+  );
+
+  server.tool(
+    'ai_action_create',
+    'Create a reusable AI Action: a prompt template with {{variables}} and an ' +
+      'optional targetField the run writes into. Variables are derived from the template.',
+    {
+      name: z.string(),
+      promptTemplate: z.string(),
+      description: z.string().optional(),
+      targetField: z.string().optional(),
+      tier: z.enum(['flagship', 'balanced', 'fast']).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      return ok(
+        await createAIAction(ctx, scopeOf(args), {
+          name: args.name,
+          promptTemplate: args.promptTemplate,
+          description: args.description,
+          targetField: args.targetField,
+          tier: args.tier,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'ai_action_run',
+    'Run a stored AI Action. Pass variables, and/or an entryId whose fields ' +
+      'become {{field.<apiId>}}; apply=true writes the output into the targetField.',
+    {
+      id: z.string(),
+      entryId: z.string().optional(),
+      variables: z.record(z.string()).optional(),
+      locale: z.string().optional(),
+      apply: z.boolean().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await runAIAction(ctx, ai, scopeOf(args), args.id, {
+          entryId: args.entryId,
+          variables: args.variables,
+          locale: args.locale,
+          apply: args.apply,
+        }),
+      );
     },
   );
 

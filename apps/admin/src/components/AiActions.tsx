@@ -1,0 +1,207 @@
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import type { AIAction, ManagementClient, ModelTier } from '../lib/management.js';
+import { useToast } from '../lib/toast.js';
+
+const TIERS: ModelTier[] = ['fast', 'balanced', 'flagship'];
+
+/** Manage reusable AI Actions: create templated prompts, run them, delete. */
+export function AiActions(props: { client: ManagementClient }) {
+  const { client } = props;
+  const toast = useToast();
+  const [actions, setActions] = useState<AIAction[]>([]);
+  const [name, setName] = useState('');
+  const [template, setTemplate] = useState('');
+  const [targetField, setTargetField] = useState('');
+  const [tier, setTier] = useState<ModelTier>('balanced');
+  const [busy, setBusy] = useState(false);
+  const [output, setOutput] = useState<{ id: string; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setActions(await client.listAIActions());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }, [client, toast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await client.createAIAction({
+        name: name.trim(),
+        promptTemplate: template,
+        targetField: targetField.trim() || undefined,
+        tier,
+      });
+      setName('');
+      setTemplate('');
+      setTargetField('');
+      await load();
+      toast.success('AI Action created');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const run = async (action: AIAction) => {
+    const variables: Record<string, string> = {};
+    for (const v of action.variables) {
+      // Field variables are resolved from a target entry, not prompted here.
+      if (v.startsWith('field.')) continue;
+      variables[v] = window.prompt(`Value for {{${v}}}`) ?? '';
+    }
+    try {
+      const r = await client.runAIAction(action.id, { variables });
+      setOutput({ id: action.id, text: r.output });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      await client.deleteAIAction(id);
+      await load();
+      toast.success('Deleted');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <h2 className="font-heading font-medium text-base">New AI Action</h2>
+          <p className="text-muted-foreground text-sm">
+            A reusable prompt template. Reference values with{' '}
+            <code className="text-xs">{'{{variable}}'}</code>; use{' '}
+            <code className="text-xs">{'{{field.apiId}}'}</code> to pull from an entry. Set a target
+            field to write the result back.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={create} className="space-y-3">
+            <div className="flex flex-wrap gap-3">
+              <div className="flex-1 space-y-1.5">
+                <Label htmlFor="action-name">Name</Label>
+                <Input
+                  id="action-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="SEO title"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="action-target">Target field (optional)</Label>
+                <Input
+                  id="action-target"
+                  value={targetField}
+                  onChange={(e) => setTargetField(e.target.value)}
+                  placeholder="title"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Tier</Label>
+                <Select value={tier} onValueChange={(v) => setTier(v as ModelTier)}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIERS.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="action-template">Prompt template</Label>
+              <Textarea
+                id="action-template"
+                value={template}
+                onChange={(e) => setTemplate(e.target.value)}
+                placeholder="Write a concise SEO title for: {{field.body}}"
+                rows={3}
+              />
+            </div>
+            <Button type="submit" disabled={!name.trim() || !template.trim() || busy}>
+              {busy ? 'Creating…' : 'Create action'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      {actions.length === 0 ? (
+        <p className="text-muted-foreground text-sm">No AI Actions yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {actions.map((a) => (
+            <Card key={a.id} size="sm">
+              <CardContent className="space-y-2 pt-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="size-4 text-primary" />
+                      <span className="font-medium">{a.name}</span>
+                      <Badge variant="outline">{a.tier}</Badge>
+                      {a.targetField && <Badge variant="secondary">→ {a.targetField}</Badge>}
+                    </div>
+                    <p className="mt-1 font-mono text-muted-foreground text-xs">
+                      {a.promptTemplate}
+                    </p>
+                    {a.variables.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {a.variables.map((v) => (
+                          <Badge key={v} variant="outline" className="text-[10px]">
+                            {v}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button type="button" variant="outline" size="sm" onClick={() => run(a)}>
+                      Run
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => remove(a.id)}>
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+                {output?.id === a.id && (
+                  <pre className="whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">
+                    {output.text}
+                  </pre>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

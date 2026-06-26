@@ -21,6 +21,8 @@ import {
   runEntryQuery,
 } from '@cw/domain';
 import type {
+  AIActionDefinition,
+  AIActionRepo,
   AgentRunRecord,
   AgentRunRepo,
   AssetRepo,
@@ -677,6 +679,55 @@ function makeAuditRepo(db: Db): AuditRepo {
         status: r.status,
         at: r.at.toISOString(),
       }));
+    },
+  };
+}
+
+function makeAiActionRepo(db: Db): AIActionRepo {
+  const toAction = (r: typeof schema.aiActions.$inferSelect): AIActionDefinition => ({
+    id: r.id,
+    name: r.name,
+    description: r.description ?? undefined,
+    promptTemplate: r.promptTemplate,
+    variables: r.variables,
+    targetField: r.targetField ?? undefined,
+    tier: r.tier,
+    createdAt: r.createdAt.toISOString(),
+  });
+  return {
+    async create(scope, action) {
+      await db.insert(schema.aiActions).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: action.id,
+        name: action.name,
+        description: action.description ?? null,
+        promptTemplate: action.promptTemplate,
+        variables: [...action.variables],
+        targetField: action.targetField ?? null,
+        tier: action.tier,
+        createdAt: new Date(action.createdAt),
+      });
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.aiActions)
+        .where(and(scopeFilter(schema.aiActions, scope), eq(schema.aiActions.id, id)));
+      return row ? toAction(row) : null;
+    },
+    async list(scope) {
+      const rows = await db
+        .select()
+        .from(schema.aiActions)
+        .where(scopeFilter(schema.aiActions, scope))
+        .orderBy(desc(schema.aiActions.createdAt));
+      return rows.map(toAction);
+    },
+    async delete(scope, id) {
+      await db
+        .delete(schema.aiActions)
+        .where(and(scopeFilter(schema.aiActions, scope), eq(schema.aiActions.id, id)));
     },
   };
 }
@@ -1363,6 +1414,7 @@ export function createPostgresStore(
     auth: makeAuthRepo(db),
     agentRuns: makeAgentRunRepo(db),
     audit: makeAuditRepo(db),
+    aiActions: makeAiActionRepo(db),
     releases: makeReleaseRepo(db),
     scheduledActions: makeScheduledActionRepo(db),
     comments: makeCommentRepo(db),
