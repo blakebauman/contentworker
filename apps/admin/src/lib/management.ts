@@ -5,6 +5,12 @@ import type {
   EntryFields,
   FilterOp,
   ReferenceEdge,
+  Release,
+  ReleaseItem,
+  ReleaseWithItems,
+  ScheduledAction,
+  ScheduledActionType,
+  ScheduledEntityType,
 } from '@cw/domain';
 
 /** Connection settings for the Management/Preview APIs (a CMA or admin token). */
@@ -429,6 +435,56 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
         `${mgmt}/webhooks/${encodeURIComponent(id)}/deliveries${qs}`,
       );
       return r.items;
+    },
+
+    // --- releases (bundled atomic publish) -------------------------------
+    async listReleases(): Promise<Release[]> {
+      const r = await req<{ items: Release[] }>('GET', `${mgmt}/releases`);
+      return r.items;
+    },
+    createRelease(input: { title: string; description?: string }): Promise<Release> {
+      return req('POST', `${mgmt}/releases`, input);
+    },
+    getRelease(id: string): Promise<ReleaseWithItems> {
+      return req('GET', `${mgmt}/releases/${encodeURIComponent(id)}`);
+    },
+    deleteRelease(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/releases/${encodeURIComponent(id)}`);
+    },
+    addEntryToRelease(
+      id: string,
+      input: { entityId: string; action?: ReleaseItem['action'] },
+    ): Promise<ReleaseWithItems> {
+      return req('POST', `${mgmt}/releases/${encodeURIComponent(id)}/items`, input);
+    },
+    removeEntryFromRelease(id: string, entityId: string): Promise<ReleaseWithItems> {
+      return req(
+        'DELETE',
+        `${mgmt}/releases/${encodeURIComponent(id)}/items/${encodeURIComponent(entityId)}`,
+      );
+    },
+    /** Ships the bundle — every member publishes/unpublishes in one transaction. */
+    publishRelease(id: string): Promise<ReleaseWithItems> {
+      return req('POST', `${mgmt}/releases/${encodeURIComponent(id)}/published`);
+    },
+
+    // --- scheduled actions -----------------------------------------------
+    async listScheduledActions(status?: string): Promise<ScheduledAction[]> {
+      const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+      const r = await req<{ items: ScheduledAction[] }>('GET', `${mgmt}/scheduled-actions${qs}`);
+      return r.items;
+    },
+    /** Schedules a publish/unpublish of an entry or release at a future instant. */
+    scheduleAction(input: {
+      action: ScheduledActionType;
+      entityType: ScheduledEntityType;
+      entityId: string;
+      scheduledFor: string;
+    }): Promise<ScheduledAction> {
+      return req('POST', `${mgmt}/scheduled-actions`, input);
+    },
+    cancelScheduledAction(id: string): Promise<ScheduledAction> {
+      return req('DELETE', `${mgmt}/scheduled-actions/${encodeURIComponent(id)}`);
     },
   };
 }

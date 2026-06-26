@@ -14,6 +14,7 @@ import { ContentLayout } from './routes/ContentLayout.js';
 import { ContentTypesOverview } from './routes/ContentTypesOverview.js';
 import { EntriesList } from './routes/EntriesList.js';
 import { EntryEditor } from './routes/EntryEditor.js';
+import { Releases } from './routes/Releases.js';
 
 // Thin route wrappers bind the shared client/connection to the leaf components.
 function DashboardRoute() {
@@ -51,6 +52,7 @@ const router = createBrowserRouter([
           { path: ':typeId/:entryId', element: <EntryEditor /> },
         ],
       },
+      { path: 'releases', element: <Releases /> },
       { path: 'media', element: <MediaRoute /> },
       { path: 'settings', element: <SettingsRoute /> },
       { path: 'settings/:section', element: <SettingsRoute /> },
