@@ -54,6 +54,7 @@ export interface ContentStore {
   readonly audit: AuditRepo;
   readonly aiActions: AIActionRepo;
   readonly functions: FunctionRepo;
+  readonly appExtensions: AppExtensionRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -76,6 +77,32 @@ export interface FunctionRepo {
   create(scope: Scope, fn: FunctionDefinition): Promise<void>;
   get(scope: Scope, id: string): Promise<FunctionDefinition | null>;
   list(scope: Scope): Promise<FunctionDefinition[]>;
+  delete(scope: Scope, id: string): Promise<void>;
+}
+
+/**
+ * A UI extension that the admin renders inside a sandboxed iframe. `target`
+ * decides where it mounts — a custom `field-editor` (replacing the built-in
+ * editor for matching `fieldTypes`) or a `sidebar` widget on the entry editor.
+ * The host posts the editing context to the iframe and receives value updates
+ * back over `postMessage`. Env-scoped like content.
+ */
+export interface AppExtension {
+  readonly id: string;
+  readonly name: string;
+  readonly target: 'field-editor' | 'sidebar';
+  /** External page rendered in the iframe. */
+  readonly entryUrl: string;
+  /** For `field-editor`: field types it handles (e.g. `JSON`); empty = any. */
+  readonly fieldTypes?: readonly string[];
+  readonly active: boolean;
+  readonly createdAt: string;
+}
+
+export interface AppExtensionRepo {
+  create(scope: Scope, app: AppExtension): Promise<void>;
+  get(scope: Scope, id: string): Promise<AppExtension | null>;
+  list(scope: Scope): Promise<AppExtension[]>;
   delete(scope: Scope, id: string): Promise<void>;
 }
 

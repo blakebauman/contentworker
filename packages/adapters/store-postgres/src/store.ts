@@ -25,6 +25,8 @@ import type {
   AIActionRepo,
   AgentRunRecord,
   AgentRunRepo,
+  AppExtension,
+  AppExtensionRepo,
   AssetRepo,
   AuditRepo,
   AuthRepo,
@@ -779,6 +781,53 @@ function makeFunctionRepo(db: Db): FunctionRepo {
   };
 }
 
+function makeAppExtensionRepo(db: Db): AppExtensionRepo {
+  const toApp = (r: typeof schema.appExtensions.$inferSelect): AppExtension => ({
+    id: r.id,
+    name: r.name,
+    target: r.target as AppExtension['target'],
+    entryUrl: r.entryUrl,
+    fieldTypes: r.fieldTypes ?? undefined,
+    active: r.active,
+    createdAt: r.createdAt.toISOString(),
+  });
+  return {
+    async create(scope, app) {
+      await db.insert(schema.appExtensions).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: app.id,
+        name: app.name,
+        target: app.target,
+        entryUrl: app.entryUrl,
+        fieldTypes: app.fieldTypes ? [...app.fieldTypes] : null,
+        active: app.active,
+        createdAt: new Date(app.createdAt),
+      });
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.appExtensions)
+        .where(and(scopeFilter(schema.appExtensions, scope), eq(schema.appExtensions.id, id)));
+      return row ? toApp(row) : null;
+    },
+    async list(scope) {
+      const rows = await db
+        .select()
+        .from(schema.appExtensions)
+        .where(scopeFilter(schema.appExtensions, scope))
+        .orderBy(desc(schema.appExtensions.createdAt));
+      return rows.map(toApp);
+    },
+    async delete(scope, id) {
+      await db
+        .delete(schema.appExtensions)
+        .where(and(scopeFilter(schema.appExtensions, scope), eq(schema.appExtensions.id, id)));
+    },
+  };
+}
+
 function makeAuthRepo(db: Db): AuthRepo {
   return {
     async createApiKey(key) {
@@ -1463,6 +1512,7 @@ export function createPostgresStore(
     audit: makeAuditRepo(db),
     aiActions: makeAiActionRepo(db),
     functions: makeFunctionRepo(db),
+    appExtensions: makeAppExtensionRepo(db),
     releases: makeReleaseRepo(db),
     scheduledActions: makeScheduledActionRepo(db),
     comments: makeCommentRepo(db),

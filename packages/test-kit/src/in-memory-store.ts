@@ -27,6 +27,8 @@ import type {
   AIActionRepo,
   AgentRunRecord,
   AgentRunRepo,
+  AppExtension,
+  AppExtensionRepo,
   AssetRepo,
   AuditEntry,
   AuditRepo,
@@ -586,6 +588,24 @@ export class InMemoryContentStore implements ContentStore {
     },
     delete: async (scope, id) => {
       this.functionData.delete(`${scopeKey(scope)}::${id}`);
+    },
+  };
+
+  private readonly appExtensionData = new Map<string, AppExtension>();
+
+  readonly appExtensions: AppExtensionRepo = {
+    create: async (scope, app) => {
+      this.appExtensionData.set(`${scopeKey(scope)}::${app.id}`, app);
+    },
+    get: async (scope, id) => this.appExtensionData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    list: async (scope) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.appExtensionData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v);
+    },
+    delete: async (scope, id) => {
+      this.appExtensionData.delete(`${scopeKey(scope)}::${id}`);
     },
   };
 

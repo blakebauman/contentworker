@@ -261,6 +261,23 @@ export const functions = pgTable(
   (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
 );
 
+/** UI extensions the admin renders in a sandboxed iframe (custom field editors / sidebar widgets). */
+export const appExtensions = pgTable(
+  'app_extensions',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    target: text('target').notNull(),
+    entryUrl: text('entry_url').notNull(),
+    fieldTypes: jsonb('field_types').$type<string[]>(),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
+);
+
 export const webhooks = pgTable('webhooks', {
   id: text('id').primaryKey(),
   spaceId: text('space_id').notNull(),

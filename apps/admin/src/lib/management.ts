@@ -287,6 +287,17 @@ export interface FunctionDefinition {
   readonly createdAt: string;
 }
 
+/** An admin UI extension rendered in a sandboxed iframe. */
+export interface AppExtension {
+  readonly id: string;
+  readonly name: string;
+  readonly target: 'field-editor' | 'sidebar';
+  readonly entryUrl: string;
+  readonly fieldTypes?: readonly string[];
+  readonly active: boolean;
+  readonly createdAt: string;
+}
+
 /** A requested image transformation (query-param URL convention). */
 export interface ImageTransform {
   readonly width?: number;
@@ -565,6 +576,24 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     },
     deleteFunction(id: string): Promise<void> {
       return req('DELETE', `${mgmt}/functions/${encodeURIComponent(id)}`);
+    },
+
+    // --- app extensions (UI extensions) ----------------------------------
+    async listAppExtensions(): Promise<AppExtension[]> {
+      const r = await req<{ items: AppExtension[] }>('GET', `${mgmt}/app-extensions`);
+      return r.items;
+    },
+    createAppExtension(input: {
+      name: string;
+      target: 'field-editor' | 'sidebar';
+      entryUrl: string;
+      fieldTypes?: string[];
+      active?: boolean;
+    }): Promise<AppExtension> {
+      return req('POST', `${mgmt}/app-extensions`, input);
+    },
+    deleteAppExtension(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/app-extensions/${encodeURIComponent(id)}`);
     },
 
     // --- Live Content API (SSE) ------------------------------------------
