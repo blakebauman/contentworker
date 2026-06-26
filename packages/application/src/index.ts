@@ -5,6 +5,8 @@ export * from './content-types.js';
 export * from './entries.js';
 export * from './assets.js';
 export * from './publishing.js';
+export * from './releases.js';
+export * from './scheduling.js';
 export * from './render.js';
 export * from './delivery.js';
 export * from './preview.js';

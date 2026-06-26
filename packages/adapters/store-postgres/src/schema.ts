@@ -214,6 +214,56 @@ export const webhookDeliveries = pgTable(
   (t) => [index('webhook_deliveries_by_webhook').on(t.spaceId, t.webhookId)],
 );
 
+export const releases = pgTable(
+  'releases',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    status: text('status').$type<'open' | 'published' | 'archived'>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
+);
+
+export const releaseItems = pgTable(
+  'release_items',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    releaseId: text('release_id').notNull(),
+    entityType: text('entity_type').$type<'Entry'>().notNull(),
+    entityId: text('entity_id').notNull(),
+    action: text('action').$type<'publish' | 'unpublish'>().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.releaseId, t.entityId] })],
+);
+
+export const scheduledActions = pgTable(
+  'scheduled_actions',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    action: text('action').$type<'publish' | 'unpublish'>().notNull(),
+    entityType: text('entity_type').$type<'Entry' | 'Release'>().notNull(),
+    entityId: text('entity_id').notNull(),
+    scheduledFor: timestamp('scheduled_for', { withTimezone: true }).notNull(),
+    status: text('status').$type<'pending' | 'completed' | 'canceled' | 'failed'>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    executedAt: timestamp('executed_at', { withTimezone: true }),
+    error: text('error'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.spaceId, t.environmentId, t.id] }),
+    // The worker scans for pending actions whose time has arrived.
+    index('scheduled_actions_due').on(t.status, t.scheduledFor),
+  ],
+);
+
 export const outbox = pgTable(
   'outbox',
   {
