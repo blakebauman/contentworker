@@ -15,6 +15,7 @@ import { ContentTypesOverview } from './routes/ContentTypesOverview.js';
 import { EntriesList } from './routes/EntriesList.js';
 import { EntryEditor } from './routes/EntryEditor.js';
 import { Releases } from './routes/Releases.js';
+import { Taxonomy } from './routes/Taxonomy.js';
 import { Workflows } from './routes/Workflows.js';
 
 // Thin route wrappers bind the shared client/connection to the leaf components.
@@ -55,6 +56,7 @@ const router = createBrowserRouter([
       },
       { path: 'releases', element: <Releases /> },
       { path: 'workflows', element: <Workflows /> },
+      { path: 'taxonomy', element: <Taxonomy /> },
       { path: 'media', element: <MediaRoute /> },
       { path: 'settings', element: <SettingsRoute /> },
       { path: 'settings/:section', element: <SettingsRoute /> },
