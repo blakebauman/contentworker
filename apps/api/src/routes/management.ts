@@ -1,17 +1,22 @@
 import {
+  addEntryToRelease,
   agentUsage,
+  cancelScheduledAction,
   createApiKey,
   createAsset,
   createContentType,
   createEntry,
   createEnvironment,
+  createRelease,
   createSpace,
   createWebhook,
+  deleteRelease,
   deleteWebhook,
   draftEntry,
   getAsset,
   getContentType,
   getEntry,
+  getRelease,
   getReverseReferences,
   getSpaceConfig,
   listAgentRuns,
@@ -19,13 +24,18 @@ import {
   listAssets,
   listContentTypes,
   listEnvironments,
+  listReleases,
+  listScheduledActions,
   listSpaces,
   listWebhookDeliveries,
   listWebhooks,
   publishAsset,
   publishContentType,
   publishEntry,
+  publishRelease,
+  removeEntryFromRelease,
   revokeApiKey,
+  scheduleAction,
   unpublishAsset,
   unpublishEntry,
   updateEntry,
@@ -223,6 +233,47 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     });
     return c.json({ items });
   });
+
+  // --- releases -----------------------------------------------------------
+  // Bundle entries and ship them atomically. Authoring (create/add/remove) is a
+  // write; shipping the bundle requires publish.
+  app.get(`${BASE}/releases`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listReleases(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/releases`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await createRelease(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.get(`${BASE}/releases/:id`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(await getRelease(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  app.delete(`${BASE}/releases/:id`, requireScope(SCOPES.contentWrite), async (c) => {
+    await deleteRelease(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+  app.post(`${BASE}/releases/:id/items`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await addEntryToRelease(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+  );
+  app.delete(`${BASE}/releases/:id/items/:entityId`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(
+      await removeEntryFromRelease(ctx, scopeOf(c), c.req.param('id'), c.req.param('entityId')),
+    ),
+  );
+  app.post(`${BASE}/releases/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await publishRelease(ctx, scopeOf(c), c.req.param('id'))),
+  );
+
+  // --- scheduled actions --------------------------------------------------
+  app.get(`${BASE}/scheduled-actions`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({
+      items: await listScheduledActions(ctx, scopeOf(c), { status: c.req.query('status') }),
+    }),
+  );
+  app.post(`${BASE}/scheduled-actions`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await scheduleAction(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.delete(`${BASE}/scheduled-actions/:id`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await cancelScheduledAction(ctx, scopeOf(c), c.req.param('id'))),
+  );
 
   return app;
 }

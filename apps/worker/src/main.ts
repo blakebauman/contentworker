@@ -14,6 +14,7 @@ import {
   dispatchEvent,
   recordAgentRun,
   relayOutbox,
+  runDueScheduledActions,
 } from '@cw/application';
 import type { DomainEvent } from '@cw/domain';
 import type { AIProvider, Clock, EmbeddingsProvider, IdGenerator } from '@cw/ports';
@@ -31,6 +32,7 @@ if (!databaseUrl) throw new Error('DATABASE_URL is required');
 if (!redisUrl) throw new Error('REDIS_URL is required');
 
 const RELAY_INTERVAL_MS = Number(process.env.RELAY_INTERVAL_MS ?? 1000);
+const SCHEDULE_INTERVAL_MS = Number(process.env.SCHEDULE_INTERVAL_MS ?? 5000);
 
 const clock: Clock = { now: () => new Date() };
 const ids: IdGenerator = { newId: () => uuidv7() };
@@ -126,6 +128,18 @@ async function main() {
   };
   setInterval(tick, RELAY_INTERVAL_MS);
   logger.info({ intervalMs: RELAY_INTERVAL_MS }, 'worker relaying outbox');
+
+  // Scheduled-actions loop: fire any publish/unpublish whose time has arrived.
+  const scheduleTick = async () => {
+    try {
+      const { executed, failed } = await runDueScheduledActions(ctx);
+      if (executed > 0 || failed > 0) logger.info({ executed, failed }, 'scheduled actions run');
+    } catch (err) {
+      logger.error({ err }, 'scheduled actions error');
+    }
+  };
+  setInterval(scheduleTick, SCHEDULE_INTERVAL_MS);
+  logger.info({ intervalMs: SCHEDULE_INTERVAL_MS }, 'worker running scheduled actions');
 }
 
 main().catch((err) => {

@@ -6,6 +6,8 @@ import {
   type Entry,
   type EntryVersion,
   type ReferenceEdge,
+  type Release,
+  type ReleaseItem,
   type Scope,
   type Webhook,
   matchesTopic,
@@ -27,6 +29,9 @@ import type {
   PublishedAsset,
   PublishedEntry,
   ReferenceRepo,
+  ReleaseRepo,
+  ScheduledActionRepo,
+  ScopedScheduledAction,
   SpaceConfig,
   SpaceRepo,
   WebhookDeliveryRecord,
@@ -309,6 +314,72 @@ export class InMemoryContentStore implements ContentStore {
     },
   };
 
+  private readonly releaseData = new Map<string, Release>();
+  private readonly releaseItemData = new Map<string, ReleaseItem[]>();
+
+  readonly releases: ReleaseRepo = {
+    create: async (scope, release) => {
+      this.releaseData.set(`${scopeKey(scope)}::${release.id}`, release);
+      this.releaseItemData.set(`${scopeKey(scope)}::${release.id}`, []);
+    },
+    get: async (scope, id) => this.releaseData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    list: async (scope) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.releaseData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v);
+    },
+    save: async (scope, release) => {
+      this.releaseData.set(`${scopeKey(scope)}::${release.id}`, release);
+    },
+    delete: async (scope, id) => {
+      this.releaseData.delete(`${scopeKey(scope)}::${id}`);
+      this.releaseItemData.delete(`${scopeKey(scope)}::${id}`);
+    },
+    addItem: async (scope, releaseId, item) => {
+      const key = `${scopeKey(scope)}::${releaseId}`;
+      const items = (this.releaseItemData.get(key) ?? []).filter(
+        (i) => i.entityId !== item.entityId,
+      );
+      items.push(item);
+      this.releaseItemData.set(key, items);
+    },
+    removeItem: async (scope, releaseId, entityId) => {
+      const key = `${scopeKey(scope)}::${releaseId}`;
+      this.releaseItemData.set(
+        key,
+        (this.releaseItemData.get(key) ?? []).filter((i) => i.entityId !== entityId),
+      );
+    },
+    listItems: async (scope, releaseId) =>
+      this.releaseItemData.get(`${scopeKey(scope)}::${releaseId}`) ?? [],
+  };
+
+  private readonly scheduledActionData = new Map<string, ScopedScheduledAction>();
+
+  readonly scheduledActions: ScheduledActionRepo = {
+    create: async (scope, action) => {
+      this.scheduledActionData.set(`${scopeKey(scope)}::${action.id}`, { scope, action });
+    },
+    get: async (scope, id) =>
+      this.scheduledActionData.get(`${scopeKey(scope)}::${id}`)?.action ?? null,
+    list: async (scope, query) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.scheduledActionData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v.action)
+        .filter((a) => !query?.status || a.status === query.status);
+    },
+    save: async (scope, action) => {
+      this.scheduledActionData.set(`${scopeKey(scope)}::${action.id}`, { scope, action });
+    },
+    findDue: async (now, limit = 100) =>
+      [...this.scheduledActionData.values()]
+        .filter((r) => r.action.status === 'pending' && r.action.scheduledFor <= now)
+        .sort((a, b) => (a.action.scheduledFor < b.action.scheduledFor ? -1 : 1))
+        .slice(0, limit),
+  };
+
   readonly outbox: OutboxRepo = {
     append: async (event) => {
       this.outboxData.push({ event, relayed: false });
@@ -326,14 +397,53 @@ export class InMemoryContentStore implements ContentStore {
     },
   };
 
+  /** The collections a transaction can mutate, for snapshot/rollback. */
+  private txCollections(): Map<string, unknown>[] {
+    return [
+      this.contentTypeData,
+      this.entryData,
+      this.versionData,
+      this.publishedData,
+      this.assetData,
+      this.publishedAssetData,
+      this.referenceData,
+      this.releaseData,
+      this.releaseItemData,
+    ] as Map<string, unknown>[];
+  }
+
+  /**
+   * Runs `fn` with rollback: the Postgres adapter rolls back on a thrown error,
+   * so the fake snapshots every transactional collection up front and restores
+   * it if `fn` throws — giving tests real all-or-nothing semantics (e.g. a
+   * release that fails mid-publish leaves nothing published).
+   */
   async withTransaction<T>(fn: (tx: ContentStoreTx) => Promise<T>): Promise<T> {
-    return fn({
-      contentTypes: this.contentTypes,
-      entries: this.entries,
-      assets: this.assets,
-      references: this.references,
-      outbox: this.outbox,
-    });
+    // Stored values are plain JSON data, so a JSON round-trip deep-clones them
+    // (defeating in-place array mutation that a shallow Map copy would miss).
+    const clone = <V>(v: V): V => JSON.parse(JSON.stringify(v)) as V;
+    const snapshot = this.txCollections().map(
+      (m) => [m, [...m.entries()].map(([k, v]) => [k, clone(v)] as const)] as const,
+    );
+    const outboxSnapshot = [...this.outboxData];
+    try {
+      return await fn({
+        contentTypes: this.contentTypes,
+        entries: this.entries,
+        assets: this.assets,
+        references: this.references,
+        releases: this.releases,
+        outbox: this.outbox,
+      });
+    } catch (err) {
+      for (const [m, entries] of snapshot) {
+        m.clear();
+        for (const [k, v] of entries) m.set(k, v);
+      }
+      this.outboxData.length = 0;
+      this.outboxData.push(...outboxSnapshot);
+      throw err;
+    }
   }
 
   // ---- test helpers -------------------------------------------------------
