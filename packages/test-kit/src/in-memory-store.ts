@@ -50,6 +50,7 @@ export class InMemoryContentStore implements ContentStore {
 
   readonly spaces: SpaceRepo = {
     getConfig: async (scope) => this.spaceConfigs.get(scope.spaceId) ?? null,
+    list: async () => [...this.spaceConfigs.values()],
     create: async (config) => {
       this.spaceConfigs.set(config.spaceId, config);
     },

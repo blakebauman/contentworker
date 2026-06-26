@@ -159,6 +159,25 @@ describe('API vertical slice over HTTP', () => {
     expect(ok.status).toBe(201);
   });
 
+  it('lists spaces scoped to the principal: admin sees all, a scoped key sees its own', async () => {
+    const app = makeApp();
+    await app.request('/spaces', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer admin', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spaceId: 's2', name: 'Two', defaultLocale: 'en-US' }),
+    });
+    const adminList = (await (await app.request('/spaces', { headers: cma })).json()) as {
+      items: { id: string }[];
+    };
+    // The dev "cma" key is scoped to s1, so it only sees s1.
+    expect(adminList.items.map((s) => s.id)).toEqual(['s1']);
+
+    const all = (await (
+      await app.request('/spaces', { headers: { Authorization: 'Bearer admin' } })
+    ).json()) as { items: { id: string }[] };
+    expect(all.items.map((s) => s.id).sort()).toEqual(['s1', 's2']);
+  });
+
   it('returns 422 on invalid content', async () => {
     const app = makeApp();
     await app.request(`${M}/content-types`, {

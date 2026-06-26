@@ -116,6 +116,8 @@ export interface Environment {
 
 export interface SpaceRepo {
   getConfig(scope: Scope): Promise<SpaceConfig | null>;
+  /** All spaces (admin/provisioning view). */
+  list(): Promise<SpaceConfig[]>;
   /** Creates (or replaces) a space's configuration. */
   create(config: SpaceConfig): Promise<void>;
   /** Registers an environment (branch) within a space. */

@@ -1,4 +1,3 @@
-import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -7,14 +6,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useClient } from '../../lib/client-context.js';
 import { EnvironmentSwitcher } from './EnvironmentSwitcher.js';
+import { SpaceMenu } from './SpaceMenu.js';
 
 /**
- * Topbar controls for the active space / environment / locale. The space is a
- * chip linking to /settings/connection; the environment is a branch switcher;
- * the locale is a Select populated from the space's configured locales.
+ * Topbar controls for the active space / environment / locale: a space switcher,
+ * an environment (branch) switcher, and a locale Select from the space's config.
  */
 export function SpaceSwitcher() {
   const { conn, updateConn, client } = useClient();
@@ -36,11 +34,7 @@ export function SpaceSwitcher() {
 
   return (
     <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm" title="Space settings">
-        <Link to="/settings/connection">
-          <span className="font-medium">{conn.space || 'no space'}</span>
-        </Link>
-      </Button>
+      <SpaceMenu />
       <EnvironmentSwitcher />
       <Select value={conn.locale} onValueChange={(locale) => updateConn({ locale })}>
         <SelectTrigger size="sm" className="w-28" aria-label="Locale">

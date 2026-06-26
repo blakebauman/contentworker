@@ -32,6 +32,12 @@ export interface EntryView {
   readonly fields: EntryFields;
 }
 
+/** A space the principal can access (id + display name). */
+export interface SpaceRef {
+  readonly id: string;
+  readonly name: string;
+}
+
 /** An environment (branch) within a space. */
 export interface Environment {
   readonly id: string;
@@ -172,6 +178,20 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
   return {
     getSpaceConfig(): Promise<SpaceConfig> {
       return req('GET', `${mgmt}/space-config`);
+    },
+    /** Spaces the current token can reach (admin → all; a scoped key → its own). */
+    async listSpaces(): Promise<SpaceRef[]> {
+      const r = await req<{ items: SpaceRef[] }>('GET', `${root}/spaces`);
+      return r.items;
+    },
+    /** Provision a new space (requires the admin token). */
+    createSpace(input: {
+      spaceId: string;
+      name: string;
+      defaultLocale: string;
+      locales?: string[];
+    }): Promise<SpaceRef> {
+      return req('POST', `${root}/spaces`, input);
     },
     /** Environments (branches) in the current space. */
     async listEnvironments(): Promise<Environment[]> {

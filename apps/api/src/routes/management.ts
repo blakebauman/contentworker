@@ -19,6 +19,7 @@ import {
   listAssets,
   listContentTypes,
   listEnvironments,
+  listSpaces,
   listWebhookDeliveries,
   listWebhooks,
   publishAsset,
@@ -65,9 +66,24 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.use('/spaces/*', principalMiddleware(deps));
 
   // --- provisioning (admin) ----------------------------------------------
+  // Authenticated principals see the spaces they can reach: admin → all,
+  // a scoped key → just its own. (No requireScope: there is no :space here.)
+  app.get('/spaces', async (c) => {
+    const principal = c.get('principal');
+    if (principal.spaceId === '*') {
+      const items = await listSpaces(ctx);
+      return c.json({ items: items.map((s) => ({ id: s.spaceId, name: s.name })) });
+    }
+    const cfg = await ctx.store.spaces.getConfig({
+      spaceId: principal.spaceId,
+      environmentId: 'main',
+    });
+    return c.json({ items: cfg ? [{ id: cfg.spaceId, name: cfg.name }] : [] });
+  });
   app.post('/spaces', requireScope(SCOPES.spaceAdmin), async (c) => {
     const body = await c.req.json();
-    return c.json(await createSpace(ctx, body), 201);
+    const created = await createSpace(ctx, body);
+    return c.json({ id: created.spaceId, name: created.name }, 201);
   });
 
   app.get('/spaces/:space/environments', requireScope(SCOPES.previewRead), async (c) =>
