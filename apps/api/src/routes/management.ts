@@ -5,6 +5,8 @@ import {
   auditEntry,
   autoTagAsset,
   autofillField,
+  bulkCreateEntries,
+  bulkEntryAction,
   cancelScheduledAction,
   compareEnvironments,
   createAIAction,
@@ -322,6 +324,20 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       ),
     ),
   );
+  // --- bulk operations ---------------------------------------------------
+  app.post(`${BASE}/bulk/entries`, requireScope(SCOPES.contentWrite), async (c) => {
+    const body = await c.req.json();
+    return c.json(await bulkCreateEntries(ctx, scopeOf(c), body.items ?? []), 201);
+  });
+  app.post(`${BASE}/bulk/entries/publish`, requireScope(SCOPES.contentPublish), async (c) => {
+    const body = await c.req.json();
+    return c.json(await bulkEntryAction(ctx, scopeOf(c), 'publish', body.ids ?? []));
+  });
+  app.post(`${BASE}/bulk/entries/unpublish`, requireScope(SCOPES.contentPublish), async (c) => {
+    const body = await c.req.json();
+    return c.json(await bulkEntryAction(ctx, scopeOf(c), 'unpublish', body.ids ?? []));
+  });
+
   // --- agent actions (audit → work packages) -----------------------------
   app.post(`${BASE}/entries/:id/audit`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(
