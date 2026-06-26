@@ -12,6 +12,7 @@ import { SCOPES, type Scope } from '@cw/domain';
 import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '@cw/graphql-gen';
 import { type GraphQLSchema, graphql } from 'graphql';
 import { type Context, Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import {
   type AuthDeps,
   type AuthVars,
@@ -30,7 +31,7 @@ const BASE = '/delivery/:space/:env';
 
 /** Delivery API (CDA): read-only published content. Requires delivery:read. */
 export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
-  const { ctx, rag } = deps;
+  const { ctx, rag, bus } = deps;
   const app = new Hono<AuthVars>();
   app.use(`${BASE}/*`, principalMiddleware(deps));
   app.use(`${BASE}/*`, environmentMiddleware(deps));
@@ -75,6 +76,31 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.get(`${BASE}/assets/:id`, requireScope(SCOPES.deliveryRead), async (c) =>
     c.json(await getPublishedAsset(ctx, scopeOf(c), c.req.param('id'))),
   );
+
+  // Live Content API: an SSE stream of published-content changes for this scope.
+  // Optional ?types=entry.published,entry.unpublished filters the event types.
+  app.get(`${BASE}/live`, requireScope(SCOPES.deliveryRead), (c) => {
+    const scope = scopeOf(c);
+    const types = (c.req.query('types') ?? '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    return streamSSE(c, async (stream) => {
+      const sub = bus.subscribe('*', async (event) => {
+        if (event.scope.spaceId !== scope.spaceId) return;
+        if (event.scope.environmentId !== scope.environmentId) return;
+        if (types.length > 0 && !types.includes(event.type)) return;
+        await stream.writeSSE({ event: event.type, id: event.id, data: JSON.stringify(event) });
+      });
+      stream.onAbort(() => void sub.close());
+      // Heartbeat so proxies keep the connection open until the client leaves.
+      while (!stream.aborted) {
+        await stream.writeSSE({ event: 'ping', data: '' });
+        await stream.sleep(15000);
+      }
+      await sub.close();
+    });
+  });
 
   // Resolves a transformed-image URL for a published asset (resize/crop/format/
   // quality, focal-point-aware) and redirects to it, so it can back an <img src>.

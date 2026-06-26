@@ -1,5 +1,5 @@
 import type { AppContext, RagDeps } from '@cw/application';
-import type { AIProvider, BlobStore } from '@cw/ports';
+import type { AIProvider, BlobStore, EventBus } from '@cw/ports';
 import { Hono } from 'hono';
 import type { AuthDeps } from './auth.js';
 import { sha256Hasher } from './auth.js';
@@ -8,6 +8,12 @@ import { onError } from './http.js';
 import { deliveryRoutes } from './routes/delivery.js';
 import { managementRoutes } from './routes/management.js';
 import { previewRoutes } from './routes/preview.js';
+
+/** A bus that never emits — the Live Content API then yields only keepalives. */
+const noopBus: EventBus = {
+  publish: async () => {},
+  subscribe: () => ({ close: async () => {} }),
+};
 
 /**
  * Builds the HTTP app. The ROLE config gates which modules mount; every module
@@ -19,6 +25,7 @@ export function createApp(
   rag: RagDeps,
   blob: BlobStore,
   ai: AIProvider,
+  bus: EventBus = noopBus,
 ): Hono {
   const app = new Hono();
   app.onError(onError);
@@ -33,6 +40,7 @@ export function createApp(
     rag,
     blob,
     ai,
+    bus,
   };
 
   const mountManagement = config.role === 'all' || config.role === 'management';

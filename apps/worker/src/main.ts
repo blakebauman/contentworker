@@ -3,7 +3,7 @@ import {
   createAzureOpenAIEmbeddings,
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
-import { createRedisCache, createRedisQueue } from '@cw/adapter-redis';
+import { createRedisCache, createRedisEventBus, createRedisQueue } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { type AgentRuntime, InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
@@ -68,6 +68,8 @@ async function main() {
   const connection = new Redis(redisUrl as string, { maxRetriesPerRequest: null });
   const queue = createRedisQueue(connection);
   const cache = createRedisCache(connection);
+  // Dedicated connection for the Live Content API fan-out (pub/sub).
+  const bus = createRedisEventBus(new Redis(redisUrl as string, { maxRetriesPerRequest: null }));
   const sender = createWebhookSender();
   const rag = makeRag(databaseUrl as string);
   const ctx: AppContext = { store, clock, ids, cache };
@@ -85,6 +87,8 @@ async function main() {
       async () => {
         try {
           await dispatchEvent(ctx, { sender, cache, rag }, ev);
+          // Fan out to Live Content API subscribers (best-effort, never blocks).
+          await bus.publish(ev).catch((err) => logger.error({ err }, 'live publish error'));
           if (agents && ev.type === 'entry.published') {
             const r = await withSpan(
               'agent.enrich',

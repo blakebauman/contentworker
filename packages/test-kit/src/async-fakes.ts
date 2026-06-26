@@ -2,6 +2,7 @@ import type { DomainEvent, Webhook } from '@cw/domain';
 import type {
   AIProvider,
   Cache,
+  EventBus,
   GenerateRequest,
   GenerateResult,
   Queue,
@@ -39,6 +40,33 @@ export class InMemoryQueue implements Queue {
 
   get depth(): number {
     return this.jobs.length;
+  }
+}
+
+/**
+ * An in-memory EventBus with synchronous fan-out — for tests and single-process
+ * dev. Mirrors the Redis pub/sub adapter's matching ('*' = all, trailing '*' =
+ * prefix on the event type).
+ */
+export class InMemoryEventBus implements EventBus {
+  private handlers: { pattern: string; handler: (e: DomainEvent) => Promise<void> }[] = [];
+
+  async publish(event: DomainEvent): Promise<void> {
+    for (const h of this.handlers) {
+      if (this.matches(h.pattern, event.type)) await h.handler(event);
+    }
+  }
+
+  subscribe(pattern: string, handler: (event: DomainEvent) => Promise<void>): Subscription {
+    const entry = { pattern, handler };
+    this.handlers.push(entry);
+    return { close: async () => void (this.handlers = this.handlers.filter((h) => h !== entry)) };
+  }
+
+  private matches(pattern: string, type: string): boolean {
+    if (!pattern || pattern === '*') return true;
+    if (pattern.endsWith('*')) return type.startsWith(pattern.slice(0, -1));
+    return pattern === type;
   }
 }
 

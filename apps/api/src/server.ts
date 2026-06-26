@@ -8,7 +8,7 @@ import { wire } from './wire.js';
 startTelemetry('cw-api');
 
 const config = loadConfig();
-const { ctx, rag, blob, ai } = wire(config);
+const { ctx, rag, blob, ai, bus } = wire(config);
 
 // Bootstrap dev data (space + keys + demo content) when SEED_DEV is set — the
 // in-memory store already seeds, so this matters for a real database.
@@ -19,7 +19,7 @@ if (config.seedDev) {
   });
 }
 
-const app = createApp(ctx, config, rag, blob, ai);
+const app = createApp(ctx, config, rag, blob, ai, bus);
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   const backend = config.databaseUrl ? 'postgres' : 'in-memory store';
