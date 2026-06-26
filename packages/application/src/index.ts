@@ -24,6 +24,7 @@ export * from './generation.js';
 export * from './content-ai.js';
 export * from './ai-actions.js';
 export * from './rag.js';
+export * from './semantics.js';
 export * from './agent-audit.js';
 export * from './events/relay.js';
 export * from './events/dispatch.js';

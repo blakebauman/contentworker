@@ -15,6 +15,7 @@ import {
   deleteEnvironmentAlias,
   diffVersions,
   draftEntry,
+  findDuplicates,
   generateAltText,
   getAssetUsage,
   getContentType,
@@ -36,6 +37,7 @@ import {
   publishContentType,
   publishEntry,
   publishRelease,
+  relatedEntries,
   resolveTask,
   restoreVersion,
   runAIAction,
@@ -184,6 +186,32 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.searchRead, scopeOf(args));
       return ok(await semanticSearch(rag, scopeOf(args), args.query, { topK: args.topK }));
+    },
+  );
+
+  server.tool(
+    'content_related',
+    'Find entries semantically related to a given entry (vector similarity).',
+    { id: z.string(), topK: z.number().int().positive().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.searchRead, scopeOf(args));
+      return ok(await relatedEntries(rag, ctx, scopeOf(args), args.id, { topK: args.topK }));
+    },
+  );
+
+  server.tool(
+    'content_duplicates',
+    'Detect near-duplicate entries for a given entry (high similarity threshold).',
+    {
+      id: z.string(),
+      threshold: z.number().min(0).max(1).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.searchRead, scopeOf(args));
+      return ok(
+        await findDuplicates(rag, ctx, scopeOf(args), args.id, { threshold: args.threshold }),
+      );
     },
   );
 

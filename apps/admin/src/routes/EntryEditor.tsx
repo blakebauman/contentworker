@@ -3,6 +3,7 @@ import { CollaborationPanel } from '@/components/CollaborationPanel';
 import { EntryMetadataPanel } from '@/components/EntryMetadataPanel';
 import { PageHeader } from '@/components/PageHeader';
 import { ReferencedBy } from '@/components/ReferencedBy';
+import { SemanticPanel } from '@/components/SemanticPanel';
 import { VersionHistory } from '@/components/VersionHistory';
 import { Button } from '@/components/ui/button';
 import type { EntryFields } from '@cw/domain';
@@ -173,6 +174,7 @@ export function EntryEditor() {
             />
           )}
           <ReferencedBy id={entryId} types={types} />
+          <SemanticPanel entryId={entryId} />
         </div>
       )}
     </div>
