@@ -6,7 +6,7 @@ both the HTTP API and the MCP server — because both resolve a `Principal` and 
 
 ## API key kinds
 
-Mirroring Contentful's split (`ApiKeyKind`):
+The three key kinds (`ApiKeyKind`):
 
 | Kind | Name | Purpose |
 | --- | --- | --- |

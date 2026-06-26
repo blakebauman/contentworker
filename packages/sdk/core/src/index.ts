@@ -34,7 +34,7 @@ export interface ClientOptions {
   readonly cacheTtlMs?: number;
 }
 
-/** Comparison operators for a field-level filter (Contentful-style). */
+/** Comparison operators for a field-level filter. */
 export type FilterOp =
   | 'eq'
   | 'ne'

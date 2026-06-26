@@ -1,6 +1,5 @@
 /**
- * Structured rich text — a Contentful-style document tree (a close cousin of
- * Portable Text / ADF). A value is a `document` node whose `content` is a tree
+ * Structured rich text — a document tree. A value is a `document` node whose `content` is a tree
  * of block and inline nodes. Text lives in `text` nodes carrying `marks`
  * (bold/italic/…); entries and assets are embedded or linked through nodes that
  * carry a `data.target` link, so the reference graph can be extracted from rich

@@ -10,8 +10,8 @@ export type ImageFit = 'clip' | 'crop' | 'fill' | 'max' | 'scale';
 export type ImageFormat = 'jpg' | 'png' | 'webp' | 'avif';
 
 /**
- * A requested image transformation. Mirrors the Imgix/Sanity URL-API
- * convention so any compatible image CDN can serve it from the source URL.
+ * A requested image transformation. Uses a query-param URL convention so any
+ * compatible image CDN can serve it from the source URL.
  */
 export interface ImageTransform {
   readonly width?: number;
@@ -46,8 +46,8 @@ function validate(transform: ImageTransform): void {
 }
 
 /**
- * Builds a transform URL from a source image URL by appending Imgix/Sanity-style
- * query params. When the fit is `crop` and a focal point is known, the crop is
+ * Builds a transform URL from a source image URL by appending query params
+ * (`w`, `h`, `fit`, `fm`, `q`). When the fit is `crop` and a focal point is known, the crop is
  * anchored to that point. Pure — no validation, no I/O.
  */
 export function buildImageUrl(

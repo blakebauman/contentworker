@@ -97,7 +97,7 @@ describe('query language parity across REST, GraphQL and SDK', () => {
     app = await seed();
   });
 
-  it('REST: field filter via Contentful-style params', async () => {
+  it('REST: field filter via field-level params', async () => {
     expect(await restTitles(app, 'fields.views[gt]=40&order=fields.views')).toEqual([
       'Bravo',
       'Charlie',
