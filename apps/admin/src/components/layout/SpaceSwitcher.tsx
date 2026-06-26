@@ -9,10 +9,11 @@ import {
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useClient } from '../../lib/client-context.js';
+import { EnvironmentSwitcher } from './EnvironmentSwitcher.js';
 
 /**
- * Topbar control for the active space/environment/locale. Space + environment
- * are configured on /settings/connection (shown here as a chip linking there);
+ * Topbar controls for the active space / environment / locale. The space is a
+ * chip linking to /settings/connection; the environment is a branch switcher;
  * the locale is a Select populated from the space's configured locales.
  */
 export function SpaceSwitcher() {
@@ -35,12 +36,12 @@ export function SpaceSwitcher() {
 
   return (
     <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm" title="Change space / environment">
+      <Button asChild variant="outline" size="sm" title="Space settings">
         <Link to="/settings/connection">
           <span className="font-medium">{conn.space || 'no space'}</span>
-          <span className="text-muted-foreground">/{conn.environment || 'main'}</span>
         </Link>
       </Button>
+      <EnvironmentSwitcher />
       <Select value={conn.locale} onValueChange={(locale) => updateConn({ locale })}>
         <SelectTrigger size="sm" className="w-28" aria-label="Locale">
           <SelectValue />
