@@ -5,10 +5,11 @@ import {
   createSpace,
   getContentType,
   getSpaceConfig,
+  listAgentRuns,
   publishContentType,
   publishEntry,
 } from '@cw/application';
-import { type ApiKeyKind, scopesForKind } from '@cw/domain';
+import { type ApiKeyKind, type Scope, scopesForKind } from '@cw/domain';
 import { logger } from '@cw/telemetry';
 import { sha256Hasher } from './auth.js';
 import type { ApiConfig } from './config.js';
@@ -96,6 +97,48 @@ export async function seedDev(ctx: AppContext, config: ApiConfig): Promise<void>
     await publishEntry(ctx, scope, view.entry.id);
     logger.info('seed: created demo article + sample entry');
   }
+
+  // 4. Sample agent runs so the dashboard's usage charts aren't empty on a
+  //    fresh stack. Skip once any run exists (keeps the seed idempotent).
+  if ((await listAgentRuns(ctx, scope, { limit: 1 })).length === 0) {
+    await seedAgentRuns(ctx, scope);
+  }
+}
+
+/**
+ * Records a deterministic spread of agent runs across the last 14 days so the
+ * dashboard's usage-trend, throughput, and per-workflow cards render real-looking
+ * data in dev/demo. Timestamps are backdated off the injected clock; tokens and
+ * statuses follow a fixed pattern (no randomness) for reproducible demos.
+ */
+async function seedAgentRuns(ctx: AppContext, scope: Scope): Promise<void> {
+  const now = ctx.clock.now();
+  const workflows = ['enrich', 'moderate', 'generate'] as const;
+  const statuses = ['completed', 'completed', 'completed', 'needs_review', 'held'] as const;
+
+  let n = 0;
+  for (let day = 13; day >= 0; day--) {
+    // 0–3 runs per day, denser toward the present so week-over-week trends up.
+    const count = Math.max(0, Math.round(3 - day / 5 + (day % 2 === 0 ? 1 : 0)) % 4);
+    for (let k = 0; k < count; k++) {
+      const created = new Date(now);
+      created.setDate(created.getDate() - day);
+      created.setHours(9 + k * 3, 15, 0, 0);
+      const workflow = workflows[n % workflows.length]!;
+      await ctx.store.agentRuns.record(scope, {
+        id: ctx.ids.newId(),
+        workflow,
+        entryId: '',
+        status: statuses[n % statuses.length]!,
+        decisions: [`${workflow} pass ${n + 1}`],
+        inputTokens: 420 + ((n * 137) % 900),
+        outputTokens: 130 + ((n * 71) % 380),
+        createdAt: created.toISOString(),
+      });
+      n++;
+    }
+  }
+  logger.info({ runs: n }, 'seed: created sample agent runs');
 }
 
 async function spaceExists(ctx: AppContext, scope: { spaceId: string; environmentId: string }) {
