@@ -1,11 +1,13 @@
 import { AiAssistPanel } from '@/components/AiAssistPanel';
 import { CollaborationPanel } from '@/components/CollaborationPanel';
 import { EntryMetadataPanel } from '@/components/EntryMetadataPanel';
+import { ExtensionFrame } from '@/components/ExtensionFrame';
 import { PageHeader } from '@/components/PageHeader';
 import { ReferencedBy } from '@/components/ReferencedBy';
 import { SemanticPanel } from '@/components/SemanticPanel';
 import { VersionHistory } from '@/components/VersionHistory';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { EntryFields } from '@cw/domain';
 import { Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -14,7 +16,7 @@ import type { Pickers } from '../components/EntryForm.js';
 import { EntryForm } from '../components/EntryForm.js';
 import { GenerateEntryDialog } from '../components/GenerateEntryDialog.js';
 import { useClient } from '../lib/client-context.js';
-import type { ModelTier } from '../lib/management.js';
+import type { AppExtension, ModelTier } from '../lib/management.js';
 import { useToast } from '../lib/toast.js';
 import { useContentOutlet } from './content-context.js';
 
@@ -33,6 +35,7 @@ export function EntryEditor() {
   const [initial, setInitial] = useState<EntryFields | null>(isEdit ? null : {});
   const [meta, setMeta] = useState<{ version: number; status: string } | null>(null);
   const [pickers, setPickers] = useState<Pickers>({ entries: [], assets: [] });
+  const [extensions, setExtensions] = useState<AppExtension[]>([]);
   const [genOpen, setGenOpen] = useState(false);
   // Bumped after a generation/restore to re-seed the form (EntryForm reads `initial` once).
   const [formKey, setFormKey] = useState(0);
@@ -91,6 +94,22 @@ export function EntryEditor() {
     };
   }, [client, types, conn.locale]);
 
+  // Load installed UI extensions (sidebar widgets + custom field editors).
+  useEffect(() => {
+    let live = true;
+    client
+      .listAppExtensions()
+      .then((items) => {
+        if (live) setExtensions(items.filter((e) => e.active));
+      })
+      .catch(() => {
+        /* extensions are optional; the editor works without them */
+      });
+    return () => {
+      live = false;
+    };
+  }, [client]);
+
   const save = (fields: EntryFields) =>
     run(async () => {
       if (!selectedType) return;
@@ -137,6 +156,13 @@ export function EntryEditor() {
           locales={locales}
           defaultLocale={defaultLocale}
           pickers={pickers}
+          fieldEditors={extensions.filter((e) => e.target === 'field-editor')}
+          entryContext={{
+            spaceId: conn.space,
+            environmentId: conn.environment,
+            entryId,
+            contentType: selectedType.apiId,
+          }}
           busy={busy}
           onSave={save}
           onCancel={() => navigate(backTo)}
@@ -175,6 +201,27 @@ export function EntryEditor() {
           )}
           <ReferencedBy id={entryId} types={types} />
           <SemanticPanel entryId={entryId} />
+          {extensions
+            .filter((e) => e.target === 'sidebar')
+            .map((ext) => (
+              <Card key={ext.id}>
+                <CardHeader>
+                  <h2 className="font-heading font-medium text-base">{ext.name}</h2>
+                </CardHeader>
+                <CardContent>
+                  <ExtensionFrame
+                    extension={ext}
+                    context={{
+                      target: 'sidebar',
+                      spaceId: conn.space,
+                      environmentId: conn.environment,
+                      entryId,
+                      contentType: selectedType.apiId,
+                    }}
+                  />
+                </CardContent>
+              </Card>
+            ))}
         </div>
       )}
     </div>

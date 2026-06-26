@@ -11,6 +11,7 @@ import {
   compareEnvironments,
   createAIAction,
   createApiKey,
+  createAppExtension,
   createAsset,
   createConcept,
   createContentType,
@@ -25,6 +26,7 @@ import {
   createWebhook,
   defineWorkflow,
   deleteAIAction,
+  deleteAppExtension,
   deleteComment,
   deleteConcept,
   deleteEnvironmentAlias,
@@ -54,6 +56,7 @@ import {
   listAIActions,
   listAgentRuns,
   listApiKeys,
+  listAppExtensions,
   listAssets,
   listAuditLog,
   listComments,
@@ -336,6 +339,18 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   app.delete(`${BASE}/functions/:id`, requireScope(SCOPES.contentManage), async (c) => {
     await deleteFunction(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+
+  // --- app extensions (admin UI extensions) ------------------------------
+  app.get(`${BASE}/app-extensions`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listAppExtensions(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/app-extensions`, requireScope(SCOPES.contentManage), async (c) =>
+    c.json(await createAppExtension(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.delete(`${BASE}/app-extensions/:id`, requireScope(SCOPES.contentManage), async (c) => {
+    await deleteAppExtension(ctx, scopeOf(c), c.req.param('id'));
     return c.body(null, 204);
   });
 

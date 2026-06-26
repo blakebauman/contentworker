@@ -60,7 +60,11 @@ export class InMemoryEventBus implements EventBus {
   subscribe(pattern: string, handler: (event: DomainEvent) => Promise<void>): Subscription {
     const entry = { pattern, handler };
     this.handlers.push(entry);
-    return { close: async () => void (this.handlers = this.handlers.filter((h) => h !== entry)) };
+    return {
+      close: async () => {
+        this.handlers = this.handlers.filter((h) => h !== entry);
+      },
+    };
   }
 
   private matches(pattern: string, type: string): boolean {

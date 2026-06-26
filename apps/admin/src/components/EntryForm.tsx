@@ -13,6 +13,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import type { ContentType, EntryFields, FieldDefinition } from '@cw/domain';
 import { useMemo, useState } from 'react';
+import type { AppExtension } from '../lib/management.js';
+import { ExtensionFrame } from './ExtensionFrame.js';
 import { RichTextEditor } from './RichTextEditor.js';
 
 const SCALAR = new Set(['Symbol', 'Text', 'Integer', 'Number', 'Boolean', 'Date']);
@@ -47,17 +49,28 @@ const cloneInitial = (initial: EntryFields): Values => {
  * edited per-locale via tabs; non-localized fields are edited once (on the default
  * locale tab). Emits the localized `EntryFields` shape, dropping empty values.
  */
+/** The entry being edited, posted to field-editor extensions for context. */
+export interface EntryContext {
+  readonly spaceId: string;
+  readonly environmentId: string;
+  readonly entryId?: string;
+  readonly contentType?: string;
+}
+
 export function EntryForm(props: {
   contentType: ContentType;
   initial: EntryFields;
   locales: readonly string[];
   defaultLocale: string;
   pickers: Pickers;
+  /** Installed custom field editors; the first matching a field's type replaces its input. */
+  fieldEditors?: readonly AppExtension[];
+  entryContext?: EntryContext;
   busy?: boolean;
   onSave: (fields: EntryFields) => void;
   onCancel: () => void;
 }) {
-  const { contentType, locales, defaultLocale } = props;
+  const { contentType, locales, defaultLocale, fieldEditors } = props;
   const [values, setValues] = useState<Values>(() => cloneInitial(props.initial));
   const [activeLocale, setActiveLocale] = useState(defaultLocale);
   const hasLocalized = useMemo(() => contentType.fields.some((f) => f.localized), [contentType]);
@@ -124,6 +137,12 @@ export function EntryForm(props: {
                   field={f}
                   value={values[f.apiId]?.[locale]}
                   pickers={props.pickers}
+                  editor={fieldEditors?.find(
+                    (e) =>
+                      !e.fieldTypes || e.fieldTypes.length === 0 || e.fieldTypes.includes(f.type),
+                  )}
+                  editorContext={props.entryContext}
+                  locale={locale}
                   onChange={(v) => set(f.apiId, locale, v)}
                 />
               </div>
@@ -149,9 +168,31 @@ function FieldInput(props: {
   field: FieldDefinition;
   value: unknown;
   pickers: Pickers;
+  editor?: AppExtension;
+  editorContext?: EntryContext;
+  locale: string;
   onChange: (v: unknown) => void;
 }) {
-  const { id, field, value, onChange, pickers } = props;
+  const { id, field, value, onChange, pickers, editor, editorContext, locale } = props;
+
+  // A custom field editor extension takes over the input entirely (sandboxed iframe).
+  if (editor) {
+    return (
+      <ExtensionFrame
+        extension={editor}
+        context={{
+          target: 'field-editor',
+          spaceId: editorContext?.spaceId ?? '',
+          environmentId: editorContext?.environmentId ?? '',
+          entryId: editorContext?.entryId,
+          contentType: editorContext?.contentType,
+          field: { apiId: field.apiId, type: field.type, locale },
+          value,
+        }}
+        onChange={onChange}
+      />
+    );
+  }
 
   // Reference fields: a dropdown of entries/assets, stored as { id, linkType }.
   if (field.type === 'Link') {

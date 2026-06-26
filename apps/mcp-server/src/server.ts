@@ -7,6 +7,7 @@ import {
   bulkEntryAction,
   compareEnvironments,
   createAIAction,
+  createAppExtension,
   createConcept,
   createContentType,
   createEntry,
@@ -15,6 +16,7 @@ import {
   createScheme,
   createTag,
   createTask,
+  deleteAppExtension,
   deleteEnvironmentAlias,
   deleteFunction,
   diffVersions,
@@ -26,6 +28,7 @@ import {
   getPreviewEntry,
   getRelease,
   listAIActions,
+  listAppExtensions,
   listAssets,
   listAuditLog,
   listComments,
@@ -405,6 +408,54 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentManage, scopeOf(args));
       await deleteFunction(ctx, scopeOf(args), args.id);
+      return ok({ deleted: args.id });
+    },
+  );
+
+  // --- app extensions (admin UI extensions) ------------------------------
+  server.tool(
+    'app_extensions_list',
+    'List the admin UI extensions (custom field editors / sidebar widgets) registered in a space/environment.',
+    scopeArgs,
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listAppExtensions(ctx, scopeOf(args)));
+    },
+  );
+
+  server.tool(
+    'app_extension_create',
+    'Register an admin UI extension rendered in a sandboxed iframe. target is ' +
+      '"field-editor" (custom editor for the given fieldTypes) or "sidebar" (entry widget).',
+    {
+      name: z.string(),
+      target: z.enum(['field-editor', 'sidebar']),
+      entryUrl: z.string(),
+      fieldTypes: z.array(z.string()).optional(),
+      active: z.boolean().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      return ok(
+        await createAppExtension(ctx, scopeOf(args), {
+          name: args.name,
+          target: args.target,
+          entryUrl: args.entryUrl,
+          fieldTypes: args.fieldTypes,
+          active: args.active,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'app_extension_delete',
+    'Delete a registered admin UI extension by id.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      await deleteAppExtension(ctx, scopeOf(args), args.id);
       return ok({ deleted: args.id });
     },
   );
