@@ -142,6 +142,13 @@ export class InMemoryContentStore implements ContentStore {
     saveAggregate: async (scope, entry) => {
       this.entryData.set(`${scopeKey(scope)}::${entry.id}`, entry);
     },
+    listVersions: async (scope, entryId) =>
+      [...(this.versionData.get(`${scopeKey(scope)}::${entryId}`) ?? [])].sort(
+        (a, b) => b.version - a.version,
+      ),
+    getVersion: async (scope, entryId, version) =>
+      this.versionData.get(`${scopeKey(scope)}::${entryId}`)?.find((v) => v.version === version) ??
+      null,
     putPublished: async (scope, snapshot) => {
       this.publishedData.set(`${scopeKey(scope)}::${snapshot.entryId}`, snapshot);
     },

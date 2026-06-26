@@ -277,6 +277,11 @@ export interface EntryRepo {
   /** Updates only the aggregate (status/pointers) — no new version. */
   saveAggregate(scope: Scope, entry: Entry): Promise<void>;
 
+  /** Lists every saved version of an entry, newest first. */
+  listVersions(scope: Scope, entryId: string): Promise<EntryVersion[]>;
+  /** Reads one specific version snapshot, or null if it doesn't exist. */
+  getVersion(scope: Scope, entryId: string, version: number): Promise<EntryVersion | null>;
+
   /** Writes the published read model for an entry. */
   putPublished(scope: Scope, snapshot: PublishedEntry): Promise<void>;
   removePublished(scope: Scope, entryId: string): Promise<void>;
