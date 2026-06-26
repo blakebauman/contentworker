@@ -17,7 +17,10 @@ export async function withSpan<T>(
       return await fn();
     } catch (err) {
       span.recordException(err as Error);
-      span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) });
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     } finally {
       span.end();

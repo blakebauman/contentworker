@@ -26,7 +26,14 @@ export function createApp(
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
   app.get('/readyz', (c) => c.json({ status: 'ready', role: config.role }));
 
-  const deps: AuthDeps = { ctx, hasher: sha256Hasher, adminToken: config.adminToken, rag, blob, ai };
+  const deps: AuthDeps = {
+    ctx,
+    hasher: sha256Hasher,
+    adminToken: config.adminToken,
+    rag,
+    blob,
+    ai,
+  };
 
   const mountManagement = config.role === 'all' || config.role === 'management';
   const mountDelivery = config.role === 'all' || config.role === 'delivery';

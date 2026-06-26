@@ -63,7 +63,13 @@ export function createOfflineDelivery<F extends Fields = Fields>(opts: OfflineOp
       const since = (await storage.getItem(cursorKey)) ?? undefined;
       const fetched: DeliveredEntry<F>[] = [];
       for (let skip = 0; ; skip += pageSize) {
-        const { items } = await client.listEntries<F>({ contentType, locale, since, limit: pageSize, skip });
+        const { items } = await client.listEntries<F>({
+          contentType,
+          locale,
+          since,
+          limit: pageSize,
+          skip,
+        });
         fetched.push(...items);
         if (items.length < pageSize) break;
       }
@@ -106,4 +112,6 @@ export function createOfflineDelivery<F extends Fields = Fields>(opts: OfflineOp
   };
 }
 
-export type OfflineDelivery<F extends Fields = Fields> = ReturnType<typeof createOfflineDelivery<F>>;
+export type OfflineDelivery<F extends Fields = Fields> = ReturnType<
+  typeof createOfflineDelivery<F>
+>;

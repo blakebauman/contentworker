@@ -11,7 +11,10 @@ const clock: Clock = { now: () => new Date() };
 const ids: IdGenerator = { newId: () => uuidv7() };
 
 /** Builds the activities implementation the Temporal worker registers. */
-export function wireActivities(env: NodeJS.ProcessEnv = process.env): { activities: Activities; ids: IdGenerator } {
+export function wireActivities(env: NodeJS.ProcessEnv = process.env): {
+  activities: Activities;
+  ids: IdGenerator;
+} {
   const store: ContentStore = env.DATABASE_URL
     ? createPostgresStore(env.DATABASE_URL)
     : (new InMemoryContentStore() as ContentStore);

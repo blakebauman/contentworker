@@ -200,7 +200,8 @@ function makeEntryRepo(db: Db): EntryRepo {
       if (query.contentTypeApiId) {
         conditions.push(eq(schema.entryPublished.contentTypeApiId, query.contentTypeApiId));
       }
-      if (query.since) conditions.push(gt(schema.entryPublished.publishedAt, new Date(query.since)));
+      if (query.since)
+        conditions.push(gt(schema.entryPublished.publishedAt, new Date(query.since)));
       const rows = await db
         .select()
         .from(schema.entryPublished)
@@ -263,7 +264,13 @@ function makeAssetRepo(db: Db): AssetRepo {
         .orderBy(desc(schema.assets.updatedAt))
         .limit(query.limit ?? 100)
         .offset(query.skip ?? 0);
-      return rows.map((r) => ({ id: r.id, status: r.status, file: r.file, title: r.title, description: r.description }));
+      return rows.map((r) => ({
+        id: r.id,
+        status: r.status,
+        file: r.file,
+        title: r.title,
+        description: r.description,
+      }));
     },
     create: upsertDraft,
     save: upsertDraft,

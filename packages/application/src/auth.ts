@@ -65,11 +65,7 @@ export async function listApiKeys(ctx: AppContext, spaceId: string): Promise<Api
 }
 
 /** Revokes a key (by id) after verifying it belongs to the space. */
-export async function revokeApiKey(
-  ctx: AppContext,
-  spaceId: string,
-  keyId: string,
-): Promise<void> {
+export async function revokeApiKey(ctx: AppContext, spaceId: string, keyId: string): Promise<void> {
   const keys = await ctx.store.auth.list(spaceId);
   if (!keys.some((k) => k.id === keyId)) throw new NotFoundError('ApiKey', keyId);
   await ctx.store.auth.revoke(keyId);
