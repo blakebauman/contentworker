@@ -265,6 +265,15 @@ export interface AuditEntry {
   readonly at: string;
 }
 
+/** A requested image transformation (Imgix/Sanity URL-API convention). */
+export interface ImageTransform {
+  readonly width?: number;
+  readonly height?: number;
+  readonly fit?: 'clip' | 'crop' | 'fill' | 'max' | 'scale';
+  readonly format?: 'jpg' | 'png' | 'webp' | 'avif';
+  readonly quality?: number;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -469,6 +478,20 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
         `${mgmt}/assets/${encodeURIComponent(id)}/usage`,
       );
       return r.items;
+    },
+    /** Resolves a transformed-image URL for an asset (focal-point-aware). */
+    transformAsset(
+      id: string,
+      transform: ImageTransform,
+    ): Promise<{ url: string; transform: ImageTransform }> {
+      const params = new URLSearchParams();
+      if (transform.width) params.set('w', String(transform.width));
+      if (transform.height) params.set('h', String(transform.height));
+      if (transform.fit) params.set('fit', transform.fit);
+      if (transform.format) params.set('fm', transform.format);
+      if (transform.quality != null) params.set('q', String(transform.quality));
+      const qs = params.toString();
+      return req('GET', `${mgmt}/assets/${encodeURIComponent(id)}/transform${qs ? `?${qs}` : ''}`);
     },
     /**
      * Full upload: create the draft asset (gets a presigned PUT), upload the

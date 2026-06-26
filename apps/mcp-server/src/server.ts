@@ -38,6 +38,7 @@ import {
   setAssetMetadata,
   setEntryMetadata,
   setEnvironmentAlias,
+  transformAssetUrl,
   transitionEntry,
   unpublishEntry,
   updateEntry,
@@ -631,6 +632,33 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.previewRead, scopeOf(args));
       return ok(await getAssetUsage(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  server.tool(
+    'asset_transform_url',
+    'Build a transformed-image URL for an asset (resize/crop/format/quality), ' +
+      'anchored to the stored focal point when cropping.',
+    {
+      id: z.string(),
+      width: z.number().int().positive().optional(),
+      height: z.number().int().positive().optional(),
+      fit: z.enum(['clip', 'crop', 'fill', 'max', 'scale']).optional(),
+      format: z.enum(['jpg', 'png', 'webp', 'avif']).optional(),
+      quality: z.number().int().min(1).max(100).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(
+        await transformAssetUrl(ctx, scopeOf(args), args.id, {
+          width: args.width,
+          height: args.height,
+          fit: args.fit,
+          format: args.format,
+          quality: args.quality,
+        }),
+      );
     },
   );
 

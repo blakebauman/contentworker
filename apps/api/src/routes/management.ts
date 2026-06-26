@@ -59,6 +59,7 @@ import {
   listWebhooks,
   listWorkflows,
   mergeEnvironments,
+  parseImageTransform,
   publishAsset,
   publishContentType,
   publishEntry,
@@ -74,6 +75,7 @@ import {
   setConceptBroader,
   setEntryMetadata,
   setEnvironmentAlias,
+  transformAssetUrl,
   transitionEntry,
   unpublishAsset,
   unpublishEntry,
@@ -331,6 +333,16 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   app.get(`${BASE}/assets/:id/usage`, requireScope(SCOPES.previewRead), async (c) =>
     c.json({ items: await getAssetUsage(ctx, scopeOf(c), c.req.param('id')) }),
+  );
+  app.get(`${BASE}/assets/:id/transform`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(
+      await transformAssetUrl(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        parseImageTransform(c.req.query()),
+      ),
+    ),
   );
   app.post(`${BASE}/assets/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await publishAsset(ctx, scopeOf(c), c.req.param('id'))),

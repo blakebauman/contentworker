@@ -4,7 +4,9 @@ import {
   listContentTypes,
   listPublishedAssets,
   listPublishedEntries,
+  parseImageTransform,
   semanticSearch,
+  transformPublishedAssetUrl,
 } from '@cw/application';
 import { SCOPES, type Scope } from '@cw/domain';
 import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '@cw/graphql-gen';
@@ -73,6 +75,18 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.get(`${BASE}/assets/:id`, requireScope(SCOPES.deliveryRead), async (c) =>
     c.json(await getPublishedAsset(ctx, scopeOf(c), c.req.param('id'))),
   );
+
+  // Resolves a transformed-image URL for a published asset (resize/crop/format/
+  // quality, focal-point-aware) and redirects to it, so it can back an <img src>.
+  app.get(`${BASE}/assets/:id/transform`, requireScope(SCOPES.deliveryRead), async (c) => {
+    const { url } = await transformPublishedAssetUrl(
+      ctx,
+      scopeOf(c),
+      c.req.param('id'),
+      parseImageTransform(c.req.query()),
+    );
+    return c.redirect(url, 302);
+  });
 
   // --- GraphQL Delivery ---------------------------------------------------
   // Schema is generated from published content types and cached per scope; it
