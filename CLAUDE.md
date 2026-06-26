@@ -123,5 +123,6 @@ production, under Temporal where each `Activities` method becomes a Temporal Act
   `noExplicitAny` is a warning; `drizzle/**` is excluded from linting.
 - **Postgres schema changes:** edit `packages/adapters/store-postgres/src/schema.ts`, then run the
   package's `generate` script. The generated SQL under `drizzle/` is committed — don't hand-edit it.
-- When adding a use-case, thread `Scope` through, take `AppContext`, and add a test in the relevant
-  `packages/application/test/pN-*.test.ts` using `@cw/test-kit` fakes.
+- When adding a use-case, thread `Scope` through, take `AppContext`, and add a test in
+  `packages/application/test/` using `@cw/test-kit` fakes. Test files are named for the capability
+  under test (e.g. `releases.test.ts`, `query.test.ts`), not for a roadmap phase.
