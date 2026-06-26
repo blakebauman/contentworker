@@ -2,6 +2,7 @@ import {
   addComment,
   addEntryToRelease,
   agentUsage,
+  auditEntry,
   autoTagAsset,
   autofillField,
   cancelScheduledAction,
@@ -321,6 +322,19 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       ),
     ),
   );
+  // --- agent actions (audit → work packages) -----------------------------
+  app.post(`${BASE}/entries/:id/audit`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(
+      await auditEntry(
+        ctx,
+        ai,
+        scopeOf(c),
+        c.req.param('id'),
+        await c.req.json().catch(() => ({})),
+      ),
+    ),
+  );
+
   // --- content semantics (vector-backed) ---------------------------------
   app.get(`${BASE}/entries/:id/related`, requireScope(SCOPES.searchRead), async (c) => {
     const topK = c.req.query('top_k');

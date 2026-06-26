@@ -1,6 +1,7 @@
 import {
   addComment,
   addEntryToRelease,
+  auditEntry,
   autoTagAsset,
   autofillField,
   compareEnvironments,
@@ -318,6 +319,29 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentWrite, scopeOf(args));
       return ok(await suggestEntryTags(ctx, ai, scopeOf(args), args.id, { apply: args.apply }));
+    },
+  );
+
+  server.tool(
+    'entry_audit',
+    'Audit an entry for gaps/inconsistencies/quality issues. createTasks=true ' +
+      'emits a work-package task per finding at/above taskSeverity.',
+    {
+      id: z.string(),
+      createTasks: z.boolean().optional(),
+      taskSeverity: z.enum(['info', 'warning', 'error']).optional(),
+      assignee: z.string().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await auditEntry(ctx, ai, scopeOf(args), args.id, {
+          createTasks: args.createTasks,
+          taskSeverity: args.taskSeverity,
+          assignee: args.assignee,
+        }),
+      );
     },
   );
 
