@@ -3,6 +3,7 @@ import {
   addEntryToRelease,
   agentUsage,
   cancelScheduledAction,
+  compareEnvironments,
   createApiKey,
   createAsset,
   createConcept,
@@ -55,6 +56,7 @@ import {
   listWebhookDeliveries,
   listWebhooks,
   listWorkflows,
+  mergeEnvironments,
   publishAsset,
   publishContentType,
   publishEntry,
@@ -177,6 +179,28 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       return c.body(null, 204);
     },
   );
+
+  // --- branch compare/merge (environments) -------------------------------
+  app.get('/spaces/:space/compare', requireScope(SCOPES.previewRead), async (c) =>
+    c.json(
+      await compareEnvironments(
+        ctx,
+        c.req.param('space'),
+        c.req.query('source') ?? '',
+        c.req.query('target') ?? '',
+      ),
+    ),
+  );
+  // Apply selected content types/entries from source→target (additive).
+  app.post('/spaces/:space/merge', requireScope(SCOPES.contentManage), async (c) => {
+    const body = await c.req.json();
+    return c.json(
+      await mergeEnvironments(ctx, c.req.param('space'), body.source, body.target, {
+        contentTypes: body.contentTypes,
+        entries: body.entries,
+      }),
+    );
+  });
 
   // --- API key management (admin) ----------------------------------------
   app.get('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) => {

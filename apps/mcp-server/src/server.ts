@@ -1,6 +1,7 @@
 import {
   addComment,
   addEntryToRelease,
+  compareEnvironments,
   createConcept,
   createContentType,
   createEntry,
@@ -23,6 +24,7 @@ import {
   listTags,
   listTasks,
   listVersions,
+  mergeEnvironments,
   publishContentType,
   publishEntry,
   publishRelease,
@@ -559,6 +561,40 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           entityType: args.entityType,
           entityId: args.entityId,
           scheduledFor: args.scheduledFor,
+        }),
+      );
+    },
+  );
+
+  // --- branch compare/merge ----------------------------------------------
+  server.tool(
+    'environments_compare',
+    'Diff two environments in a space (content types + entries that differ).',
+    { source: z.string(), target: z.string(), space: z.string().optional() },
+    async (args) => {
+      const spaceId = args.space ?? DEFAULT_SPACE;
+      guard(SCOPES.previewRead, { spaceId, environmentId: args.source });
+      return ok(await compareEnvironments(ctx, spaceId, args.source, args.target));
+    },
+  );
+
+  server.tool(
+    'environments_merge',
+    'Apply selected content types/entries from a source environment into a target (additive).',
+    {
+      source: z.string(),
+      target: z.string(),
+      contentTypes: z.array(z.string()).optional(),
+      entries: z.array(z.string()).optional(),
+      space: z.string().optional(),
+    },
+    async (args) => {
+      const spaceId = args.space ?? DEFAULT_SPACE;
+      guard(SCOPES.contentManage, { spaceId, environmentId: args.target });
+      return ok(
+        await mergeEnvironments(ctx, spaceId, args.source, args.target, {
+          contentTypes: args.contentTypes,
+          entries: args.entries,
         }),
       );
     },
