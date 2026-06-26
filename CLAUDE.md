@@ -25,6 +25,10 @@ pnpm --filter @cw/application test
 pnpm --filter @cw/application test -- p8-auth.test.ts
 pnpm --filter @cw/application test -- -t 'name of test'
 
+# Postgres adapter contract tests are opt-in (skipped unless a migrated DB is set):
+TEST_DATABASE_URL=postgres://localhost:5432/contentworker_test \
+  pnpm --filter @cw/adapter-store-postgres test
+
 # Boot the API on an in-memory store (no Postgres/Redis needed):
 pnpm --filter @cw/api start                             # http://localhost:8787
 pnpm --filter @cw/api dev                               # same, with --watch

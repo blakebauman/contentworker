@@ -24,7 +24,7 @@ import {
   Sun,
   Tags,
 } from 'lucide-react';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useClient } from '../../lib/client-context.js';
 import { useTheme } from '../../lib/theme.js';
@@ -96,7 +96,9 @@ export function AppShell() {
         </header>
 
         <main className="overflow-auto p-6">
-          <Outlet />
+          <Suspense fallback={<p className="text-muted-foreground text-sm">Loading…</p>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 
