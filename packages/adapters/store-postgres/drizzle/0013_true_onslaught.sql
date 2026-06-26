@@ -1,0 +1,2 @@
+ALTER TABLE "asset_published" ADD COLUMN "metadata" jsonb DEFAULT '{"altText":{},"tags":[]}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "assets" ADD COLUMN "metadata" jsonb DEFAULT '{"altText":{},"tags":[]}'::jsonb NOT NULL;

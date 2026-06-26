@@ -1,8 +1,12 @@
 import {
   type Asset,
+  type AssetMetadata,
   type LocalizedValue,
   NotFoundError,
+  type ReferenceEdge,
   type Scope,
+  applyAssetMetadata,
+  emptyAssetMetadata,
   publishAsset as publishAssetState,
   unpublishAsset as unpublishAssetState,
 } from '@cw/domain';
@@ -43,6 +47,7 @@ export async function createAsset(
     file: { url, fileName: input.fileName, contentType: input.contentType },
     title: input.title ?? {},
     description: input.description ?? {},
+    metadata: emptyAssetMetadata,
   };
   await ctx.store.assets.create(scope, asset);
   return { asset, upload };
@@ -74,6 +79,7 @@ export async function publishAsset(ctx: AppContext, scope: Scope, id: string): P
     file: published.file,
     title: published.title,
     description: published.description,
+    metadata: published.metadata,
     publishedAt: ctx.clock.now().toISOString(),
   });
   return published;
@@ -104,4 +110,37 @@ export async function listPublishedAssets(
   query: { limit?: number; skip?: number } = {},
 ): Promise<PublishedAsset[]> {
   return ctx.store.assets.listPublished(scope, query);
+}
+
+/** A metadata patch — any subset of the editable "Aspects" of an asset. */
+export type AssetMetadataPatch = Partial<AssetMetadata>;
+
+/**
+ * Updates an asset's editorial metadata (alt text, focal point, tags, custom
+ * fields), validating the focal point in the domain. Re-publishing carries the
+ * new metadata into the delivered snapshot; this only touches the draft.
+ */
+export async function setAssetMetadata(
+  ctx: AppContext,
+  scope: Scope,
+  id: string,
+  patch: AssetMetadataPatch,
+): Promise<Asset> {
+  const asset = await ctx.store.assets.get(scope, id);
+  if (!asset) throw new NotFoundError('Asset', id);
+  const updated = applyAssetMetadata(asset, patch);
+  await ctx.store.assets.save(scope, updated);
+  return updated;
+}
+
+/**
+ * Lists the entries that reference an asset — its usage across the space. Reuses
+ * the reverse-reference index that already tracks entry→asset links.
+ */
+export async function getAssetUsage(
+  ctx: AppContext,
+  scope: Scope,
+  id: string,
+): Promise<ReferenceEdge[]> {
+  return ctx.store.references.findReverse(scope, id);
 }

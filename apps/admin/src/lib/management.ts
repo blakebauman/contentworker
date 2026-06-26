@@ -1,5 +1,6 @@
 import type {
   Asset,
+  AssetMetadata,
   Comment,
   Concept,
   ConceptScheme,
@@ -456,6 +457,18 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     },
     unpublishAsset(id: string): Promise<Asset> {
       return req('DELETE', `${mgmt}/assets/${encodeURIComponent(id)}/published`);
+    },
+    /** Updates an asset's editorial metadata (alt text, focal point, tags, custom fields). */
+    setAssetMetadata(id: string, patch: Partial<AssetMetadata>): Promise<Asset> {
+      return req('PATCH', `${mgmt}/assets/${encodeURIComponent(id)}/metadata`, patch);
+    },
+    /** Lists the entries that reference an asset (where it is used). */
+    async assetUsage(id: string): Promise<ReferenceEdge[]> {
+      const r = await req<{ items: ReferenceEdge[] }>(
+        'GET',
+        `${mgmt}/assets/${encodeURIComponent(id)}/usage`,
+      );
+      return r.items;
     },
     /**
      * Full upload: create the draft asset (gets a presigned PUT), upload the

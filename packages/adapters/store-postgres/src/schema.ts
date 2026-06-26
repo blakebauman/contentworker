@@ -1,4 +1,10 @@
-import type { AssetFile, DomainEvent, EntryFields, LocalizedValue } from '@cw/domain';
+import type {
+  AssetFile,
+  AssetMetadata,
+  DomainEvent,
+  EntryFields,
+  LocalizedValue,
+} from '@cw/domain';
 import type { FieldDefinition } from '@cw/domain';
 import { sql } from 'drizzle-orm';
 import {
@@ -131,6 +137,7 @@ export const assets = pgTable(
     file: jsonb('file').$type<AssetFile>().notNull(),
     title: jsonb('title').$type<LocalizedValue>().notNull(),
     description: jsonb('description').$type<LocalizedValue>().notNull(),
+    metadata: jsonb('metadata').$type<AssetMetadata>().notNull().default({ altText: {}, tags: [] }),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
@@ -145,6 +152,7 @@ export const assetPublished = pgTable(
     file: jsonb('file').$type<AssetFile>().notNull(),
     title: jsonb('title').$type<LocalizedValue>().notNull(),
     description: jsonb('description').$type<LocalizedValue>().notNull(),
+    metadata: jsonb('metadata').$type<AssetMetadata>().notNull().default({ altText: {}, tags: [] }),
     publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
   },
   (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.assetId] })],
