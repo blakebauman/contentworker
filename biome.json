@@ -7,7 +7,9 @@
       "**/node_modules/**",
       "**/.turbo/**",
       "**/drizzle/**",
-      "**/components/ui/**"
+      "**/components/ui/**",
+      "**/test-results/**",
+      "**/playwright-report/**"
     ]
   },
   "formatter": {
