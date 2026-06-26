@@ -2,10 +2,11 @@ import { CollaborationPanel } from '@/components/CollaborationPanel';
 import { EntryMetadataPanel } from '@/components/EntryMetadataPanel';
 import { PageHeader } from '@/components/PageHeader';
 import { ReferencedBy } from '@/components/ReferencedBy';
+import { VersionHistory } from '@/components/VersionHistory';
 import { Button } from '@/components/ui/button';
 import type { EntryFields } from '@cw/domain';
 import { Sparkles } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Pickers } from '../components/EntryForm.js';
 import { EntryForm } from '../components/EntryForm.js';
@@ -28,26 +29,31 @@ export function EntryEditor() {
   const backTo = `/content/${typeId}`;
 
   const [initial, setInitial] = useState<EntryFields | null>(isEdit ? null : {});
+  const [meta, setMeta] = useState<{ version: number; status: string } | null>(null);
   const [pickers, setPickers] = useState<Pickers>({ entries: [], assets: [] });
   const [genOpen, setGenOpen] = useState(false);
-  // Bumped after a generation to re-seed the form (EntryForm reads `initial` once).
+  // Bumped after a generation/restore to re-seed the form (EntryForm reads `initial` once).
   const [formKey, setFormKey] = useState(0);
 
   // Load the existing draft (edit mode) into the form's initial values.
-  useEffect(() => {
+  const loadEntry = useCallback(async () => {
     if (!isEdit || !entryId) return;
+    const e = await client.getEntry(entryId);
+    setInitial(e.fields as EntryFields);
+    setMeta({ version: e.version, status: e.status });
+  }, [client, entryId, isEdit]);
+
+  useEffect(() => {
     let live = true;
-    client
-      .getEntry(entryId)
-      .then((e) => live && setInitial(e.fields as EntryFields))
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : String(err));
-        if (live) navigate(backTo);
-      });
+    loadEntry().catch((err) => {
+      if (!live) return;
+      toast.error(err instanceof Error ? err.message : String(err));
+      navigate(backTo);
+    });
     return () => {
       live = false;
     };
-  }, [client, entryId, isEdit, navigate, backTo, toast]);
+  }, [loadEntry, navigate, backTo, toast]);
 
   // Build reference/asset picker options (all entries + all assets) for Link fields.
   useEffect(() => {
@@ -144,6 +150,17 @@ export function EntryEditor() {
         <div className="grid max-w-5xl gap-4 lg:grid-cols-2">
           <CollaborationPanel entryId={entryId} />
           <EntryMetadataPanel entryId={entryId} />
+          {meta && (
+            <VersionHistory
+              entryId={entryId}
+              currentVersion={meta.version}
+              publishedVersion={meta.status === 'published' ? meta.version : null}
+              onRestored={() => {
+                loadEntry();
+                setFormKey((k) => k + 1);
+              }}
+            />
+          )}
           <ReferencedBy id={entryId} types={types} />
         </div>
       )}

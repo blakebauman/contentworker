@@ -8,6 +8,7 @@ import {
   createScheme,
   createTag,
   createTask,
+  diffVersions,
   draftEntry,
   getContentType,
   getPreviewEntry,
@@ -19,10 +20,12 @@ import {
   listReleases,
   listTags,
   listTasks,
+  listVersions,
   publishContentType,
   publishEntry,
   publishRelease,
   resolveTask,
+  restoreVersion,
   scheduleAction,
   semanticSearch,
   setEntryMetadata,
@@ -264,6 +267,37 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentPublish, scopeOf(args));
       return ok(await unpublishEntry(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  // --- entry version history ---------------------------------------------
+  server.tool(
+    'entries_list_versions',
+    'List every saved version of an entry, newest first.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listVersions(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  server.tool(
+    'entries_diff_versions',
+    'Diff two versions of an entry field-by-field (from → to).',
+    { id: z.string(), from: z.number(), to: z.number(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await diffVersions(ctx, scopeOf(args), args.id, args.from, args.to));
+    },
+  );
+
+  server.tool(
+    'entries_restore_version',
+    'Restore an older version by copying its fields into a new draft version.',
+    { id: z.string(), version: z.number(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(await restoreVersion(ctx, scopeOf(args), args.id, args.version));
     },
   );
 

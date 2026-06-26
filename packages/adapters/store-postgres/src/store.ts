@@ -189,6 +189,29 @@ function makeEntryRepo(db: Db): EntryRepo {
     async saveAggregate(scope, entry) {
       await saveEntryAggregate(db, scope, entry);
     },
+    async listVersions(scope, entryId) {
+      const rows = await db
+        .select()
+        .from(schema.entryVersions)
+        .where(
+          and(scopeFilter(schema.entryVersions, scope), eq(schema.entryVersions.entryId, entryId)),
+        )
+        .orderBy(desc(schema.entryVersions.version));
+      return rows.map(toVersion);
+    },
+    async getVersion(scope, entryId, version) {
+      const [row] = await db
+        .select()
+        .from(schema.entryVersions)
+        .where(
+          and(
+            scopeFilter(schema.entryVersions, scope),
+            eq(schema.entryVersions.entryId, entryId),
+            eq(schema.entryVersions.version, version),
+          ),
+        );
+      return row ? toVersion(row) : null;
+    },
     async putPublished(scope, snapshot) {
       const values = {
         spaceId: scope.spaceId,
@@ -1369,6 +1392,17 @@ const versionRow = (scope: Scope, version: EntryVersion) => ({
   entryId: version.entryId,
   version: version.version,
   fields: version.fields,
+  // Honor a use-case-supplied timestamp (deterministic via the clock); else the
+  // column defaults to now().
+  ...(version.createdAt ? { createdAt: new Date(version.createdAt) } : {}),
+});
+
+type EntryVersionRow = typeof schema.entryVersions.$inferSelect;
+const toVersion = (r: EntryVersionRow): EntryVersion => ({
+  entryId: r.entryId,
+  version: r.version,
+  fields: r.fields,
+  createdAt: r.createdAt.toISOString(),
 });
 
 async function saveEntryAggregate(db: Db, scope: Scope, entry: Entry): Promise<void> {

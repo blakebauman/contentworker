@@ -57,7 +57,12 @@ export async function createEntry(
     currentVersion: 1,
     publishedVersion: null,
   };
-  const version: EntryVersion = { entryId: id, version: 1, fields: input.fields };
+  const version: EntryVersion = {
+    entryId: id,
+    version: 1,
+    fields: input.fields,
+    createdAt: ctx.clock.now().toISOString(),
+  };
   await ctx.store.entries.create(scope, entry, version);
   return { entry, fields: input.fields };
 }
@@ -87,6 +92,7 @@ export async function updateEntry(
     ...entry,
     status: deriveStatus(entry.currentVersion, entry.publishedVersion, false),
   };
-  await ctx.store.entries.saveVersion(scope, synced, version);
+  const stamped: EntryVersion = { ...version, createdAt: ctx.clock.now().toISOString() };
+  await ctx.store.entries.saveVersion(scope, synced, stamped);
   return { entry: synced, fields };
 }

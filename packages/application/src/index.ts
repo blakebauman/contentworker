@@ -3,6 +3,7 @@ export * from './auth.js';
 export * from './spaces.js';
 export * from './content-types.js';
 export * from './entries.js';
+export * from './versioning.js';
 export * from './assets.js';
 export * from './publishing.js';
 export * from './releases.js';

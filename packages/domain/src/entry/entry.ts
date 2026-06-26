@@ -20,6 +20,9 @@ export interface EntryVersion {
   readonly entryId: string;
   readonly version: number;
   readonly fields: EntryFields;
+  /** When this version was saved (ISO-8601). Optional: set by use-cases, which
+   *  hold the clock; the domain stays time-free. */
+  readonly createdAt?: string;
 }
 
 /**

@@ -7,6 +7,7 @@ import type {
   ContentTypeDraft,
   EntryFields,
   EntryMetadata,
+  EntryVersion,
   EntryWorkflowState,
   FilterOp,
   ReferenceEdge,
@@ -209,6 +210,22 @@ export interface WebhookDeliveryRecord {
   readonly attempts: number;
   readonly error?: string;
   readonly createdAt: string;
+}
+
+/** A single field's difference between two entry versions. */
+export interface FieldChange {
+  readonly field: string;
+  readonly kind: 'added' | 'removed' | 'changed' | 'unchanged';
+  readonly before: unknown;
+  readonly after: unknown;
+}
+
+/** Field-by-field diff of two entry versions (from → to). */
+export interface VersionDiff {
+  readonly entryId: string;
+  readonly from: number;
+  readonly to: number;
+  readonly changes: readonly FieldChange[];
 }
 
 export class ApiError extends Error {
@@ -618,6 +635,31 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       input: { tags?: readonly string[]; concepts?: readonly string[] },
     ): Promise<EntryMetadata> {
       return req('PUT', `${mgmt}/entries/${encodeURIComponent(entryId)}/metadata`, input);
+    },
+
+    // --- entry version history -------------------------------------------
+    async listVersions(entryId: string): Promise<EntryVersion[]> {
+      const r = await req<{ items: EntryVersion[] }>(
+        'GET',
+        `${mgmt}/entries/${encodeURIComponent(entryId)}/versions`,
+      );
+      return r.items;
+    },
+    getVersion(entryId: string, version: number): Promise<EntryVersion> {
+      return req('GET', `${mgmt}/entries/${encodeURIComponent(entryId)}/versions/${version}`);
+    },
+    diffVersions(entryId: string, from: number, to: number): Promise<VersionDiff> {
+      return req(
+        'GET',
+        `${mgmt}/entries/${encodeURIComponent(entryId)}/versions/diff?from=${from}&to=${to}`,
+      );
+    },
+    /** Copies an older version's fields into a new draft version. */
+    restoreVersion(entryId: string, version: number): Promise<EntryView> {
+      return req(
+        'POST',
+        `${mgmt}/entries/${encodeURIComponent(entryId)}/versions/${version}/restore`,
+      );
     },
   };
 }

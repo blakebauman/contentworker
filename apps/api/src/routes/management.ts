@@ -24,6 +24,7 @@ import {
   deleteTask,
   deleteWebhook,
   deleteWorkflow,
+  diffVersions,
   draftEntry,
   getAsset,
   getContentType,
@@ -33,6 +34,7 @@ import {
   getRelease,
   getReverseReferences,
   getSpaceConfig,
+  getVersion,
   getWorkflow,
   listAgentRuns,
   listApiKeys,
@@ -47,6 +49,7 @@ import {
   listSpaces,
   listTags,
   listTasks,
+  listVersions,
   listWebhookDeliveries,
   listWebhooks,
   listWorkflows,
@@ -58,6 +61,7 @@ import {
   removeEntryFromRelease,
   reopenTask,
   resolveTask,
+  restoreVersion,
   revokeApiKey,
   scheduleAction,
   setConceptBroader,
@@ -196,6 +200,35 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   app.delete(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await unpublishEntry(ctx, scopeOf(c), c.req.param('id'))),
+  );
+
+  // --- entry version history ---------------------------------------------
+  app.get(`${BASE}/entries/:id/versions`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listVersions(ctx, scopeOf(c), c.req.param('id')) }),
+  );
+  // A field-by-field diff between two versions (?from=&to=).
+  app.get(`${BASE}/entries/:id/versions/diff`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(
+      await diffVersions(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        Number(c.req.query('from')),
+        Number(c.req.query('to')),
+      ),
+    ),
+  );
+  app.get(`${BASE}/entries/:id/versions/:version`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json(await getVersion(ctx, scopeOf(c), c.req.param('id'), Number(c.req.param('version')))),
+  );
+  // Restore copies an old version's fields into a NEW draft version.
+  app.post(
+    `${BASE}/entries/:id/versions/:version/restore`,
+    requireScope(SCOPES.contentWrite),
+    async (c) =>
+      c.json(
+        await restoreVersion(ctx, scopeOf(c), c.req.param('id'), Number(c.req.param('version'))),
+      ),
   );
 
   // --- assets -------------------------------------------------------------
