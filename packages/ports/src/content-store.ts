@@ -108,12 +108,20 @@ export interface SpaceConfig {
   readonly fallbacks?: Readonly<Record<LocaleCode, LocaleCode | null>>;
 }
 
+/** An environment (branch) within a space. */
+export interface Environment {
+  readonly id: string;
+  readonly name: string;
+}
+
 export interface SpaceRepo {
   getConfig(scope: Scope): Promise<SpaceConfig | null>;
   /** Creates (or replaces) a space's configuration. */
   create(config: SpaceConfig): Promise<void>;
   /** Registers an environment (branch) within a space. */
   createEnvironment(spaceId: string, environmentId: string, name: string): Promise<void>;
+  /** Lists a space's environments (branches). */
+  listEnvironments(spaceId: string): Promise<Environment[]>;
 }
 
 export interface ContentTypeRepo {

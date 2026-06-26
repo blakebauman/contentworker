@@ -18,6 +18,7 @@ import {
   listApiKeys,
   listAssets,
   listContentTypes,
+  listEnvironments,
   listWebhookDeliveries,
   listWebhooks,
   publishAsset,
@@ -69,6 +70,9 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.json(await createSpace(ctx, body), 201);
   });
 
+  app.get('/spaces/:space/environments', requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listEnvironments(ctx, c.req.param('space')) }),
+  );
   app.post('/spaces/:space/environments', requireScope(SCOPES.spaceAdmin), async (c) => {
     const body = await c.req.json();
     await createEnvironment(ctx, c.req.param('space'), body.id, body.name);

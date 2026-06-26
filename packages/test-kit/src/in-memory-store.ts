@@ -46,16 +46,19 @@ export class InMemoryContentStore implements ContentStore {
   private readonly publishedData = new Map<string, PublishedEntry>();
   private readonly outboxData: { event: DomainEvent; relayed: boolean }[] = [];
 
-  private readonly environmentData = new Set<string>();
+  private readonly environmentData = new Map<string, { id: string; name: string }[]>();
 
   readonly spaces: SpaceRepo = {
     getConfig: async (scope) => this.spaceConfigs.get(scope.spaceId) ?? null,
     create: async (config) => {
       this.spaceConfigs.set(config.spaceId, config);
     },
-    createEnvironment: async (spaceId, environmentId) => {
-      this.environmentData.add(`${spaceId}::${environmentId}`);
+    createEnvironment: async (spaceId, environmentId, name) => {
+      const list = this.environmentData.get(spaceId) ?? [];
+      if (!list.some((e) => e.id === environmentId)) list.push({ id: environmentId, name });
+      this.environmentData.set(spaceId, list);
     },
+    listEnvironments: async (spaceId) => this.environmentData.get(spaceId) ?? [],
   };
 
   readonly contentTypes: ContentTypeRepo = {
