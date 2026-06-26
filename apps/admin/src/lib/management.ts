@@ -540,6 +540,15 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       return req('POST', `${mgmt}/ai-actions/${encodeURIComponent(id)}/run`, input);
     },
 
+    // --- bulk operations -------------------------------------------------
+    /** Publishes or unpublishes many entries in one call. */
+    bulkEntryAction(
+      action: 'publish' | 'unpublish',
+      ids: string[],
+    ): Promise<{ total: number; succeeded: number; failed: number }> {
+      return req('POST', `${mgmt}/bulk/entries/${action}`, { ids });
+    },
+
     // --- agent actions (audit → work packages) ---------------------------
     auditEntry(
       id: string,

@@ -86,20 +86,27 @@ export function EntriesList() {
   const optimisticStatus = (ids: Set<string>, status: string) =>
     setEntries((es) => es.map((e) => (ids.has(e.id) ? { ...e, status } : e)));
 
-  const bulk = (action: (id: string) => Promise<unknown>, verb: string, status: string) => {
+  // One bulk API call handles the whole selection server-side, reporting
+  // per-item outcomes; we surface any partial failures in the toast.
+  const bulk = (action: 'publish' | 'unpublish', verb: string, status: string) => {
     const snapshot = entries;
-    const ids = picked;
-    optimisticStatus(ids, status);
+    const ids = [...picked];
+    optimisticStatus(picked, status);
     setPicked(new Set());
     return run(async () => {
+      let summary: { succeeded: number; failed: number };
       try {
-        for (const id of ids) await action(id);
+        summary = await client.bulkEntryAction(action, ids);
       } catch (e) {
         setEntries(snapshot);
         throw e;
       }
       await loadEntries(query);
-      toast.success(`${verb} ${ids.size} ${ids.size === 1 ? 'entry' : 'entries'}`);
+      toast.success(
+        summary.failed > 0
+          ? `${verb} ${summary.succeeded}, ${summary.failed} failed`
+          : `${verb} ${summary.succeeded} ${summary.succeeded === 1 ? 'entry' : 'entries'}`,
+      );
     });
   };
 
@@ -140,7 +147,7 @@ export function EntriesList() {
             <span className="text-sm text-muted-foreground">{picked.size} selected</span>
             <Button
               type="button"
-              onClick={() => bulk((id) => client.publishEntry(id), 'Published', 'published')}
+              onClick={() => bulk('publish', 'Published', 'published')}
               disabled={busy}
             >
               Publish selected
@@ -148,7 +155,7 @@ export function EntriesList() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => bulk((id) => client.unpublishEntry(id), 'Unpublished', 'draft')}
+              onClick={() => bulk('unpublish', 'Unpublished', 'draft')}
               disabled={busy}
             >
               Unpublish selected

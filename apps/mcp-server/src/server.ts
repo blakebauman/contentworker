@@ -4,6 +4,7 @@ import {
   auditEntry,
   autoTagAsset,
   autofillField,
+  bulkEntryAction,
   compareEnvironments,
   createAIAction,
   createConcept,
@@ -342,6 +343,20 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           assignee: args.assignee,
         }),
       );
+    },
+  );
+
+  server.tool(
+    'entries_bulk_action',
+    'Publish or unpublish many entries in one call; returns a per-item summary.',
+    {
+      action: z.enum(['publish', 'unpublish']),
+      ids: z.array(z.string()),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      return ok(await bulkEntryAction(ctx, scopeOf(args), args.action, args.ids));
     },
   );
 

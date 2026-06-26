@@ -3,6 +3,7 @@ export * from './auth.js';
 export * from './spaces.js';
 export * from './content-types.js';
 export * from './entries.js';
+export * from './bulk.js';
 export * from './versioning.js';
 export * from './branching.js';
 export * from './audit.js';
