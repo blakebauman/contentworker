@@ -1,3 +1,4 @@
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -13,6 +14,18 @@ import { Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import { useClient } from '../lib/client-context.js';
 import { useToast } from '../lib/toast.js';
+
+type Finding = {
+  field?: string;
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+  suggestedAction: string;
+};
+const SEVERITY_VARIANT = {
+  error: 'destructive',
+  warning: 'secondary',
+  info: 'outline',
+} as const;
 
 const TEXT_TYPES = new Set(['Symbol', 'Text']);
 const SCALAR_TYPES = new Set(['Symbol', 'Text', 'Integer', 'Number', 'Boolean', 'Date']);
@@ -39,6 +52,7 @@ export function AiAssistPanel(props: {
   const [target, setTarget] = useState(otherLocales[0] ?? '');
   const [summaryField, setSummaryField] = useState(textFields[0]?.apiId ?? '');
   const [autofill, setAutofill] = useState(scalarFields[0]?.apiId ?? '');
+  const [findings, setFindings] = useState<Finding[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const ok = (label: string, fn: () => Promise<void>) => async () => {
@@ -78,6 +92,19 @@ export function AiAssistPanel(props: {
         ? `Tagged · new: ${r.newTags.join(', ')}`
         : `Applied ${r.tagIds.length} tag(s)`,
     );
+    onApplied();
+  });
+
+  const audit = ok('audit', async () => {
+    const r = await client.auditEntry(entryId);
+    setFindings(r.findings);
+    toast.success(`${r.findings.length} finding(s)`);
+  });
+
+  const createTasks = ok('tasks-create', async () => {
+    const r = await client.auditEntry(entryId, { createTasks: true, taskSeverity: 'warning' });
+    setFindings(r.findings);
+    toast.success(`Created ${r.taskIds.length} work-package task(s)`);
     onApplied();
   });
 
@@ -176,6 +203,52 @@ export function AiAssistPanel(props: {
         >
           {busy === 'tags' ? 'Classifying…' : 'Suggest taxonomy tags'}
         </Button>
+
+        <div className="space-y-2 border-t pt-3">
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              disabled={busy !== null}
+              onClick={audit}
+            >
+              {busy === 'audit' ? 'Auditing…' : 'Audit entry'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              disabled={busy !== null}
+              onClick={createTasks}
+            >
+              {busy === 'tasks-create' ? 'Creating…' : 'Audit → tasks'}
+            </Button>
+          </div>
+          {findings && findings.length === 0 && (
+            <p className="text-muted-foreground text-sm">No issues found.</p>
+          )}
+          {findings && findings.length > 0 && (
+            <ul className="space-y-1.5">
+              {findings.map((f) => (
+                <li key={`${f.severity}:${f.message}`} className="text-sm">
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant={SEVERITY_VARIANT[f.severity]} className="text-[10px]">
+                      {f.severity}
+                    </Badge>
+                    {f.field && (
+                      <span className="font-mono text-muted-foreground text-xs">{f.field}</span>
+                    )}
+                  </div>
+                  <p>{f.message}</p>
+                  <p className="text-muted-foreground text-xs">→ {f.suggestedAction}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

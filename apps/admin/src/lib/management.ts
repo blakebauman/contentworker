@@ -540,6 +540,26 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       return req('POST', `${mgmt}/ai-actions/${encodeURIComponent(id)}/run`, input);
     },
 
+    // --- agent actions (audit → work packages) ---------------------------
+    auditEntry(
+      id: string,
+      input: {
+        createTasks?: boolean;
+        taskSeverity?: 'info' | 'warning' | 'error';
+        assignee?: string;
+      } = {},
+    ): Promise<{
+      findings: {
+        field?: string;
+        severity: 'info' | 'warning' | 'error';
+        message: string;
+        suggestedAction: string;
+      }[];
+      taskIds: string[];
+    }> {
+      return req('POST', `${mgmt}/entries/${encodeURIComponent(id)}/audit`, input);
+    },
+
     // --- AI content operations over an entry -----------------------------
     /** Translates an entry's localized text fields; `apply` saves a draft. */
     translateEntry(
