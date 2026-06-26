@@ -17,18 +17,18 @@ describe('environments (branches)', () => {
       spaceId: 'shop',
       name: 'Shop',
       defaultLocale: 'en-US',
-      environments: ['master', 'staging'],
+      environments: ['main', 'staging'],
     });
 
-    expect((await listEnvironments(c, 'shop')).map((e) => e.id)).toEqual(['master', 'staging']);
+    expect((await listEnvironments(c, 'shop')).map((e) => e.id)).toEqual(['main', 'staging']);
 
     await createEnvironment(c, 'shop', 'preview', 'Preview branch');
     const envs = await listEnvironments(c, 'shop');
-    expect(envs.map((e) => e.id)).toEqual(['master', 'staging', 'preview']);
+    expect(envs.map((e) => e.id)).toEqual(['main', 'staging', 'preview']);
     expect(envs.find((e) => e.id === 'preview')?.name).toBe('Preview branch');
 
     // Adding an existing environment is a no-op (idempotent).
-    await createEnvironment(c, 'shop', 'master');
+    await createEnvironment(c, 'shop', 'main');
     expect(await listEnvironments(c, 'shop')).toHaveLength(3);
   });
 });
