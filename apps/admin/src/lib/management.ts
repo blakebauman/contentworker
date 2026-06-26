@@ -479,6 +479,35 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       );
       return r.items;
     },
+    // --- AI content operations over an entry -----------------------------
+    /** Translates an entry's localized text fields; `apply` saves a draft. */
+    translateEntry(
+      id: string,
+      input: { targetLocale: string; sourceLocale?: string; apply?: boolean },
+    ): Promise<{ translatedFields: string[]; applied: boolean }> {
+      return req('POST', `${mgmt}/entries/${encodeURIComponent(id)}/translate`, input);
+    },
+    /** Summarizes an entry; `apply` writes the summary into `targetField`. */
+    summarizeEntry(
+      id: string,
+      input: { locale?: string; maxWords?: number; targetField?: string; apply?: boolean } = {},
+    ): Promise<{ summary: string; applied: boolean }> {
+      return req('POST', `${mgmt}/entries/${encodeURIComponent(id)}/summarize`, input);
+    },
+    /** Generates a value for one scalar field; `apply` saves it. */
+    autofillField(
+      id: string,
+      input: { field: string; locale?: string; instructions?: string; apply?: boolean },
+    ): Promise<{ field: string; value: unknown; applied: boolean }> {
+      return req('POST', `${mgmt}/entries/${encodeURIComponent(id)}/autofill`, input);
+    },
+    /** Suggests taxonomy tags for an entry; `apply` creates + assigns them. */
+    suggestEntryTags(
+      id: string,
+      input: { apply?: boolean } = {},
+    ): Promise<{ tagIds: string[]; newTags: string[]; applied: boolean }> {
+      return req('POST', `${mgmt}/entries/${encodeURIComponent(id)}/suggest-tags`, input);
+    },
     /** Suggests alt text for an image; `apply` writes it to the asset metadata. */
     generateAltText(
       id: string,

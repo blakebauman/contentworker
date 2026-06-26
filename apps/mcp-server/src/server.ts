@@ -2,6 +2,7 @@ import {
   addComment,
   addEntryToRelease,
   autoTagAsset,
+  autofillField,
   compareEnvironments,
   createConcept,
   createContentType,
@@ -40,8 +41,11 @@ import {
   setAssetMetadata,
   setEntryMetadata,
   setEnvironmentAlias,
+  suggestEntryTags,
+  summarizeEntry,
   transformAssetUrl,
   transitionEntry,
+  translateEntry,
   unpublishEntry,
   updateEntry,
 } from '@cw/application';
@@ -199,6 +203,90 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           tier: args.tier,
         }),
       );
+    },
+  );
+
+  // --- AI content operations over an entry -------------------------------
+  server.tool(
+    'entry_translate',
+    'Translate an entry’s localized text fields into a target locale; ' +
+      'apply=true saves a new draft version.',
+    {
+      id: z.string(),
+      targetLocale: z.string(),
+      sourceLocale: z.string().optional(),
+      apply: z.boolean().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await translateEntry(ctx, ai, scopeOf(args), args.id, {
+          targetLocale: args.targetLocale,
+          sourceLocale: args.sourceLocale,
+          apply: args.apply,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'entry_summarize',
+    'Summarize an entry’s text content; apply=true writes it to targetField.',
+    {
+      id: z.string(),
+      locale: z.string().optional(),
+      maxWords: z.number().int().positive().optional(),
+      targetField: z.string().optional(),
+      apply: z.boolean().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await summarizeEntry(ctx, ai, scopeOf(args), args.id, {
+          locale: args.locale,
+          maxWords: args.maxWords,
+          targetField: args.targetField,
+          apply: args.apply,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'entry_autofill_field',
+    'Generate a value for one scalar field from the entry’s other fields; ' +
+      'apply=true saves it. Validated against the content model.',
+    {
+      id: z.string(),
+      field: z.string(),
+      locale: z.string().optional(),
+      instructions: z.string().optional(),
+      apply: z.boolean().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await autofillField(ctx, ai, scopeOf(args), args.id, {
+          field: args.field,
+          locale: args.locale,
+          instructions: args.instructions,
+          apply: args.apply,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'entry_suggest_tags',
+    'Suggest taxonomy tags for an entry (matching the vocabulary, proposing ' +
+      'new names); apply=true creates + assigns them.',
+    { id: z.string(), apply: z.boolean().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(await suggestEntryTags(ctx, ai, scopeOf(args), args.id, { apply: args.apply }));
     },
   );
 

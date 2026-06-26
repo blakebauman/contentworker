@@ -3,6 +3,7 @@ import {
   addEntryToRelease,
   agentUsage,
   autoTagAsset,
+  autofillField,
   cancelScheduledAction,
   compareEnvironments,
   createApiKey,
@@ -77,8 +78,11 @@ import {
   setConceptBroader,
   setEntryMetadata,
   setEnvironmentAlias,
+  suggestEntryTags,
+  summarizeEntry,
   transformAssetUrl,
   transitionEntry,
+  translateEntry,
   unpublishAsset,
   unpublishEntry,
   updateEntry,
@@ -281,6 +285,35 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     const body = await c.req.json();
     return c.json(await updateEntry(ctx, scopeOf(c), c.req.param('id'), body.fields));
   });
+  // --- AI content operations over an entry -------------------------------
+  app.post(`${BASE}/entries/:id/translate`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await translateEntry(ctx, ai, scopeOf(c), c.req.param('id'), await c.req.json())),
+  );
+  app.post(`${BASE}/entries/:id/summarize`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(
+      await summarizeEntry(
+        ctx,
+        ai,
+        scopeOf(c),
+        c.req.param('id'),
+        await c.req.json().catch(() => ({})),
+      ),
+    ),
+  );
+  app.post(`${BASE}/entries/:id/autofill`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await autofillField(ctx, ai, scopeOf(c), c.req.param('id'), await c.req.json())),
+  );
+  app.post(`${BASE}/entries/:id/suggest-tags`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(
+      await suggestEntryTags(
+        ctx,
+        ai,
+        scopeOf(c),
+        c.req.param('id'),
+        await c.req.json().catch(() => ({})),
+      ),
+    ),
+  );
   app.post(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await publishEntry(ctx, scopeOf(c), c.req.param('id'))),
   );

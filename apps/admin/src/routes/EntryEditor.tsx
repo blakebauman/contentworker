@@ -1,3 +1,4 @@
+import { AiAssistPanel } from '@/components/AiAssistPanel';
 import { CollaborationPanel } from '@/components/CollaborationPanel';
 import { EntryMetadataPanel } from '@/components/EntryMetadataPanel';
 import { PageHeader } from '@/components/PageHeader';
@@ -148,6 +149,16 @@ export function EntryEditor() {
       />
       {isEdit && entryId && (
         <div className="grid max-w-5xl gap-4 lg:grid-cols-2">
+          <AiAssistPanel
+            entryId={entryId}
+            contentType={selectedType}
+            locales={locales}
+            defaultLocale={defaultLocale}
+            onApplied={() => {
+              loadEntry();
+              setFormKey((k) => k + 1);
+            }}
+          />
           <CollaborationPanel entryId={entryId} />
           <EntryMetadataPanel entryId={entryId} />
           {meta && (
