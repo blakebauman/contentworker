@@ -1,3 +1,4 @@
+import { BranchMerge } from '@/components/BranchMerge';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { WebhookDeliveriesSheet } from '@/components/WebhookDeliveriesSheet';
@@ -267,6 +268,8 @@ function Environments(props: { client: ManagementClient }) {
           )}
         </CardContent>
       </Card>
+
+      <BranchMerge client={client} environments={environments} />
     </div>
   );
 }

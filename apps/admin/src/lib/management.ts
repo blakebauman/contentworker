@@ -235,6 +235,23 @@ export interface VersionDiff {
   readonly changes: readonly FieldChange[];
 }
 
+/** How a source-environment item relates to the target. */
+export type ChangeKind = 'added' | 'removed' | 'changed' | 'unchanged';
+
+/** A diff of two environments (what merging source→target would change). */
+export interface EnvironmentComparison {
+  readonly spaceId: string;
+  readonly source: string;
+  readonly target: string;
+  readonly contentTypes: readonly { apiId: string; kind: ChangeKind }[];
+  readonly entries: readonly { entryId: string; contentTypeApiId: string; kind: ChangeKind }[];
+}
+
+export interface MergeResult {
+  readonly mergedContentTypes: readonly string[];
+  readonly mergedEntries: readonly string[];
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -309,6 +326,22 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     },
     deleteEnvironmentAlias(alias: string): Promise<void> {
       return req('DELETE', `${spaceBase}/environment-aliases/${encodeURIComponent(alias)}`);
+    },
+    /** Diffs two environments (content types + entries that differ). */
+    compareEnvironments(source: string, target: string): Promise<EnvironmentComparison> {
+      return req(
+        'GET',
+        `${spaceBase}/compare?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`,
+      );
+    },
+    /** Applies selected content types/entries from source→target (additive). */
+    mergeEnvironments(input: {
+      source: string;
+      target: string;
+      contentTypes?: string[];
+      entries?: string[];
+    }): Promise<MergeResult> {
+      return req('POST', `${spaceBase}/merge`, input);
     },
     async listContentTypes(): Promise<ContentType[]> {
       const r = await req<{ items: ContentType[] }>('GET', `${mgmt}/content-types`);
