@@ -9,6 +9,8 @@ import {
   type Scope,
   type Webhook,
   matchesTopic,
+  projectFields,
+  runEntryQuery,
 } from '@cw/domain';
 import type {
   AgentRunRecord,
@@ -92,13 +94,22 @@ export class InMemoryContentStore implements ContentStore {
       if (query.contentTypeApiId) {
         entries = entries.filter((e) => e.contentTypeApiId === query.contentTypeApiId);
       }
-      const skip = query.skip ?? 0;
-      const limit = query.limit ?? 100;
-      return entries.slice(skip, skip + limit).map((entry) => {
+      const withFields: EntryWithFields[] = entries.map((entry) => {
         const versions = this.versionData.get(`${scopeKey(scope)}::${entry.id}`) ?? [];
         const current = versions.find((v) => v.version === entry.currentVersion);
         return { entry, fields: current?.fields ?? {} };
       });
+      const filtered = runEntryQuery(
+        withFields,
+        query,
+        (r) => r.fields,
+        (r) => ({ id: r.entry.id, contentType: r.entry.contentTypeApiId, status: r.entry.status }),
+      );
+      if (!query.select) return filtered;
+      return filtered.map((r) => ({
+        ...r,
+        fields: projectFields(r.fields, query.select as string[]),
+      }));
     },
     create: async (scope, entry, version) => {
       this.entryData.set(`${scopeKey(scope)}::${entry.id}`, entry);
@@ -130,13 +141,22 @@ export class InMemoryContentStore implements ContentStore {
         rows = rows.filter((r) => r.contentTypeApiId === query.contentTypeApiId);
       }
       if (query.since) rows = rows.filter((r) => r.publishedAt > (query.since as string));
-      // Order by publishedAt so a `since` cursor advances deterministically.
+      // Default order is publishedAt asc so a `since` cursor advances
+      // deterministically; an explicit `order` overrides it inside runEntryQuery.
       rows.sort((a, b) =>
         a.publishedAt < b.publishedAt ? -1 : a.publishedAt > b.publishedAt ? 1 : 0,
       );
-      const skip = query.skip ?? 0;
-      const limit = query.limit ?? 100;
-      return rows.slice(skip, skip + limit);
+      const filtered = runEntryQuery(
+        rows,
+        query,
+        (r) => r.fields,
+        (r) => ({ id: r.entryId, contentType: r.contentTypeApiId, publishedAt: r.publishedAt }),
+      );
+      if (!query.select) return filtered;
+      return filtered.map((r) => ({
+        ...r,
+        fields: projectFields(r.fields, query.select as string[]),
+      }));
     },
   };
 

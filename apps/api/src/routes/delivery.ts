@@ -11,6 +11,7 @@ import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from 
 import { type GraphQLSchema, graphql } from 'graphql';
 import { Hono } from 'hono';
 import { type AuthDeps, type AuthVars, principalMiddleware, requireScope } from '../auth.js';
+import { entryQueryFrom, parseEntryQuery } from '../query.js';
 
 const scopeOf = (c: { req: { param: (k: string) => string } }): Scope => ({
   spaceId: c.req.param('space'),
@@ -36,18 +37,11 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
 
   app.get(`${BASE}/entries`, requireScope(SCOPES.deliveryRead), async (c) => {
     const include = c.req.query('include');
-    const limit = c.req.query('limit');
-    const items = await listPublishedEntries(
-      ctx,
-      scopeOf(c),
-      {
-        contentTypeApiId: c.req.query('content_type'),
-        limit: limit ? Number(limit) : undefined,
-        skip: c.req.query('skip') ? Number(c.req.query('skip')) : undefined,
-        since: c.req.query('since'),
-      },
-      { locale: c.req.query('locale'), include: include ? Number(include) : undefined },
-    );
+    const query = parseEntryQuery(new URL(c.req.url).searchParams);
+    const items = await listPublishedEntries(ctx, scopeOf(c), query, {
+      locale: c.req.query('locale'),
+      include: include ? Number(include) : undefined,
+    });
     return c.json({ items, total: items.length });
   });
 
@@ -97,13 +91,21 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
           return null;
         }
       },
-      collection: (contentType, args) =>
-        listPublishedEntries(
+      collection: (contentType, args) => {
+        const raw: [string, string][] = [];
+        for (const [k, v] of Object.entries(args.where ?? {})) {
+          raw.push([k, Array.isArray(v) ? v.join(',') : String(v)]);
+        }
+        if (args.order?.length) raw.push(['order', args.order.join(',')]);
+        if (args.search) raw.push(['query', args.search]);
+        const parsed = entryQueryFrom(raw);
+        return listPublishedEntries(
           ctx,
           scope,
-          { contentTypeApiId: contentType, limit: args.limit, skip: args.skip },
+          { ...parsed, contentTypeApiId: contentType, limit: args.limit, skip: args.skip },
           { locale: args.locale, include: 1 },
-        ) as Promise<ResolvedEntry[]>,
+        ) as Promise<ResolvedEntry[]>;
+      },
       asset: async (id, _locale) => {
         try {
           const a = await getPublishedAsset(ctx, scope, id);

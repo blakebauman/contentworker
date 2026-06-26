@@ -9,6 +9,8 @@ import {
   type Scope,
   type Webhook,
   matchesTopic,
+  projectFields,
+  runEntryQuery,
 } from '@cw/domain';
 import type {
   AgentRunRecord,
@@ -37,6 +39,15 @@ type Db = PostgresJsDatabase<typeof schema>;
 
 const scopeFilter = (t: { spaceId: unknown; environmentId: unknown }, scope: Scope) =>
   and(eq(t.spaceId as never, scope.spaceId), eq(t.environmentId as never, scope.environmentId));
+
+// Field-level filtering/ordering/search/projection runs in JS over the loaded
+// rows (shared with the in-memory store for identical semantics). When any of
+// these are present we cannot push `limit/offset` into SQL, so the scoped set is
+// loaded in full and paginated in JS. Pushing JSONB predicates down to SQL is a
+// future optimization. The common `contentType + since + limit/skip` path keeps
+// its SQL pushdown.
+const isAdvancedQuery = (q: EntryQuery) =>
+  Boolean(q.filters?.length || q.order?.length || q.search || q.select);
 
 function makeContentTypeRepo(db: Db): ContentTypeRepo {
   return {
@@ -110,17 +121,20 @@ function makeEntryRepo(db: Db): EntryRepo {
       return result;
     },
     async list(scope, query: EntryQuery) {
+      const advanced = isAdvancedQuery(query);
       const conditions = [scopeFilter(schema.entries, scope)];
       if (query.contentTypeApiId) {
         conditions.push(eq(schema.entries.contentTypeApiId, query.contentTypeApiId));
       }
-      const rows = await db
+      let select = db
         .select()
         .from(schema.entries)
         .where(and(...conditions))
         .orderBy(asc(schema.entries.updatedAt))
-        .limit(query.limit ?? 100)
-        .offset(query.skip ?? 0);
+        .$dynamic();
+      // SQL pagination is only valid when there are no JS-side field predicates.
+      if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
+      const rows = await select;
       // Fetch each entry's current-version fields.
       const results: EntryWithFields[] = [];
       for (const row of rows) {
@@ -136,7 +150,18 @@ function makeEntryRepo(db: Db): EntryRepo {
           );
         results.push({ entry: toEntry(row), fields: version?.fields ?? {} });
       }
-      return results;
+      if (!advanced) return results;
+      const filtered = runEntryQuery(
+        results,
+        query,
+        (r) => r.fields,
+        (r) => ({ id: r.entry.id, contentType: r.entry.contentTypeApiId, status: r.entry.status }),
+      );
+      if (!query.select) return filtered;
+      return filtered.map((r) => ({
+        ...r,
+        fields: projectFields(r.fields, query.select as string[]),
+      }));
     },
     async create(scope, entry, version) {
       await db.insert(schema.entries).values(entryRow(scope, entry));
@@ -196,20 +221,33 @@ function makeEntryRepo(db: Db): EntryRepo {
       return row ? toPublished(row) : null;
     },
     async listPublished(scope, query: EntryQuery) {
+      const advanced = isAdvancedQuery(query);
       const conditions = [scopeFilter(schema.entryPublished, scope)];
       if (query.contentTypeApiId) {
         conditions.push(eq(schema.entryPublished.contentTypeApiId, query.contentTypeApiId));
       }
       if (query.since)
         conditions.push(gt(schema.entryPublished.publishedAt, new Date(query.since)));
-      const rows = await db
+      let select = db
         .select()
         .from(schema.entryPublished)
         .where(and(...conditions))
         .orderBy(asc(schema.entryPublished.publishedAt))
-        .limit(query.limit ?? 100)
-        .offset(query.skip ?? 0);
-      return rows.map(toPublished);
+        .$dynamic();
+      if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
+      const published = (await select).map(toPublished);
+      if (!advanced) return published;
+      const filtered = runEntryQuery(
+        published,
+        query,
+        (r) => r.fields,
+        (r) => ({ id: r.entryId, contentType: r.contentTypeApiId, publishedAt: r.publishedAt }),
+      );
+      if (!query.select) return filtered;
+      return filtered.map((r) => ({
+        ...r,
+        fields: projectFields(r.fields, query.select as string[]),
+      }));
     },
   };
 }

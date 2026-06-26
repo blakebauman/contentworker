@@ -48,8 +48,9 @@ export async function listPreviewEntries(
   query: EntryQuery = {},
   opts: RenderOptions = {},
 ): Promise<PreviewedEntry[]> {
-  const rows = await ctx.store.entries.list(scope, query);
   const config = await spaceConfig(ctx, scope);
+  const locale = query.locale ?? opts.locale ?? config.defaultLocale;
+  const rows = await ctx.store.entries.list(scope, { ...query, locale });
   return rows.map((found) => ({
     id: found.entry.id,
     contentType: found.entry.contentTypeApiId,

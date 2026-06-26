@@ -2,6 +2,7 @@ export * from './types.js';
 export * from './errors.js';
 export * from './events.js';
 export * from './locale.js';
+export * from './query/query.js';
 export * from './content-type/field.js';
 export * from './content-type/content-type.js';
 export * from './entry/entry.js';

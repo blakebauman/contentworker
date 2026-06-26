@@ -87,10 +87,27 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
 
   server.tool(
     'entries_query',
-    'List entries (current/draft versions), optionally filtered by content type.',
+    'List entries (current/draft versions) with optional field-level filters, ' +
+      'ordering, projection, and full-text search.',
     {
       contentType: z.string().optional(),
       limit: z.number().int().positive().optional(),
+      skip: z.number().int().nonnegative().optional(),
+      locale: z.string().optional(),
+      filters: z
+        .array(
+          z.object({
+            field: z.string().describe('field apiId or a sys.* pseudo-field'),
+            op: z.enum(['eq', 'ne', 'in', 'nin', 'gt', 'gte', 'lt', 'lte', 'exists', 'match']),
+            value: z.any().optional(),
+          }),
+        )
+        .optional(),
+      order: z
+        .array(z.object({ field: z.string(), direction: z.enum(['asc', 'desc']) }))
+        .optional(),
+      select: z.array(z.string()).optional().describe('field apiIds to return'),
+      search: z.string().optional(),
       ...scopeArgs,
     },
     async (args) => {
@@ -99,6 +116,12 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
         await listPreviewEntries(ctx, scopeOf(args), {
           contentTypeApiId: args.contentType,
           limit: args.limit,
+          skip: args.skip,
+          locale: args.locale,
+          filters: args.filters,
+          order: args.order,
+          select: args.select,
+          search: args.search,
         }),
       );
     },
