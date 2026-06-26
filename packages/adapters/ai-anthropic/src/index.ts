@@ -15,6 +15,46 @@ export interface AnthropicProviderOptions {
 }
 
 /**
+ * Pulls a JSON value out of free-form model text. The `fast` tier can't use
+ * native structured outputs, so it's prompted to emit JSON and may wrap it in
+ * ```json fences or surround it with prose; this tolerates both. Returns
+ * undefined when nothing parses, letting the caller validate and re-prompt.
+ */
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function extractJson(text: string): unknown {
+  const trimmed = text.trim();
+  // Prefer a fenced block when present, else fall back to the raw text.
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidates = [fence?.[1], trimmed].filter((c): c is string => Boolean(c));
+  for (const candidate of candidates) {
+    const body = candidate.trim();
+    try {
+      return JSON.parse(body);
+    } catch {
+      // Slice from the first opening brace/bracket to its matching last one —
+      // handles leading/trailing prose around an otherwise-valid object.
+      const start = body.search(/[[{]/);
+      const end = Math.max(body.lastIndexOf('}'), body.lastIndexOf(']'));
+      if (start >= 0 && end > start) {
+        try {
+          return JSON.parse(body.slice(start, end + 1));
+        } catch {
+          // try next candidate
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * Anthropic Claude implementation of the AIProvider port. Callers select a
  * `tier`, never a model string, so the tier→model policy lives in one place.
  * Uses adaptive thinking, the effort parameter, and structured outputs
@@ -29,12 +69,24 @@ export function createAnthropicProvider(opts: AnthropicProviderOptions = {}): AI
       const tier = req.tier ?? 'balanced';
       const model = MODEL_BY_TIER[tier];
 
+      // Haiku (the `fast` tier) supports neither the effort parameter nor native
+      // structured outputs (output_config.format). For it we drop output_config
+      // and instead instruct JSON-only output in the system prompt, then parse
+      // the text ourselves (extractJson). Flagship/balanced keep native outputs.
+      const fastJson = tier === 'fast' && Boolean(req.outputSchema);
+
       const outputConfig: Record<string, unknown> = {};
-      // Haiku (the `fast` tier) does not support the effort parameter.
-      if (tier !== 'fast') outputConfig.effort = defaultEffort;
-      if (req.outputSchema) {
-        outputConfig.format = { type: 'json_schema', schema: req.outputSchema };
+      if (tier !== 'fast') {
+        outputConfig.effort = defaultEffort;
+        if (req.outputSchema) {
+          outputConfig.format = { type: 'json_schema', schema: req.outputSchema };
+        }
       }
+
+      const jsonInstruction = `Respond with a single JSON value that conforms to this JSON Schema. Output only the JSON — no prose, no markdown fences.\n${JSON.stringify(req.outputSchema)}`;
+      const system = fastJson
+        ? [req.system, jsonInstruction].filter(Boolean).join('\n\n')
+        : req.system;
 
       // The current Anthropic SDK types lag some GA fields (adaptive thinking,
       // output_config); the request shape is correct per the API.
@@ -43,7 +95,7 @@ export function createAnthropicProvider(opts: AnthropicProviderOptions = {}): AI
         max_tokens: req.maxTokens,
         thinking: { type: 'adaptive' },
         ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
-        ...(req.system ? { system: req.system } : {}),
+        ...(system ? { system } : {}),
         messages: [{ role: 'user', content: req.prompt }],
         // biome-ignore lint/suspicious/noExplicitAny: SDK param types lag GA fields
       } as any;
@@ -63,11 +115,11 @@ export function createAnthropicProvider(opts: AnthropicProviderOptions = {}): AI
         },
       };
       if (req.outputSchema && text) {
-        try {
-          result.object = JSON.parse(text);
-        } catch {
-          // Leave object undefined; caller validates and can re-prompt.
-        }
+        // `fast` returns prompt-instructed JSON (possibly fenced/with prose);
+        // native structured outputs return clean JSON. extractJson handles both.
+        const parsed = fastJson ? extractJson(text) : safeJsonParse(text);
+        if (parsed !== undefined) result.object = parsed;
+        // Leave object undefined otherwise; caller validates and can re-prompt.
       }
       return result;
     },
