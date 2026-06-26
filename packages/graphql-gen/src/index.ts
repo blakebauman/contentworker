@@ -33,7 +33,17 @@ export interface DeliveryResolvers {
   entry(contentType: string, id: string, locale?: string): Promise<ResolvedEntry | null>;
   collection(
     contentType: string,
-    args: { locale?: string; limit?: number; skip?: number },
+    args: {
+      locale?: string;
+      limit?: number;
+      skip?: number;
+      /** Field-level predicates keyed `fields.x[op]` (see Delivery query syntax). */
+      where?: Record<string, unknown>;
+      /** Sort keys, e.g. `["fields.title", "-sys.publishedAt"]`. */
+      order?: readonly string[];
+      /** Full-text search over string fields. */
+      search?: string;
+    },
   ): Promise<ResolvedEntry[]>;
   asset(id: string, locale?: string): Promise<unknown | null>;
   search(query: string, topK?: number): Promise<SearchHit[]>;
@@ -121,9 +131,25 @@ export function buildDeliverySchema(
     };
     query[`${ct.apiId}Collection`] = {
       type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
-      args: { ...localeArg, limit: { type: GraphQLInt }, skip: { type: GraphQLInt } },
-      resolve: (_root, args: { locale?: string; limit?: number; skip?: number }) =>
-        resolvers.collection(ct.apiId, args),
+      args: {
+        ...localeArg,
+        limit: { type: GraphQLInt },
+        skip: { type: GraphQLInt },
+        where: { type: JSONScalar },
+        order: { type: new GraphQLList(new GraphQLNonNull(GraphQLString)) },
+        search: { type: GraphQLString },
+      },
+      resolve: (
+        _root,
+        args: {
+          locale?: string;
+          limit?: number;
+          skip?: number;
+          where?: Record<string, unknown>;
+          order?: readonly string[];
+          search?: string;
+        },
+      ) => resolvers.collection(ct.apiId, args),
     };
   }
 

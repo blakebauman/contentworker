@@ -34,6 +34,26 @@ export interface ClientOptions {
   readonly cacheTtlMs?: number;
 }
 
+/** Comparison operators for a field-level filter (Contentful-style). */
+export type FilterOp =
+  | 'eq'
+  | 'ne'
+  | 'in'
+  | 'nin'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'exists'
+  | 'match';
+
+/** A single field predicate. `field` is a field apiId or a `sys.*` pseudo-field. */
+export interface EntryFilter {
+  readonly field: string;
+  readonly op?: FilterOp;
+  readonly value?: unknown;
+}
+
 export interface EntryQuery {
   readonly contentType?: string;
   readonly locale?: string;
@@ -43,6 +63,14 @@ export interface EntryQuery {
   readonly skip?: number;
   /** Delta cursor — only entries published after this ISO timestamp. */
   readonly since?: string;
+  /** Field-level predicates (all must match). */
+  readonly filters?: readonly EntryFilter[];
+  /** Sort keys, e.g. `['fields.title', '-sys.publishedAt']`. */
+  readonly order?: readonly string[];
+  /** Projection — return only these field apiIds. */
+  readonly select?: readonly string[];
+  /** Full-text search over string fields. */
+  readonly search?: string;
 }
 
 export class DeliveryError extends Error {
@@ -107,14 +135,7 @@ export function createDeliveryClient(opts: ClientOptions) {
     async listEntries<F extends Fields = Fields>(
       q: EntryQuery = {},
     ): Promise<{ items: DeliveredEntry<F>[]; total: number }> {
-      return get('/entries', {
-        content_type: q.contentType,
-        locale: q.locale,
-        include: q.include,
-        limit: q.limit,
-        skip: q.skip,
-        since: q.since,
-      });
+      return get('/entries', toParams(q));
     },
 
     /** Semantic search over published content. */
@@ -132,7 +153,7 @@ export function createDeliveryClient(opts: ClientOptions) {
 }
 
 function toParams(q: EntryQuery): Record<string, string | number | undefined> {
-  return {
+  const params: Record<string, string | number | undefined> = {
     content_type: q.contentType,
     locale: q.locale,
     include: q.include,
@@ -140,6 +161,17 @@ function toParams(q: EntryQuery): Record<string, string | number | undefined> {
     skip: q.skip,
     since: q.since,
   };
+  for (const f of q.filters ?? []) {
+    const path = f.field.startsWith('sys.') ? f.field : `fields.${f.field}`;
+    const op = f.op ?? 'eq';
+    const key = op === 'eq' ? path : `${path}[${op}]`;
+    const value = Array.isArray(f.value) ? f.value.join(',') : String(f.value ?? '');
+    params[key] = value;
+  }
+  if (q.order?.length) params.order = q.order.join(',');
+  if (q.select?.length) params.select = q.select.join(',');
+  if (q.search) params.query = q.search;
+  return params;
 }
 
 /** Fluent entry query: `client.query().contentType('article').locale('en-US').limit(10).fetch()`. */
@@ -166,6 +198,32 @@ export class EntryQueryBuilder<F extends Fields> {
   }
   skip(n: number): this {
     this.q = { ...this.q, skip: n };
+    return this;
+  }
+  /** Add a field predicate, e.g. `.where('views', 'gt', 100)`. Defaults to `eq`. */
+  where(field: string, op: FilterOp, value?: unknown): this;
+  where(field: string, value: unknown): this;
+  where(field: string, ...rest: unknown[]): this {
+    const filter: EntryFilter =
+      rest.length >= 2
+        ? { field, op: rest[0] as FilterOp, value: rest[1] }
+        : { field, op: 'eq', value: rest[0] };
+    this.q = { ...this.q, filters: [...(this.q.filters ?? []), filter] };
+    return this;
+  }
+  /** Set sort keys, e.g. `.order('fields.title', '-sys.publishedAt')`. */
+  order(...keys: string[]): this {
+    this.q = { ...this.q, order: keys };
+    return this;
+  }
+  /** Project to a subset of field apiIds. */
+  select(...fields: string[]): this {
+    this.q = { ...this.q, select: fields };
+    return this;
+  }
+  /** Full-text search over string fields. */
+  search(text: string): this {
+    this.q = { ...this.q, search: text };
     return this;
   }
   fetch(): Promise<{ items: DeliveredEntry<F>[]; total: number }> {

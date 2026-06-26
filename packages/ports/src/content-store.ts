@@ -9,6 +9,8 @@ import type {
   EventType,
   LocaleCode,
   LocalizedValue,
+  QueryFilter,
+  QueryOrder,
   ReferenceEdge,
   Scope,
   Webhook,
@@ -154,6 +156,16 @@ export interface EntryQuery {
   readonly skip?: number;
   /** Delta cursor — only entries published strictly after this ISO timestamp. */
   readonly since?: string;
+  /** Field-level predicates (all must match). `field` is a field apiId or `sys.*`. */
+  readonly filters?: readonly QueryFilter[];
+  /** Sort keys, applied in order. */
+  readonly order?: readonly QueryOrder[];
+  /** Projection — return only these field apiIds. */
+  readonly select?: readonly string[];
+  /** Full-text search across string field values (case-insensitive). */
+  readonly search?: string;
+  /** Locale used to resolve field values for filtering/ordering/search. */
+  readonly locale?: LocaleCode;
 }
 
 export interface EntryRepo {

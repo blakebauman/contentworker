@@ -151,8 +151,11 @@ export async function listPublishedEntries(
   query: EntryQuery = {},
   opts: RenderOptions = {},
 ): Promise<DeliveredEntry[]> {
-  const rows = await ctx.store.entries.listPublished(scope, query);
   const config = await spaceConfig(ctx, scope);
+  // Filtering/ordering/search compare against a single resolved locale; default
+  // to the requested locale, then the space default.
+  const locale = query.locale ?? opts.locale ?? config.defaultLocale;
+  const rows = await ctx.store.entries.listPublished(scope, { ...query, locale });
   const depth = clampDepth(opts.include);
   return Promise.all(
     rows.map((s) => render(ctx, scope, s, config, opts, depth, new Set([s.entryId]), new Set())),

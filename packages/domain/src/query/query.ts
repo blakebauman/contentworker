@@ -1,0 +1,219 @@
+/**
+ * Field-level query primitives shared by every store adapter (Postgres and the
+ * in-memory test store) so filtering/ordering/search behave identically across
+ * surfaces. Pure domain logic: no infrastructure, no port types.
+ *
+ * Field values are localized (`locale -> value`); a query compares against a
+ * single comparable scalar resolved from the requested locale, falling back to
+ * the field's first (default-locale) value — keeping localized and
+ * non-localized fields uniform.
+ */
+
+import type { EntryFields, LocaleCode, LocalizedValue } from '../types.js';
+
+/** The comparison operators a field filter may use (Contentful-style). */
+export type FilterOp =
+  | 'eq'
+  | 'ne'
+  | 'in'
+  | 'nin'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'exists'
+  | 'match';
+
+/** A single field-level predicate. `field` may be a content field apiId or a
+ *  `sys.*` pseudo-field (e.g. `sys.publishedAt`). */
+export interface QueryFilter {
+  readonly field: string;
+  readonly op: FilterOp;
+  /** Comparand: scalar for eq/ne/gt…; array for in/nin; boolean for exists. */
+  readonly value?: unknown;
+}
+
+/** A sort key. `field` may be a content field apiId or a `sys.*` pseudo-field. */
+export interface QueryOrder {
+  readonly field: string;
+  readonly direction: 'asc' | 'desc';
+}
+
+/** Resolves the comparable scalar for a localized value at the given locale. */
+export function comparableValue(lv: LocalizedValue | undefined, locale?: LocaleCode): unknown {
+  if (!lv) return undefined;
+  if (locale && lv[locale] !== undefined && lv[locale] !== null) return lv[locale];
+  // Non-localized fields hold a single (default-locale) value; localized fields
+  // missing the requested locale degrade to whatever value is present.
+  for (const v of Object.values(lv)) {
+    if (v !== undefined && v !== null) return v;
+  }
+  return undefined;
+}
+
+/** Coerces a string comparand to the runtime type of the field value it is
+ *  compared against (query strings are untyped; field values are not). */
+function coerce(filterValue: unknown, fieldValue: unknown): unknown {
+  if (typeof filterValue !== 'string') return filterValue;
+  if (typeof fieldValue === 'number') {
+    const n = Number(filterValue);
+    return Number.isNaN(n) ? filterValue : n;
+  }
+  if (typeof fieldValue === 'boolean') {
+    if (filterValue === 'true') return true;
+    if (filterValue === 'false') return false;
+  }
+  return filterValue;
+}
+
+/** Orders two comparable scalars; numbers numerically, otherwise lexically.
+ *  `undefined`/`null` sort last. */
+export function compareValues(a: unknown, b: unknown): number {
+  const aMissing = a === undefined || a === null;
+  const bMissing = b === undefined || b === null;
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const as = String(a);
+  const bs = String(b);
+  return as < bs ? -1 : as > bs ? 1 : 0;
+}
+
+/** Evaluates a single operator against a resolved field value. */
+export function matchOp(op: FilterOp, fieldValue: unknown, filterValue: unknown): boolean {
+  switch (op) {
+    case 'exists': {
+      const present = fieldValue !== undefined && fieldValue !== null;
+      // A bare `exists` (no comparand) asserts presence.
+      const want = filterValue === undefined ? true : Boolean(filterValue);
+      return present === want;
+    }
+    case 'in':
+    case 'nin': {
+      const arr = (Array.isArray(filterValue) ? filterValue : [filterValue]).map((v) =>
+        coerce(v, fieldValue),
+      );
+      const found = arr.some((v) => v === fieldValue);
+      return op === 'in' ? found : !found;
+    }
+    case 'match': {
+      if (fieldValue === undefined || fieldValue === null) return false;
+      return String(fieldValue).toLowerCase().includes(String(filterValue).toLowerCase());
+    }
+    default: {
+      const fv = coerce(filterValue, fieldValue);
+      switch (op) {
+        case 'eq':
+          return fieldValue === fv;
+        case 'ne':
+          return fieldValue !== fv;
+        case 'gt':
+          return compareValues(fieldValue, fv) > 0;
+        case 'gte':
+          return compareValues(fieldValue, fv) >= 0;
+        case 'lt':
+          return compareValues(fieldValue, fv) < 0;
+        case 'lte':
+          return compareValues(fieldValue, fv) <= 0;
+        default:
+          return false;
+      }
+    }
+  }
+}
+
+/** Resolves a filter/order field name to its comparable value, honoring the
+ *  `sys.*` namespace (backed by the row's sys record). */
+function resolveField(
+  field: string,
+  fields: EntryFields,
+  sys: Record<string, unknown>,
+  locale?: LocaleCode,
+): unknown {
+  if (field.startsWith('sys.')) return sys[field.slice(4)];
+  return comparableValue(fields[field], locale);
+}
+
+/** True if every filter matches the entry's fields. */
+function matchesFilters(
+  fields: EntryFields,
+  sys: Record<string, unknown>,
+  filters: readonly QueryFilter[],
+  locale?: LocaleCode,
+): boolean {
+  return filters.every((f) => matchOp(f.op, resolveField(f.field, fields, sys, locale), f.value));
+}
+
+/** True if `search` (case-insensitive) appears in any string field value. */
+function matchesSearch(fields: EntryFields, search: string, locale?: LocaleCode): boolean {
+  const needle = search.toLowerCase();
+  for (const lv of Object.values(fields)) {
+    const v = comparableValue(lv, locale);
+    if (typeof v === 'string' && v.toLowerCase().includes(needle)) return true;
+  }
+  return false;
+}
+
+/** Projects an entry's fields down to `select` (field apiIds). */
+export function projectFields(fields: EntryFields, select: readonly string[]): EntryFields {
+  const keep = new Set(select);
+  const out: EntryFields = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (keep.has(k)) out[k] = v;
+  }
+  return out;
+}
+
+/** What a row must expose for {@link runEntryQuery} to filter/order it. */
+export interface EntryQueryInput {
+  readonly filters?: readonly QueryFilter[];
+  readonly order?: readonly QueryOrder[];
+  readonly search?: string;
+  readonly skip?: number;
+  readonly limit?: number;
+  /** Locale used to resolve field values for comparison. */
+  readonly locale?: LocaleCode;
+}
+
+/**
+ * Filters, orders and paginates `rows` by a field-level query. `fieldsOf` and
+ * `sysOf` adapt each row to its localized fields and `sys.*` values, so the same
+ * engine drives both the published and the draft/preview read paths.
+ *
+ * Projection (`select`) is applied by the caller, since it reshapes the returned
+ * row's `fields` and the row type varies per surface.
+ */
+export function runEntryQuery<T>(
+  rows: readonly T[],
+  query: EntryQueryInput,
+  fieldsOf: (row: T) => EntryFields,
+  sysOf: (row: T) => Record<string, unknown>,
+): T[] {
+  let result = [...rows];
+
+  if (query.filters?.length) {
+    result = result.filter((r) =>
+      matchesFilters(fieldsOf(r), sysOf(r), query.filters as QueryFilter[], query.locale),
+    );
+  }
+  if (query.search) {
+    result = result.filter((r) => matchesSearch(fieldsOf(r), query.search as string, query.locale));
+  }
+  if (query.order?.length) {
+    const order = query.order;
+    result.sort((a, b) => {
+      for (const o of order) {
+        const av = resolveField(o.field, fieldsOf(a), sysOf(a), query.locale);
+        const bv = resolveField(o.field, fieldsOf(b), sysOf(b), query.locale);
+        const cmp = compareValues(av, bv);
+        if (cmp !== 0) return o.direction === 'desc' ? -cmp : cmp;
+      }
+      return 0;
+    });
+  }
+
+  const skip = query.skip ?? 0;
+  const limit = query.limit ?? 100;
+  return result.slice(skip, skip + limit);
+}
