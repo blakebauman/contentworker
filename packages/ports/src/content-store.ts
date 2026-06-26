@@ -53,7 +53,30 @@ export interface ContentStore {
   readonly taxonomy: TaxonomyRepo;
   readonly audit: AuditRepo;
   readonly aiActions: AIActionRepo;
+  readonly functions: FunctionRepo;
   readonly outbox: OutboxRepo;
+}
+
+/**
+ * A user-defined function invoked on matching domain events. `eventPattern` is a
+ * glob on the event type (`*`, prefix like `entry.*`, or an exact type); the
+ * handler is hosted externally and invoked over HTTP. Env-scoped like content.
+ */
+export interface FunctionDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly eventPattern: string;
+  /** External HTTP endpoint invoked with the event payload. */
+  readonly url: string;
+  readonly active: boolean;
+  readonly createdAt: string;
+}
+
+export interface FunctionRepo {
+  create(scope: Scope, fn: FunctionDefinition): Promise<void>;
+  get(scope: Scope, id: string): Promise<FunctionDefinition | null>;
+  list(scope: Scope): Promise<FunctionDefinition[]>;
+  delete(scope: Scope, id: string): Promise<void>;
 }
 
 /**

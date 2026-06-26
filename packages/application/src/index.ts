@@ -21,6 +21,7 @@ export * from './render.js';
 export * from './delivery.js';
 export * from './preview.js';
 export * from './webhooks.js';
+export * from './functions.js';
 export * from './generation.js';
 export * from './content-ai.js';
 export * from './ai-actions.js';

@@ -1,6 +1,7 @@
 import type { DomainEvent } from '@cw/domain';
-import type { Cache, WebhookSender } from '@cw/ports';
+import type { Cache, FunctionInvoker, WebhookSender } from '@cw/ports';
 import type { AppContext } from '../context.js';
+import { invokeFunctionsForEvent } from '../functions.js';
 import { type RagDeps, indexEntryEmbeddings, removeEntryEmbeddings } from '../rag.js';
 
 export interface DispatchDeps {
@@ -9,6 +10,8 @@ export interface DispatchDeps {
   readonly cache?: Cache;
   /** Optional — when present, entries are embedded on publish (RAG). */
   readonly rag?: RagDeps;
+  /** Optional — when present, matching user functions are invoked on each event. */
+  readonly invoker?: FunctionInvoker;
 }
 
 /**
@@ -58,6 +61,11 @@ export async function dispatchEvent(
     } else if (event.type === 'entry.unpublished') {
       await removeEntryEmbeddings(deps.rag, scope, event.entryId);
     }
+  }
+
+  // 4. User-defined functions matching this event type.
+  if (deps.invoker) {
+    await invokeFunctionsForEvent(ctx, deps.invoker, event);
   }
 }
 

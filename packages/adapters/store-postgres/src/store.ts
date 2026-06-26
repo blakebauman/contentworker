@@ -35,6 +35,8 @@ import type {
   EntryQuery,
   EntryRepo,
   EntryWithFields,
+  FunctionDefinition,
+  FunctionRepo,
   OutboxRepo,
   PublishedAsset,
   PublishedEntry,
@@ -732,6 +734,51 @@ function makeAiActionRepo(db: Db): AIActionRepo {
   };
 }
 
+function makeFunctionRepo(db: Db): FunctionRepo {
+  const toFn = (r: typeof schema.functions.$inferSelect): FunctionDefinition => ({
+    id: r.id,
+    name: r.name,
+    eventPattern: r.eventPattern,
+    url: r.url,
+    active: r.active,
+    createdAt: r.createdAt.toISOString(),
+  });
+  return {
+    async create(scope, fn) {
+      await db.insert(schema.functions).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: fn.id,
+        name: fn.name,
+        eventPattern: fn.eventPattern,
+        url: fn.url,
+        active: fn.active,
+        createdAt: new Date(fn.createdAt),
+      });
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.functions)
+        .where(and(scopeFilter(schema.functions, scope), eq(schema.functions.id, id)));
+      return row ? toFn(row) : null;
+    },
+    async list(scope) {
+      const rows = await db
+        .select()
+        .from(schema.functions)
+        .where(scopeFilter(schema.functions, scope))
+        .orderBy(desc(schema.functions.createdAt));
+      return rows.map(toFn);
+    },
+    async delete(scope, id) {
+      await db
+        .delete(schema.functions)
+        .where(and(scopeFilter(schema.functions, scope), eq(schema.functions.id, id)));
+    },
+  };
+}
+
 function makeAuthRepo(db: Db): AuthRepo {
   return {
     async createApiKey(key) {
@@ -1415,6 +1462,7 @@ export function createPostgresStore(
     agentRuns: makeAgentRunRepo(db),
     audit: makeAuditRepo(db),
     aiActions: makeAiActionRepo(db),
+    functions: makeFunctionRepo(db),
     releases: makeReleaseRepo(db),
     scheduledActions: makeScheduledActionRepo(db),
     comments: makeCommentRepo(db),

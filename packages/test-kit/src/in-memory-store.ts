@@ -39,6 +39,8 @@ import type {
   EntryRepo,
   EntryWithFields,
   EnvironmentAlias,
+  FunctionDefinition,
+  FunctionRepo,
   OutboxRepo,
   PublishedAsset,
   PublishedEntry,
@@ -566,6 +568,24 @@ export class InMemoryContentStore implements ContentStore {
     },
     delete: async (scope, id) => {
       this.aiActionData.delete(`${scopeKey(scope)}::${id}`);
+    },
+  };
+
+  private readonly functionData = new Map<string, FunctionDefinition>();
+
+  readonly functions: FunctionRepo = {
+    create: async (scope, fn) => {
+      this.functionData.set(`${scopeKey(scope)}::${fn.id}`, fn);
+    },
+    get: async (scope, id) => this.functionData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    list: async (scope) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.functionData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v);
+    },
+    delete: async (scope, id) => {
+      this.functionData.delete(`${scopeKey(scope)}::${id}`);
     },
   };
 

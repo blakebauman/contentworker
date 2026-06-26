@@ -16,6 +16,7 @@ import {
   createContentType,
   createEntry,
   createEnvironment,
+  createFunction,
   createRelease,
   createScheme,
   createSpace,
@@ -27,6 +28,7 @@ import {
   deleteComment,
   deleteConcept,
   deleteEnvironmentAlias,
+  deleteFunction,
   deleteRelease,
   deleteScheme,
   deleteTag,
@@ -59,6 +61,7 @@ import {
   listContentTypes,
   listEnvironmentAliases,
   listEnvironments,
+  listFunctions,
   listReleases,
   listScheduledActions,
   listSchemes,
@@ -324,6 +327,18 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       ),
     ),
   );
+  // --- functions (event-triggered, HTTP-invoked) -------------------------
+  app.get(`${BASE}/functions`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listFunctions(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/functions`, requireScope(SCOPES.contentManage), async (c) =>
+    c.json(await createFunction(ctx, scopeOf(c), await c.req.json()), 201),
+  );
+  app.delete(`${BASE}/functions/:id`, requireScope(SCOPES.contentManage), async (c) => {
+    await deleteFunction(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
+
   // --- bulk operations ---------------------------------------------------
   app.post(`${BASE}/bulk/entries`, requireScope(SCOPES.contentWrite), async (c) => {
     const body = await c.req.json();
