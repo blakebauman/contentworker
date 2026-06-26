@@ -1,3 +1,4 @@
+import { CollaborationPanel } from '@/components/CollaborationPanel';
 import { PageHeader } from '@/components/PageHeader';
 import { ReferencedBy } from '@/components/ReferencedBy';
 import { Button } from '@/components/ui/button';
@@ -139,7 +140,8 @@ export function EntryEditor() {
         onGenerate={generate}
       />
       {isEdit && entryId && (
-        <div className="max-w-2xl">
+        <div className="grid max-w-5xl gap-4 lg:grid-cols-2">
+          <CollaborationPanel entryId={entryId} />
           <ReferencedBy id={entryId} types={types} />
         </div>
       )}

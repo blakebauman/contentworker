@@ -13,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import {
   FileText,
+  GitBranch,
   Image,
   LayoutDashboard,
   Menu,
@@ -34,6 +35,7 @@ const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/content', label: 'Content', icon: FileText },
   { to: '/releases', label: 'Releases', icon: Rocket },
+  { to: '/workflows', label: 'Workflows', icon: GitBranch },
   { to: '/media', label: 'Media', icon: Image },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];

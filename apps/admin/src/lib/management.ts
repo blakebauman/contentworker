@@ -1,8 +1,10 @@
 import type {
   Asset,
+  Comment,
   ContentType,
   ContentTypeDraft,
   EntryFields,
+  EntryWorkflowState,
   FilterOp,
   ReferenceEdge,
   Release,
@@ -11,6 +13,9 @@ import type {
   ScheduledAction,
   ScheduledActionType,
   ScheduledEntityType,
+  Task,
+  WorkflowDefinition,
+  WorkflowStep,
 } from '@cw/domain';
 
 /** Connection settings for the Management/Preview APIs (a CMA or admin token). */
@@ -485,6 +490,73 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     },
     cancelScheduledAction(id: string): Promise<ScheduledAction> {
       return req('DELETE', `${mgmt}/scheduled-actions/${encodeURIComponent(id)}`);
+    },
+
+    // --- comments (threaded, on entries) ---------------------------------
+    async listComments(entryId: string): Promise<Comment[]> {
+      const r = await req<{ items: Comment[] }>(
+        'GET',
+        `${mgmt}/entries/${encodeURIComponent(entryId)}/comments`,
+      );
+      return r.items;
+    },
+    addComment(
+      entryId: string,
+      input: { body: string; parentId?: string | null; author?: string },
+    ): Promise<Comment> {
+      return req('POST', `${mgmt}/entries/${encodeURIComponent(entryId)}/comments`, input);
+    },
+    deleteComment(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/comments/${encodeURIComponent(id)}`);
+    },
+
+    // --- tasks (on entries) ----------------------------------------------
+    async listTasks(entryId: string): Promise<Task[]> {
+      const r = await req<{ items: Task[] }>(
+        'GET',
+        `${mgmt}/entries/${encodeURIComponent(entryId)}/tasks`,
+      );
+      return r.items;
+    },
+    createTask(entryId: string, input: { body: string; assignee?: string }): Promise<Task> {
+      return req('POST', `${mgmt}/entries/${encodeURIComponent(entryId)}/tasks`, input);
+    },
+    /** One change per call: status ('resolved'|'open') or reassignment. */
+    updateTask(
+      id: string,
+      change: { status: 'resolved' | 'open' } | { assignee: string | null },
+    ): Promise<Task> {
+      return req('PUT', `${mgmt}/tasks/${encodeURIComponent(id)}`, change);
+    },
+    deleteTask(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/tasks/${encodeURIComponent(id)}`);
+    },
+
+    // --- workflows (configurable editorial steps) ------------------------
+    async listWorkflows(): Promise<WorkflowDefinition[]> {
+      const r = await req<{ items: WorkflowDefinition[] }>('GET', `${mgmt}/workflows`);
+      return r.items;
+    },
+    defineWorkflow(input: { name: string; steps: WorkflowStep[] }): Promise<WorkflowDefinition> {
+      return req('POST', `${mgmt}/workflows`, input);
+    },
+    deleteWorkflow(id: string): Promise<void> {
+      return req('DELETE', `${mgmt}/workflows/${encodeURIComponent(id)}`);
+    },
+    /** The entry's current workflow step, or null if it hasn't entered one. */
+    getEntryWorkflowState(entryId: string): Promise<EntryWorkflowState | null> {
+      return req('GET', `${mgmt}/entries/${encodeURIComponent(entryId)}/workflow`);
+    },
+    /** Moves the entry into a step; the backend enforces the step's required scope. */
+    transitionEntry(
+      entryId: string,
+      input: { workflowId: string; toStepId: string },
+    ): Promise<EntryWorkflowState> {
+      return req(
+        'POST',
+        `${mgmt}/entries/${encodeURIComponent(entryId)}/workflow/transition`,
+        input,
+      );
     },
   };
 }
