@@ -7,6 +7,7 @@ export * from './versioning.js';
 export * from './branching.js';
 export * from './audit.js';
 export * from './assets.js';
+export * from './image.js';
 export * from './publishing.js';
 export * from './releases.js';
 export * from './scheduling.js';

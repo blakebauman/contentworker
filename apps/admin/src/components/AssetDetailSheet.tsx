@@ -1,6 +1,14 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Sheet,
   SheetContent,
@@ -13,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type { Asset, ReferenceEdge, Tag } from '@cw/domain';
 import { useEffect, useRef, useState } from 'react';
 import { useClient } from '../lib/client-context.js';
+import type { ImageTransform } from '../lib/management.js';
 import { useToast } from '../lib/toast.js';
 
 /**
@@ -36,6 +45,10 @@ export function AssetDetailSheet(props: {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [usage, setUsage] = useState<ReferenceEdge[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [width, setWidth] = useState('400');
+  const [fit, setFit] = useState<NonNullable<ImageTransform['fit']>>('crop');
+  const [format, setFormat] = useState<ImageTransform['format'] | 'original'>('original');
+  const [preview, setPreview] = useState<string | null>(null);
   const imgRef = useRef<HTMLButtonElement>(null);
 
   // Hydrate form state from the asset whenever the sheet opens on a new asset.
@@ -45,6 +58,7 @@ export function AssetDetailSheet(props: {
     setFocal(asset.metadata.focalPoint);
     setTagIds([...asset.metadata.tags]);
     setUsage(null);
+    setPreview(null);
     client
       .listTags()
       .then(setAllTags)
@@ -68,6 +82,19 @@ export function AssetDetailSheet(props: {
 
   const toggleTag = (id: string) => {
     setTagIds((ids) => (ids.includes(id) ? ids.filter((t) => t !== id) : [...ids, id]));
+  };
+
+  const applyTransform = async () => {
+    try {
+      const { url } = await client.transformAsset(asset.id, {
+        width: width ? Number(width) : undefined,
+        fit,
+        format: format === 'original' ? undefined : format,
+      });
+      setPreview(url);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const save = async () => {
@@ -120,6 +147,78 @@ export function AssetDetailSheet(props: {
                 {focal
                   ? `x ${focal.x}, y ${focal.y} — click to move`
                   : 'Click the image to set a focal point for smart cropping.'}
+              </p>
+            </div>
+          )}
+
+          {isImage && (
+            <div className="space-y-2">
+              <Label>Transform preview</Label>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="t-width" className="text-muted-foreground text-xs">
+                    Width
+                  </Label>
+                  <Input
+                    id="t-width"
+                    type="number"
+                    value={width}
+                    onChange={(e) => setWidth(e.target.value)}
+                    className="h-8 w-24"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Fit</Label>
+                  <Select
+                    value={fit}
+                    onValueChange={(v) => setFit(v as NonNullable<ImageTransform['fit']>)}
+                  >
+                    <SelectTrigger className="h-8 w-28">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(['clip', 'crop', 'fill', 'max', 'scale'] as const).map((f) => (
+                        <SelectItem key={f} value={f}>
+                          {f}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Format</Label>
+                  <Select
+                    value={format}
+                    onValueChange={(v) => setFormat(v as ImageTransform['format'] | 'original')}
+                  >
+                    <SelectTrigger className="h-8 w-28">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(['original', 'jpg', 'png', 'webp', 'avif'] as const).map((f) => (
+                        <SelectItem key={f} value={f}>
+                          {f}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={applyTransform}>
+                  Apply
+                </Button>
+              </div>
+              {preview && (
+                <div className="space-y-1">
+                  <img
+                    src={preview}
+                    alt="Transformed preview"
+                    className="max-h-48 rounded-md border"
+                  />
+                  <p className="break-all font-mono text-[10px] text-muted-foreground">{preview}</p>
+                </div>
+              )}
+              <p className="text-muted-foreground text-xs">
+                Crop honors the saved focal point — save metadata first to see its effect.
               </p>
             </div>
           )}
