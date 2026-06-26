@@ -78,22 +78,42 @@ async function main() {
   queue.process(EVENTS_TOPIC, async (payload) => {
     const ev = payload as DomainEvent;
     const entryId = 'entryId' in ev ? ev.entryId : undefined;
-    await withSpan('event.dispatch', async () => {
-      try {
-        await dispatchEvent(ctx, { sender, cache, rag }, ev);
-        if (agents && ev.type === 'entry.published') {
-          const r = await withSpan('agent.enrich', () => agents.run('enrich', { scope: ev.scope, entryId: ev.entryId, autoApply }), { 'entry.id': ev.entryId });
-          await recordAgentRun(ctx, ev.scope, { workflow: 'enrich', entryId: ev.entryId, status: r.status, decisions: r.decisions, usage: r.usage });
-          logger.info({ entryId: ev.entryId, status: r.status, decisions: r.decisions, usage: r.usage }, 'enrich complete');
+    await withSpan(
+      'event.dispatch',
+      async () => {
+        try {
+          await dispatchEvent(ctx, { sender, cache, rag }, ev);
+          if (agents && ev.type === 'entry.published') {
+            const r = await withSpan(
+              'agent.enrich',
+              () => agents.run('enrich', { scope: ev.scope, entryId: ev.entryId, autoApply }),
+              { 'entry.id': ev.entryId },
+            );
+            await recordAgentRun(ctx, ev.scope, {
+              workflow: 'enrich',
+              entryId: ev.entryId,
+              status: r.status,
+              decisions: r.decisions,
+              usage: r.usage,
+            });
+            logger.info(
+              { entryId: ev.entryId, status: r.status, decisions: r.decisions, usage: r.usage },
+              'enrich complete',
+            );
+          }
+          logger.info({ type: ev.type, entryId }, 'event dispatched');
+        } catch (err) {
+          logger.error({ type: ev.type, entryId, err }, 'dispatch error');
+          throw err; // let BullMQ retry/dead-letter
         }
-        logger.info({ type: ev.type, entryId }, 'event dispatched');
-      } catch (err) {
-        logger.error({ type: ev.type, entryId, err }, 'dispatch error');
-        throw err; // let BullMQ retry/dead-letter
-      }
-    }, { 'event.type': ev.type, ...(entryId ? { 'entry.id': entryId } : {}) });
+      },
+      { 'event.type': ev.type, ...(entryId ? { 'entry.id': entryId } : {}) },
+    );
   });
-  logger.info({ topic: EVENTS_TOPIC, rag: !!rag, enrich: !!agents, autoApply }, 'worker consuming events');
+  logger.info(
+    { topic: EVENTS_TOPIC, rag: !!rag, enrich: !!agents, autoApply },
+    'worker consuming events',
+  );
 
   // Outbox relay loop: drain pending events onto the queue.
   const tick = async () => {

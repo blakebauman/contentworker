@@ -1,21 +1,48 @@
 import { defineContentType } from '@cw/domain';
 import { graphql } from 'graphql';
 import { describe, expect, it } from 'vitest';
-import { buildDeliverySchema, type DeliveryResolvers, type ResolvedEntry } from '../src/index.js';
+import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '../src/index.js';
 
 const article = defineContentType({
   apiId: 'article',
   name: 'Article',
   displayField: 'title',
   fields: [
-    { apiId: 'title', name: 'Title', type: 'Symbol', localized: false, required: true, position: 0 },
-    { apiId: 'wordCount', name: 'Words', type: 'Integer', localized: false, required: false, position: 1 },
-    { apiId: 'hero', name: 'Hero', type: 'Link', localized: false, required: false, position: 2, linkType: 'Asset' },
+    {
+      apiId: 'title',
+      name: 'Title',
+      type: 'Symbol',
+      localized: false,
+      required: true,
+      position: 0,
+    },
+    {
+      apiId: 'wordCount',
+      name: 'Words',
+      type: 'Integer',
+      localized: false,
+      required: false,
+      position: 1,
+    },
+    {
+      apiId: 'hero',
+      name: 'Hero',
+      type: 'Link',
+      localized: false,
+      required: false,
+      position: 2,
+      linkType: 'Asset',
+    },
   ],
 });
 
 const entries: Record<string, ResolvedEntry> = {
-  e1: { id: 'e1', contentType: 'article', publishedAt: 'now', fields: { title: 'Hello', wordCount: 42, hero: { id: 'a1', file: { fileName: 'h.jpg' } } } },
+  e1: {
+    id: 'e1',
+    contentType: 'article',
+    publishedAt: 'now',
+    fields: { title: 'Hello', wordCount: 42, hero: { id: 'a1', file: { fileName: 'h.jpg' } } },
+  },
 };
 
 const resolvers: DeliveryResolvers = {
@@ -43,7 +70,10 @@ describe('@cw/graphql-gen', () => {
   });
 
   it('exposes a collection root and a search root', async () => {
-    const r = await graphql({ schema, source: '{ articleCollection { _sys { id } } search(query: "x") { entryId score } }' });
+    const r = await graphql({
+      schema,
+      source: '{ articleCollection { _sys { id } } search(query: "x") { entryId score } }',
+    });
     expect(r.errors).toBeUndefined();
     const data = r.data as { articleCollection: unknown[]; search: { entryId: string }[] };
     expect(data.articleCollection).toHaveLength(1);

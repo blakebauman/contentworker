@@ -1,5 +1,8 @@
 import { createAnthropicProvider } from '@cw/adapter-ai-anthropic';
-import { createAzureOpenAIEmbeddings, createAzureOpenAIProvider } from '@cw/adapter-ai-azure-openai';
+import {
+  createAzureOpenAIEmbeddings,
+  createAzureOpenAIProvider,
+} from '@cw/adapter-ai-azure-openai';
 import { createS3BlobStore } from '@cw/adapter-blob-s3';
 import { createRedisCache } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';

@@ -1,17 +1,17 @@
 import type { ContentType, FieldDefinition } from '@cw/domain';
 import {
   GraphQLBoolean,
+  type GraphQLFieldConfigMap,
   GraphQLFloat,
   GraphQLID,
   GraphQLInt,
   GraphQLList,
   GraphQLNonNull,
   GraphQLObjectType,
+  type GraphQLOutputType,
   GraphQLScalarType,
   GraphQLSchema,
   GraphQLString,
-  type GraphQLFieldConfigMap,
-  type GraphQLOutputType,
 } from 'graphql';
 
 /** An entry rendered (locale-flattened, links resolved) by the resolvers. */
@@ -81,8 +81,14 @@ export function buildDeliverySchema(
     name: 'Sys',
     fields: {
       id: { type: new GraphQLNonNull(GraphQLID), resolve: (s: ResolvedEntry) => s.id },
-      contentType: { type: new GraphQLNonNull(GraphQLString), resolve: (s: ResolvedEntry) => s.contentType },
-      publishedAt: { type: new GraphQLNonNull(GraphQLString), resolve: (s: ResolvedEntry) => s.publishedAt },
+      contentType: {
+        type: new GraphQLNonNull(GraphQLString),
+        resolve: (s: ResolvedEntry) => s.contentType,
+      },
+      publishedAt: {
+        type: new GraphQLNonNull(GraphQLString),
+        resolve: (s: ResolvedEntry) => s.publishedAt,
+      },
     },
   });
 
@@ -124,12 +130,14 @@ export function buildDeliverySchema(
   query.asset = {
     type: JSONScalar,
     args: { id: { type: new GraphQLNonNull(GraphQLID) }, ...localeArg },
-    resolve: (_root, args: { id: string; locale?: string }) => resolvers.asset(args.id, args.locale),
+    resolve: (_root, args: { id: string; locale?: string }) =>
+      resolvers.asset(args.id, args.locale),
   };
   query.search = {
     type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(searchHitType))),
     args: { query: { type: new GraphQLNonNull(GraphQLString) }, topK: { type: GraphQLInt } },
-    resolve: (_root, args: { query: string; topK?: number }) => resolvers.search(args.query, args.topK),
+    resolve: (_root, args: { query: string; topK?: number }) =>
+      resolvers.search(args.query, args.topK),
   };
 
   return new GraphQLSchema({ query: new GraphQLObjectType({ name: 'Query', fields: query }) });

@@ -1,17 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createMailchimpConnector, FakeEspConnector, mapEntryToCampaign } from '../src/index.js';
+import { FakeEspConnector, createMailchimpConnector, mapEntryToCampaign } from '../src/index.js';
 
 describe('@cw/sdk-email', () => {
   it('maps a delivered entry to a campaign via field roles', () => {
     const fields = { title: 'Spring Sale', body: '<h1>50% off</h1>', other: 'ignored' };
-    const c = mapEntryToCampaign(fields, { subjectField: 'title', bodyField: 'body', fromName: 'Shop' });
+    const c = mapEntryToCampaign(fields, {
+      subjectField: 'title',
+      bodyField: 'body',
+      fromName: 'Shop',
+    });
     expect(c.subject).toBe('Spring Sale');
     expect(c.html).toBe('<h1>50% off</h1>');
     expect(c.fromName).toBe('Shop');
   });
 
   it('throws when the subject field is empty', () => {
-    expect(() => mapEntryToCampaign({ body: 'x' }, { subjectField: 'title', bodyField: 'body' })).toThrow(/Subject/);
+    expect(() =>
+      mapEntryToCampaign({ body: 'x' }, { subjectField: 'title', bodyField: 'body' }),
+    ).toThrow(/Subject/);
   });
 
   it('pushes campaigns + contacts through a connector (fake)', async () => {
@@ -27,12 +33,20 @@ describe('@cw/sdk-email', () => {
     const calls: { method: string; url: string; auth?: string }[] = [];
     const fakeFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      calls.push({ method: init?.method ?? 'GET', url, auth: (init?.headers as Record<string, string>)?.authorization });
+      calls.push({
+        method: init?.method ?? 'GET',
+        url,
+        auth: (init?.headers as Record<string, string>)?.authorization,
+      });
       const bodyForPath = url.endsWith('/campaigns') ? { id: 'camp_42' } : {};
       return new Response(JSON.stringify(bodyForPath), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const mc = createMailchimpConnector({ apiKey: 'secret-us21', audienceId: 'list1', fetch: fakeFetch });
+    const mc = createMailchimpConnector({
+      apiKey: 'secret-us21',
+      audienceId: 'list1',
+      fetch: fakeFetch,
+    });
     const res = await mc.sendCampaign({ subject: 'Launch', html: '<p>Launch</p>' });
     expect(res.id).toBe('camp_42');
 

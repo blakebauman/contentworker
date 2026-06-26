@@ -13,7 +13,9 @@ export interface SyncState<F extends Fields> {
  * Loads cached entries immediately (offline) and delta-syncs in the background.
  * Call `sync()` again on reconnect / foreground / pull-to-refresh.
  */
-export function useOfflineEntries<F extends Fields = Fields>(store: OfflineDelivery<F>): SyncState<F> {
+export function useOfflineEntries<F extends Fields = Fields>(
+  store: OfflineDelivery<F>,
+): SyncState<F> {
   const [entries, setEntries] = useState<import('@cw/sdk-core').DeliveredEntry<F>[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<Error | undefined>();

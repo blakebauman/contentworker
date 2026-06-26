@@ -1,3 +1,4 @@
+import type { Activities, AgentRunResult, WorkflowInput } from '@cw/agent-runtime';
 /**
  * Temporal workflow definitions. These run in Temporal's deterministic sandbox,
  * so this module imports ONLY workflow-safe code: the pure `enrichWorkflow` /
@@ -7,7 +8,6 @@
  * in-process runtime uses, so the workflow logic is shared, not duplicated.
  */
 import { enrichWorkflow, moderateWorkflow } from '@cw/agent-runtime/workflows';
-import type { Activities, AgentRunResult, WorkflowInput } from '@cw/agent-runtime';
 import { proxyActivities } from '@temporalio/workflow';
 
 const activities = proxyActivities<Activities>({

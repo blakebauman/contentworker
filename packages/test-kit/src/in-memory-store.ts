@@ -131,7 +131,9 @@ export class InMemoryContentStore implements ContentStore {
       }
       if (query.since) rows = rows.filter((r) => r.publishedAt > (query.since as string));
       // Order by publishedAt so a `since` cursor advances deterministically.
-      rows.sort((a, b) => (a.publishedAt < b.publishedAt ? -1 : a.publishedAt > b.publishedAt ? 1 : 0));
+      rows.sort((a, b) =>
+        a.publishedAt < b.publishedAt ? -1 : a.publishedAt > b.publishedAt ? 1 : 0,
+      );
       const skip = query.skip ?? 0;
       const limit = query.limit ?? 100;
       return rows.slice(skip, skip + limit);
@@ -145,7 +147,9 @@ export class InMemoryContentStore implements ContentStore {
     get: async (scope, id) => this.assetData.get(`${scopeKey(scope)}::${id}`) ?? null,
     list: async (scope, query) => {
       const prefix = `${scopeKey(scope)}::`;
-      const rows = [...this.assetData.entries()].filter(([k]) => k.startsWith(prefix)).map(([, v]) => v);
+      const rows = [...this.assetData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v);
       const skip = query.skip ?? 0;
       return rows.slice(skip, skip + (query.limit ?? 100));
     },
@@ -275,7 +279,11 @@ export class InMemoryContentStore implements ContentStore {
       if (query.workflow) rows = rows.filter((r) => r.workflow === query.workflow);
       if (query.since) rows = rows.filter((r) => r.createdAt >= (query.since as string));
       return rows.reduce(
-        (acc, r) => ({ runs: acc.runs + 1, inputTokens: acc.inputTokens + r.inputTokens, outputTokens: acc.outputTokens + r.outputTokens }),
+        (acc, r) => ({
+          runs: acc.runs + 1,
+          inputTokens: acc.inputTokens + r.inputTokens,
+          outputTokens: acc.outputTokens + r.outputTokens,
+        }),
         { runs: 0, inputTokens: 0, outputTokens: 0 },
       );
     },
