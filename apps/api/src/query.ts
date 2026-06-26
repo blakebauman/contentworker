@@ -1,5 +1,5 @@
 /**
- * Parses Contentful-style query parameters into a port `EntryQuery`. Shared by
+ * Parses field-level query parameters into a port `EntryQuery`. Shared by
  * the Delivery, Preview, and GraphQL surfaces so the query language is identical
  * everywhere.
  *

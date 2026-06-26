@@ -1,8 +1,8 @@
 # contentworker
 
-A composable, **API-first, AI-agentic-first** headless CMS — think Contentful, but with
-the AI surface treated as a first-class client rather than a bolt-on. Model structured
-content once and deliver it anywhere (web, mobile, wearables, kiosks, IoT, email).
+A composable, **API-first, AI-agentic-first** headless CMS — the AI surface is treated as
+a first-class client rather than a bolt-on. Model structured content once and deliver it
+anywhere (web, mobile, wearables, kiosks, IoT, email).
 
 Built **cloud-agnostic** for Kubernetes (EKS/GKE/AKS) on a strict **ports & adapters**
 core, so swapping clouds — Postgres vendor, object store, AI provider — is a config change,
@@ -21,7 +21,7 @@ not a code change.
   validation and RBAC.
 - **Structured content model.** 11 field types, per-field validation, localization with
   fallback chains, references with referential integrity, and assets with direct-to-S3 uploads.
-- **Contentful-style API split.** Management (CMA), Delivery (CDA), and Preview (CPA) surfaces,
+- **Three-surface API split.** Management (CMA), Delivery (CDA), and Preview (CPA) surfaces,
   each gated by scoped, hashed API keys, mountable together or as independently-scaled services.
   Delivery is available as both REST and a **per-space GraphQL** schema generated from your model.
 - **Event-driven backbone.** Publishing writes a denormalized read model *and* appends a domain

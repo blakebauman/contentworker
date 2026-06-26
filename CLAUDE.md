@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`contentworker` is an API-first, AI-agentic-first headless CMS (a Contentful-like).
+`contentworker` is an API-first, AI-agentic-first headless CMS.
 It is a pnpm + Turborepo monorepo built on **strict ports & adapters (hexagonal)**
 architecture, designed to be cloud-agnostic on Kubernetes. The full design and the
-phased roadmap (P0–P10) live in `/Users/blake/.claude/plans/like-contentful-design-and-melodic-glade.md`.
+phased roadmap (P0–P10) live in the project plans directory under `~/.claude/plans/`.
 
 ## Commands
 

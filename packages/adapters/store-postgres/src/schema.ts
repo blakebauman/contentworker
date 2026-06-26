@@ -227,7 +227,7 @@ export const auditLog = pgTable(
   (t) => [index('audit_log_by_space').on(t.spaceId, t.at)],
 );
 
-/** Persisted, templated AI operations (Contentful "AI Actions"), env-scoped. */
+/** Persisted, templated AI operations ("AI Actions"), env-scoped. */
 export const aiActions = pgTable(
   'ai_actions',
   {

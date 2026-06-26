@@ -70,7 +70,7 @@ export interface EntryOrder {
   readonly direction: 'asc' | 'desc';
 }
 
-/** Contentful-style query options for the entries list (filters/order/search). */
+/** Query options for the entries list (filters/order/search). */
 export interface EntryListQuery {
   readonly filters?: readonly EntryFilter[];
   readonly order?: readonly EntryOrder[];
@@ -84,7 +84,7 @@ function fieldPath(field: string): string {
   return field.startsWith('sys.') || field.startsWith('metadata.') ? field : `fields.${field}`;
 }
 
-/** Serializes an `EntryListQuery` into Contentful-style query params. */
+/** Serializes an `EntryListQuery` into field-level query params. */
 export function entryQueryParams(query: EntryListQuery): URLSearchParams {
   const params = new URLSearchParams();
   for (const f of query.filters ?? []) {
@@ -265,7 +265,7 @@ export interface AuditEntry {
   readonly at: string;
 }
 
-/** A persisted, templated AI Action (Contentful "AI Actions"). */
+/** A persisted, templated AI Action. */
 export interface AIAction {
   readonly id: string;
   readonly name: string;
@@ -277,7 +277,7 @@ export interface AIAction {
   readonly createdAt: string;
 }
 
-/** A requested image transformation (Imgix/Sanity URL-API convention). */
+/** A requested image transformation (query-param URL convention). */
 export interface ImageTransform {
   readonly width?: number;
   readonly height?: number;

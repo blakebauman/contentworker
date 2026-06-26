@@ -57,7 +57,7 @@ export interface ContentStore {
 }
 
 /**
- * A persisted, templated, governed AI operation (Contentful "AI Actions"). The
+ * A persisted, templated, governed AI operation ("AI Action"). The
  * prompt template interpolates `{{variables}}`; an optional `targetField` says
  * which entry field a run writes into. Scoped per environment like content.
  */

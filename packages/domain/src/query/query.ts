@@ -11,7 +11,7 @@
 
 import type { EntryFields, LocaleCode, LocalizedValue } from '../types.js';
 
-/** The comparison operators a field filter may use (Contentful-style). */
+/** The comparison operators a field filter may use. */
 export type FilterOp =
   | 'eq'
   | 'ne'

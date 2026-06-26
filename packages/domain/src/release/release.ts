@@ -1,7 +1,7 @@
 /**
  * A release groups several entries so they can be published together in a single
- * atomic transaction (Contentful "Release" / Sanity "Release"). Each item names
- * an entry and the action to apply when the release ships.
+ * atomic transaction. Each item names an entry and the action to apply when the
+ * release ships.
  */
 
 import { InvalidStateError } from '../errors.js';

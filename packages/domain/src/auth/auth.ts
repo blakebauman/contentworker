@@ -1,6 +1,6 @@
 import { DomainError } from '../errors.js';
 
-/** The kind of API key — mirrors Contentful's CMA/CDA/CPA split. */
+/** The kind of API key — the CMA/CDA/CPA (management/delivery/preview) split. */
 export type ApiKeyKind = 'cma' | 'cda' | 'cpa';
 
 /** Permission scopes. A principal's scopes are checked per operation. */
