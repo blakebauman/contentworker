@@ -9,7 +9,7 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import { InProcessAgentRuntime, makeActivities } from '../src/index.js';
 
-const scope = { spaceId: 'blog', environmentId: 'master' };
+const scope = { spaceId: 'blog', environmentId: 'main' };
 
 async function seed(ctx: AppContext) {
   await createSpace(ctx, { spaceId: 'blog', name: 'Blog', defaultLocale: 'en-US' });

@@ -32,7 +32,7 @@ pnpm --filter @cw/application test -- -t 'publishes an entry'
 ## Running locally
 
 ```bash
-# In-memory (no infra): seeded space-1/master, dev tokens
+# In-memory (no infra): seeded space-1/main, dev tokens
 pnpm --filter @cw/api start          # http://localhost:8787
 pnpm --filter @cw/api dev            # same, with --watch
 pnpm --filter @cw/mcp-server start   # http://localhost:8788/mcp

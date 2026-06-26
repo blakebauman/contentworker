@@ -8,7 +8,7 @@ export interface CreateSpaceInput {
   readonly defaultLocale: LocaleCode;
   readonly locales?: readonly LocaleCode[];
   readonly fallbacks?: Record<LocaleCode, LocaleCode | null>;
-  /** Environments to create alongside the space. Defaults to ["master"]. */
+  /** Environments to create alongside the space. Defaults to ["main"]. */
   readonly environments?: readonly string[];
 }
 
@@ -31,7 +31,7 @@ export async function createSpace(ctx: AppContext, input: CreateSpaceInput): Pro
     fallbacks: input.fallbacks,
   };
   await ctx.store.spaces.create(config);
-  const environments = input.environments?.length ? input.environments : ['master'];
+  const environments = input.environments?.length ? input.environments : ['main'];
   for (const env of environments) {
     await ctx.store.spaces.createEnvironment(input.spaceId, env, env);
   }

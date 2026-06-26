@@ -484,7 +484,7 @@ const CONN_FIELDS: {
   { key: 'baseUrl', label: 'API URL', placeholder: 'same-origin (leave blank to use this host)' },
   { key: 'token', label: 'Token', placeholder: 'CMA or admin token', password: true },
   { key: 'space', label: 'Space', placeholder: 'space-1' },
-  { key: 'environment', label: 'Environment', placeholder: 'master' },
+  { key: 'environment', label: 'Environment', placeholder: 'main' },
 ];
 
 /**

@@ -13,7 +13,7 @@ function fakeFetch(handler: (url: string, init?: RequestInit) => unknown) {
   }) as unknown as typeof fetch;
 }
 
-const base = { baseUrl: 'https://cms.test', space: 's1', environment: 'master', token: 'cda-tok' };
+const base = { baseUrl: 'https://cms.test', space: 's1', environment: 'main', token: 'cda-tok' };
 
 describe('@cw/sdk-core delivery client', () => {
   let calls: { url: string; init?: RequestInit }[];
@@ -31,7 +31,7 @@ describe('@cw/sdk-core delivery client', () => {
     const entry = await client.getEntry('e1', { locale: 'de-DE', include: 2 });
     expect(entry.fields.title).toBe('Hi');
     const call = calls[0];
-    expect(call?.url).toBe('https://cms.test/delivery/s1/master/entries/e1?locale=de-DE&include=2');
+    expect(call?.url).toBe('https://cms.test/delivery/s1/main/entries/e1?locale=de-DE&include=2');
     expect((call?.init?.headers as Record<string, string>).authorization).toBe('Bearer cda-tok');
   });
 

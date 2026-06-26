@@ -123,7 +123,7 @@ etc., which validate fields against the content model and authorize the principa
 ## Multi-tenancy by construction
 
 Every store and use-case operation carries a `Scope` of `{ spaceId, environmentId }`. A *space*
-is a tenant boundary; an *environment* is a branch within it (e.g. `master`, `staging`). In
+is a tenant boundary; an *environment* is a branch within it (e.g. `main`, `staging`). In
 Postgres, `(spaceId, environmentId)` is part of the primary key or a unique index on every
 content table, so one database serves many isolated spaces without row-level security.
 

@@ -12,7 +12,7 @@ import {
   unpublishEntry,
 } from '../src/index.js';
 
-const scope = { spaceId: 'blog', environmentId: 'master' };
+const scope = { spaceId: 'blog', environmentId: 'main' };
 
 function makeContext() {
   const store = new InMemoryContentStore();

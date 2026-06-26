@@ -13,7 +13,7 @@ import { createDeliveryClient } from '@cw/sdk-core';
 const client = createDeliveryClient({
   baseUrl: 'https://cms.example.com',
   space: 'space-1',
-  environment: 'master',
+  environment: 'main',
   token: '<cda-token>',
   fetch,                 // optional: inject a fetch (SSR/edge/test)
   cacheTtlMs: 0,         // optional in-memory cache (0 = off)

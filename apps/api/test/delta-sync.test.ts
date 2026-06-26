@@ -11,10 +11,10 @@ const config: ApiConfig = {
   cdaKey: 'cda',
   cpaKey: 'cpa',
   adminToken: 'admin',
-  seed: { spaceId: 's1', environmentId: 'master', defaultLocale: 'en-US', locales: ['en-US'] },
+  seed: { spaceId: 's1', environmentId: 'main', defaultLocale: 'en-US', locales: ['en-US'] },
 };
 const cma = { Authorization: 'Bearer cma', 'Content-Type': 'application/json' };
-const M = '/spaces/s1/environments/master';
+const M = '/spaces/s1/environments/main';
 
 describe('Delivery delta cursor (?since)', () => {
   it('returns only entries published after the cursor', async () => {
@@ -23,12 +23,30 @@ describe('Delivery delta cursor (?since)', () => {
     await app.request(`${M}/content-types`, {
       method: 'POST',
       headers: cma,
-      body: JSON.stringify({ apiId: 'post', name: 'Post', displayField: 'title', fields: [{ apiId: 'title', name: 'Title', type: 'Symbol', localized: false, required: true, position: 0 }] }),
+      body: JSON.stringify({
+        apiId: 'post',
+        name: 'Post',
+        displayField: 'title',
+        fields: [
+          {
+            apiId: 'title',
+            name: 'Title',
+            type: 'Symbol',
+            localized: false,
+            required: true,
+            position: 0,
+          },
+        ],
+      }),
     });
     await app.request(`${M}/content-types/post/published`, { method: 'POST', headers: cma });
 
     const publish = async (title: string) => {
-      const r = await app.request(`${M}/entries`, { method: 'POST', headers: cma, body: JSON.stringify({ contentTypeApiId: 'post', fields: { title: { 'en-US': title } } }) });
+      const r = await app.request(`${M}/entries`, {
+        method: 'POST',
+        headers: cma,
+        body: JSON.stringify({ contentTypeApiId: 'post', fields: { title: { 'en-US': title } } }),
+      });
       const { entry } = (await r.json()) as { entry: { id: string } };
       await app.request(`${M}/entries/${entry.id}/published`, { method: 'POST', headers: cma });
       return entry.id;
@@ -39,9 +57,10 @@ describe('Delivery delta cursor (?since)', () => {
     const client = createDeliveryClient({
       baseUrl: '',
       space: 's1',
-      environment: 'master',
+      environment: 'main',
       token: 'cda',
-      fetch: ((url: string | URL | Request, init?: RequestInit) => app.request(String(url), init)) as typeof fetch,
+      fetch: ((url: string | URL | Request, init?: RequestInit) =>
+        app.request(String(url), init)) as typeof fetch,
     });
 
     // Full pull, capture the cursor (last publishedAt).

@@ -13,7 +13,7 @@ import {
   updateEntry,
 } from '../src/index.js';
 
-const scope = { spaceId: 'space-1', environmentId: 'master' };
+const scope = { spaceId: 'space-1', environmentId: 'main' };
 
 function makeContext(): { ctx: AppContext; store: InMemoryContentStore } {
   const store = new InMemoryContentStore();

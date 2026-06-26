@@ -51,7 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     seedDev: env.SEED_DEV === 'true',
     seed: {
       spaceId: env.SEED_SPACE_ID ?? 'space-1',
-      environmentId: env.SEED_ENV_ID ?? 'master',
+      environmentId: env.SEED_ENV_ID ?? 'main',
       defaultLocale: env.SEED_DEFAULT_LOCALE ?? 'en-US',
       locales: (env.SEED_LOCALES ?? 'en-US').split(',').map((s) => s.trim()),
     },

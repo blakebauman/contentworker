@@ -61,4 +61,4 @@ A web console for editors/admins, talking to the Management/Preview APIs.
 
 - [ ] Hosted multi-tenant SaaS control plane (org/billing/usage metering).
 - [ ] Multi-region read replicas + edge delivery caching.
-- [ ] Per-environment content migration/diff tooling (promote master→staging).
+- [ ] Per-environment content migration/diff tooling (promote main→staging).

@@ -10,19 +10,22 @@ const config: ApiConfig = {
   cdaKey: 'cda',
   cpaKey: 'cpa',
   adminToken: 'admin',
-  seed: { spaceId: 's1', environmentId: 'master', defaultLocale: 'en-US', locales: ['en-US'] },
+  seed: { spaceId: 's1', environmentId: 'main', defaultLocale: 'en-US', locales: ['en-US'] },
 };
 
 const cma = { Authorization: 'Bearer cma', 'Content-Type': 'application/json' };
-const M = '/spaces/s1/environments/master';
+const M = '/spaces/s1/environments/main';
 
 async function gql(app: ReturnType<typeof createApp>, query: string) {
-  const res = await app.request('/delivery/s1/master/graphql', {
+  const res = await app.request('/delivery/s1/main/graphql', {
     method: 'POST',
     headers: { Authorization: 'Bearer cda', 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
   });
-  return { status: res.status, body: (await res.json()) as { data?: Record<string, unknown>; errors?: unknown[] } };
+  return {
+    status: res.status,
+    body: (await res.json()) as { data?: Record<string, unknown>; errors?: unknown[] },
+  };
 }
 
 describe('GraphQL Delivery (generated from content types)', () => {
@@ -39,8 +42,22 @@ describe('GraphQL Delivery (generated from content types)', () => {
         name: 'Article',
         displayField: 'title',
         fields: [
-          { apiId: 'title', name: 'Title', type: 'Symbol', localized: false, required: true, position: 0 },
-          { apiId: 'views', name: 'Views', type: 'Integer', localized: false, required: false, position: 1 },
+          {
+            apiId: 'title',
+            name: 'Title',
+            type: 'Symbol',
+            localized: false,
+            required: true,
+            position: 0,
+          },
+          {
+            apiId: 'views',
+            name: 'Views',
+            type: 'Integer',
+            localized: false,
+            required: false,
+            position: 1,
+          },
         ],
       }),
     });
@@ -48,13 +65,19 @@ describe('GraphQL Delivery (generated from content types)', () => {
     const created = await app.request(`${M}/entries`, {
       method: 'POST',
       headers: cma,
-      body: JSON.stringify({ contentTypeApiId: 'article', fields: { title: { 'en-US': 'GraphQL works' }, views: { 'en-US': 7 } } }),
+      body: JSON.stringify({
+        contentTypeApiId: 'article',
+        fields: { title: { 'en-US': 'GraphQL works' }, views: { 'en-US': 7 } },
+      }),
     });
     const { entry } = (await created.json()) as { entry: { id: string } };
     await app.request(`${M}/entries/${entry.id}/published`, { method: 'POST', headers: cma });
 
     // Query it through the generated GraphQL schema.
-    const one = await gql(app, `{ article(id: "${entry.id}", locale: "en-US") { _sys { id contentType } title views } }`);
+    const one = await gql(
+      app,
+      `{ article(id: "${entry.id}", locale: "en-US") { _sys { id contentType } title views } }`,
+    );
     expect(one.status).toBe(200);
     expect(one.body.errors).toBeUndefined();
     const a = (one.body.data as { article: Record<string, unknown> }).article;
@@ -69,7 +92,7 @@ describe('GraphQL Delivery (generated from content types)', () => {
   it('requires the delivery scope', async () => {
     const { ctx, rag, blob, ai } = wire(config);
     const app = createApp(ctx, config, rag, blob, ai);
-    const res = await app.request('/delivery/s1/master/graphql', {
+    const res = await app.request('/delivery/s1/main/graphql', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }, // no token
       body: JSON.stringify({ query: '{ __typename }' }),
