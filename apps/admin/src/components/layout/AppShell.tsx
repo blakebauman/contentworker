@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   Menu,
   Moon,
+  Rocket,
   Search,
   Settings as SettingsIcon,
   Sun,
@@ -32,6 +33,7 @@ import { SpaceSwitcher } from './SpaceSwitcher.js';
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/content', label: 'Content', icon: FileText },
+  { to: '/releases', label: 'Releases', icon: Rocket },
   { to: '/media', label: 'Media', icon: Image },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
