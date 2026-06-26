@@ -212,6 +212,14 @@ export interface Environment {
   readonly name: string;
 }
 
+/** A repointable pointer to a target environment, used for blue/green serving. */
+export interface EnvironmentAlias {
+  readonly alias: string;
+  readonly targetEnvironmentId: string;
+  /** When the alias was last (re)pointed (ISO-8601). */
+  readonly updatedAt: string;
+}
+
 export interface SpaceRepo {
   getConfig(scope: Scope): Promise<SpaceConfig | null>;
   /** All spaces (admin/provisioning view). */
@@ -222,6 +230,14 @@ export interface SpaceRepo {
   createEnvironment(spaceId: string, environmentId: string, name: string): Promise<void>;
   /** Lists a space's environments (branches). */
   listEnvironments(spaceId: string): Promise<Environment[]>;
+  /** Creates or repoints an environment alias (atomic blue/green pointer). */
+  setAlias(spaceId: string, alias: string, targetEnvironmentId: string, at: string): Promise<void>;
+  /** Resolves one alias, or null if the name isn't an alias. */
+  getAlias(spaceId: string, alias: string): Promise<EnvironmentAlias | null>;
+  /** Lists a space's environment aliases. */
+  listAliases(spaceId: string): Promise<EnvironmentAlias[]>;
+  /** Removes an alias (the target environment is untouched). */
+  deleteAlias(spaceId: string, alias: string): Promise<void>;
 }
 
 export interface ContentTypeRepo {

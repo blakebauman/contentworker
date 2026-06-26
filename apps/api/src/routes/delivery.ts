@@ -9,13 +9,19 @@ import {
 import { SCOPES, type Scope } from '@cw/domain';
 import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '@cw/graphql-gen';
 import { type GraphQLSchema, graphql } from 'graphql';
-import { Hono } from 'hono';
-import { type AuthDeps, type AuthVars, principalMiddleware, requireScope } from '../auth.js';
+import { type Context, Hono } from 'hono';
+import {
+  type AuthDeps,
+  type AuthVars,
+  environmentMiddleware,
+  principalMiddleware,
+  requireScope,
+} from '../auth.js';
 import { entryQueryFrom, parseEntryQuery } from '../query.js';
 
-const scopeOf = (c: { req: { param: (k: string) => string } }): Scope => ({
-  spaceId: c.req.param('space'),
-  environmentId: c.req.param('env'),
+const scopeOf = (c: Context<AuthVars>): Scope => ({
+  spaceId: c.req.param('space') as string,
+  environmentId: c.get('environmentId') ?? (c.req.param('env') as string),
 });
 
 const BASE = '/delivery/:space/:env';
@@ -25,6 +31,7 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
   const { ctx, rag } = deps;
   const app = new Hono<AuthVars>();
   app.use(`${BASE}/*`, principalMiddleware(deps));
+  app.use(`${BASE}/*`, environmentMiddleware(deps));
 
   app.get(`${BASE}/search`, requireScope(SCOPES.searchRead), async (c) => {
     const q = c.req.query('q') ?? '';

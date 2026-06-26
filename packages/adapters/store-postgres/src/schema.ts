@@ -45,6 +45,20 @@ export const environments = pgTable(
   (t) => [primaryKey({ columns: [t.spaceId, t.id] })],
 );
 
+/** Repointable pointers to a target environment (blue/green serving). */
+export const environmentAliases = pgTable(
+  'environment_aliases',
+  {
+    spaceId: text('space_id')
+      .notNull()
+      .references(() => spaces.id, { onDelete: 'cascade' }),
+    alias: text('alias').notNull(),
+    targetEnvironmentId: text('target_environment_id').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.alias] })],
+);
+
 export const contentTypes = pgTable(
   'content_types',
   {

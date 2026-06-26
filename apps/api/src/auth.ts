@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AppContext, RagDeps } from '@cw/application';
-import { authenticate } from '@cw/application';
+import { authenticate, resolveEnvironment } from '@cw/application';
 import { type PermissionScope, type Principal, authorize, scopesForKind } from '@cw/domain';
 import type { AIProvider, BlobStore, Hasher } from '@cw/ports';
 import type { MiddlewareHandler } from 'hono';
@@ -10,8 +10,12 @@ export const sha256Hasher: Hasher = {
   hash: (value: string) => createHash('sha256').update(value).digest('hex'),
 };
 
-/** Hono context variables carrying the resolved principal. */
-export type AuthVars = { Variables: { principal: Principal } };
+/**
+ * Hono context variables: the resolved principal, plus `environmentId` — the
+ * concrete environment a request targets after alias resolution (set by
+ * {@link environmentMiddleware}; `scopeOf` reads it, falling back to the raw param).
+ */
+export type AuthVars = { Variables: { principal: Principal; environmentId?: string } };
 
 export interface AuthDeps {
   readonly ctx: AppContext;
@@ -48,6 +52,23 @@ export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars>
       } catch {
         throw new HTTPException(401, { message: 'Invalid or missing API key' });
       }
+    }
+    await next();
+  };
+}
+
+/**
+ * Resolves the route's `:env` param through environment aliases and stamps the
+ * concrete environment id onto the context. Mounted on the scoped path prefixes
+ * so an alias name works anywhere `:env` does. A direct environment reference
+ * resolves to itself (one indexed lookup).
+ */
+export function environmentMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars> {
+  return async (c, next) => {
+    const space = c.req.param('space');
+    const env = c.req.param('env');
+    if (space && env) {
+      c.set('environmentId', await resolveEnvironment(deps.ctx, space, env));
     }
     await next();
   };

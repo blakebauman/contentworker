@@ -44,6 +44,8 @@ import {
   type ApiKeySummary,
   type Connection,
   type CreatedApiKey,
+  type Environment,
+  type EnvironmentAlias,
   type ManagementClient,
   WEBHOOK_TOPICS,
   type WebhookSummary,
@@ -72,6 +74,7 @@ export function Settings(props: {
         <TabsList>
           <TabsTrigger value="api-keys">API keys</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+          <TabsTrigger value="environments">Environments</TabsTrigger>
           <TabsTrigger value="connection">Connection</TabsTrigger>
         </TabsList>
         <TabsContent value="api-keys" className="mt-4">
@@ -80,10 +83,190 @@ export function Settings(props: {
         <TabsContent value="webhooks" className="mt-4">
           <Webhooks client={client} />
         </TabsContent>
+        <TabsContent value="environments" className="mt-4">
+          <Environments client={client} />
+        </TabsContent>
         <TabsContent value="connection" className="mt-4">
           <ConnectionSettings />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+/** Environments + repointable aliases (blue/green). An alias resolves to a
+ *  target environment anywhere `:env` is accepted; repointing is atomic cutover. */
+function Environments(props: { client: ManagementClient }) {
+  const { client } = props;
+  const toast = useToast();
+  const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [aliases, setAliases] = useState<EnvironmentAlias[]>([]);
+  const [alias, setAlias] = useState('');
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [envs, als] = await Promise.all([
+        client.listEnvironments(),
+        client.listEnvironmentAliases(),
+      ]);
+      setEnvironments(envs);
+      setAliases(als);
+      setTarget((t) => t || envs[0]?.id || '');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }, [client, toast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await client.setEnvironmentAlias(alias.trim(), target);
+      setAlias('');
+      await load();
+      toast.success(`Alias “${alias.trim()}” → ${target}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (name: string) => {
+    try {
+      await client.deleteEnvironmentAlias(name);
+      await load();
+      toast.success('Alias deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const repoint = async (name: string, targetEnvironmentId: string) => {
+    try {
+      await client.setEnvironmentAlias(name, targetEnvironmentId);
+      await load();
+      toast.success(`“${name}” → ${targetEnvironmentId}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <h2 className="font-heading font-medium text-base">Environments</h2>
+        </CardHeader>
+        <CardContent>
+          {environments.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No environments.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {environments.map((e) => (
+                <Badge key={e.id} variant="outline">
+                  {e.id}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <h2 className="font-heading font-medium text-base">Aliases</h2>
+          <p className="text-muted-foreground text-sm">
+            A repointable pointer to an environment. Use it as the environment in any API call;
+            repoint it for an atomic blue/green cutover.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form onSubmit={save} className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="alias-name">Alias</Label>
+              <Input
+                id="alias-name"
+                value={alias}
+                onChange={(e) => setAlias(e.target.value)}
+                placeholder="production"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Target environment</Label>
+              <Select value={target} onValueChange={setTarget}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Environment" />
+                </SelectTrigger>
+                <SelectContent>
+                  {environments.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="submit" disabled={!alias.trim() || !target || busy}>
+              Save alias
+            </Button>
+          </form>
+
+          {aliases.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No aliases yet.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Alias</TableHead>
+                  <TableHead>Target</TableHead>
+                  <TableHead className="w-24" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {aliases.map((a) => (
+                  <TableRow key={a.alias}>
+                    <TableCell className="font-medium">{a.alias}</TableCell>
+                    <TableCell>
+                      <Select
+                        value={a.targetEnvironmentId}
+                        onValueChange={(v) => repoint(a.alias, v)}
+                      >
+                        <SelectTrigger className="h-8 w-[180px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {environments.map((e) => (
+                            <SelectItem key={e.id} value={e.id}>
+                              {e.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => remove(a.alias)}
+                      >
+                        Delete
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

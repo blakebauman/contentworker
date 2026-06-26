@@ -728,6 +728,55 @@ function makeSpaceRepo(db: Db): SpaceRepo {
         .orderBy(asc(schema.environments.createdAt));
       return rows.map((r) => ({ id: r.id, name: r.name }));
     },
+    async setAlias(spaceId, alias, targetEnvironmentId, at) {
+      await db
+        .insert(schema.environmentAliases)
+        .values({ spaceId, alias, targetEnvironmentId, updatedAt: new Date(at) })
+        .onConflictDoUpdate({
+          target: [schema.environmentAliases.spaceId, schema.environmentAliases.alias],
+          set: { targetEnvironmentId, updatedAt: new Date(at) },
+        });
+    },
+    async getAlias(spaceId, alias) {
+      const [row] = await db
+        .select()
+        .from(schema.environmentAliases)
+        .where(
+          and(
+            eq(schema.environmentAliases.spaceId, spaceId),
+            eq(schema.environmentAliases.alias, alias),
+          ),
+        );
+      return row
+        ? {
+            alias: row.alias,
+            targetEnvironmentId: row.targetEnvironmentId,
+            updatedAt: row.updatedAt.toISOString(),
+          }
+        : null;
+    },
+    async listAliases(spaceId) {
+      const rows = await db
+        .select()
+        .from(schema.environmentAliases)
+        .where(eq(schema.environmentAliases.spaceId, spaceId))
+        .orderBy(asc(schema.environmentAliases.alias));
+      return rows.map((r) => ({
+        alias: r.alias,
+        targetEnvironmentId: r.targetEnvironmentId,
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    },
+    async deleteAlias(spaceId, alias) {
+      await db
+        .delete(schema.environmentAliases)
+        .where(
+          and(
+            eq(schema.environmentAliases.spaceId, spaceId),
+            eq(schema.environmentAliases.alias, alias),
+          ),
+        );
+    },
   };
 }
 

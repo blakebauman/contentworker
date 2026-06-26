@@ -1,5 +1,11 @@
-import { type LocaleCode, NotFoundError, type Scope, ValidationError } from '@cw/domain';
-import type { SpaceConfig } from '@cw/ports';
+import {
+  InvalidStateError,
+  type LocaleCode,
+  NotFoundError,
+  type Scope,
+  ValidationError,
+} from '@cw/domain';
+import type { EnvironmentAlias, SpaceConfig } from '@cw/ports';
 import type { AppContext } from './context.js';
 
 export interface CreateSpaceInput {
@@ -63,4 +69,71 @@ export async function createEnvironment(
 /** Lists a space's environments (branches). */
 export async function listEnvironments(ctx: AppContext, spaceId: string) {
   return ctx.store.spaces.listEnvironments(spaceId);
+}
+
+// --- environment aliases (blue/green) --------------------------------------
+
+async function requireEnvironment(ctx: AppContext, spaceId: string, environmentId: string) {
+  const envs = await ctx.store.spaces.listEnvironments(spaceId);
+  if (!envs.some((e) => e.id === environmentId)) {
+    throw new NotFoundError('Environment', `${spaceId}/${environmentId}`);
+  }
+}
+
+/**
+ * Creates or atomically repoints an environment alias at a target environment.
+ * Rejects an alias whose name collides with a real environment (so resolution is
+ * never ambiguous) and a target that doesn't exist. Repointing is how blue/green
+ * cutover works: flip the alias from the old env to the new one in one write.
+ */
+export async function setEnvironmentAlias(
+  ctx: AppContext,
+  spaceId: string,
+  alias: string,
+  targetEnvironmentId: string,
+): Promise<EnvironmentAlias> {
+  await requireEnvironment(ctx, spaceId, targetEnvironmentId);
+  const envs = await ctx.store.spaces.listEnvironments(spaceId);
+  if (envs.some((e) => e.id === alias)) {
+    throw new InvalidStateError(
+      `"${alias}" is already an environment; an alias cannot share its name`,
+    );
+  }
+  const at = ctx.clock.now().toISOString();
+  await ctx.store.spaces.setAlias(spaceId, alias, targetEnvironmentId, at);
+  return { alias, targetEnvironmentId, updatedAt: at };
+}
+
+/** Lists a space's environment aliases. */
+export async function listEnvironmentAliases(
+  ctx: AppContext,
+  spaceId: string,
+): Promise<EnvironmentAlias[]> {
+  return ctx.store.spaces.listAliases(spaceId);
+}
+
+export async function deleteEnvironmentAlias(
+  ctx: AppContext,
+  spaceId: string,
+  alias: string,
+): Promise<void> {
+  if (!(await ctx.store.spaces.getAlias(spaceId, alias))) {
+    throw new NotFoundError('EnvironmentAlias', `${spaceId}/${alias}`);
+  }
+  await ctx.store.spaces.deleteAlias(spaceId, alias);
+}
+
+/**
+ * Resolves an environment-or-alias name to a concrete environment id. If the
+ * name is a registered alias it returns the alias target; otherwise it returns
+ * the name unchanged (a direct environment reference). This is the single seam
+ * the API uses so an alias works anywhere `:env` does.
+ */
+export async function resolveEnvironment(
+  ctx: AppContext,
+  spaceId: string,
+  envOrAlias: string,
+): Promise<string> {
+  const alias = await ctx.store.spaces.getAlias(spaceId, envOrAlias);
+  return alias?.targetEnvironmentId ?? envOrAlias;
 }
