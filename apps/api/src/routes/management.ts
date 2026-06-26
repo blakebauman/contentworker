@@ -18,6 +18,7 @@ import {
   defineWorkflow,
   deleteComment,
   deleteConcept,
+  deleteEnvironmentAlias,
   deleteRelease,
   deleteScheme,
   deleteTag,
@@ -42,6 +43,7 @@ import {
   listComments,
   listConcepts,
   listContentTypes,
+  listEnvironmentAliases,
   listEnvironments,
   listReleases,
   listScheduledActions,
@@ -66,6 +68,7 @@ import {
   scheduleAction,
   setConceptBroader,
   setEntryMetadata,
+  setEnvironmentAlias,
   transitionEntry,
   unpublishAsset,
   unpublishEntry,
@@ -73,12 +76,20 @@ import {
   updateWebhook,
 } from '@cw/application';
 import { type ApiKey, SCOPES, type Scope, type Webhook } from '@cw/domain';
-import { Hono } from 'hono';
-import { type AuthDeps, type AuthVars, principalMiddleware, requireScope } from '../auth.js';
+import { type Context, Hono } from 'hono';
+import {
+  type AuthDeps,
+  type AuthVars,
+  environmentMiddleware,
+  principalMiddleware,
+  requireScope,
+} from '../auth.js';
 
-const scopeOf = (c: { req: { param: (k: string) => string } }): Scope => ({
-  spaceId: c.req.param('space'),
-  environmentId: c.req.param('env'),
+// Reads the route's scope, preferring the alias-resolved environment id stamped
+// by environmentMiddleware over the raw `:env` param.
+const scopeOf = (c: Context<AuthVars>): Scope => ({
+  spaceId: c.req.param('space') as string,
+  environmentId: c.get('environmentId') ?? (c.req.param('env') as string),
 });
 
 // Public projections that strip secrets before they leave the server: API keys
@@ -105,6 +116,8 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   const app = new Hono<AuthVars>();
   app.use('/spaces', principalMiddleware(deps));
   app.use('/spaces/*', principalMiddleware(deps));
+  // Resolve environment aliases for any scoped (:env) route.
+  app.use('/spaces/:space/environments/:env/*', environmentMiddleware(deps));
 
   // --- provisioning (admin) ----------------------------------------------
   // Authenticated principals see the spaces they can reach: admin → all,
@@ -135,6 +148,35 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     await createEnvironment(ctx, c.req.param('space'), body.id, body.name);
     return c.json({ id: body.id }, 201);
   });
+
+  // --- environment aliases (blue/green) ----------------------------------
+  app.get('/spaces/:space/environment-aliases', requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listEnvironmentAliases(ctx, c.req.param('space')) }),
+  );
+  // Create or repoint an alias (atomic cutover).
+  app.put(
+    '/spaces/:space/environment-aliases/:alias',
+    requireScope(SCOPES.spaceAdmin),
+    async (c) => {
+      const body = await c.req.json();
+      return c.json(
+        await setEnvironmentAlias(
+          ctx,
+          c.req.param('space'),
+          c.req.param('alias'),
+          body.targetEnvironmentId,
+        ),
+      );
+    },
+  );
+  app.delete(
+    '/spaces/:space/environment-aliases/:alias',
+    requireScope(SCOPES.spaceAdmin),
+    async (c) => {
+      await deleteEnvironmentAlias(ctx, c.req.param('space'), c.req.param('alias'));
+      return c.body(null, 204);
+    },
+  );
 
   // --- API key management (admin) ----------------------------------------
   app.get('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) => {

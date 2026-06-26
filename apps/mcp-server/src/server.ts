@@ -8,6 +8,7 @@ import {
   createScheme,
   createTag,
   createTask,
+  deleteEnvironmentAlias,
   diffVersions,
   draftEntry,
   getContentType,
@@ -16,6 +17,7 @@ import {
   listComments,
   listConcepts,
   listContentTypes,
+  listEnvironmentAliases,
   listPreviewEntries,
   listReleases,
   listTags,
@@ -29,6 +31,7 @@ import {
   scheduleAction,
   semanticSearch,
   setEntryMetadata,
+  setEnvironmentAlias,
   transitionEntry,
   unpublishEntry,
   updateEntry,
@@ -558,6 +561,41 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           scheduledFor: args.scheduledFor,
         }),
       );
+    },
+  );
+
+  // --- environment aliases (blue/green) ----------------------------------
+  server.tool(
+    'environment_aliases_list',
+    'List a space’s environment aliases (repointable pointers to environments).',
+    { space: z.string().optional() },
+    async (args) => {
+      const spaceId = args.space ?? DEFAULT_SPACE;
+      guard(SCOPES.previewRead, { spaceId, environmentId: DEFAULT_ENV });
+      return ok(await listEnvironmentAliases(ctx, spaceId));
+    },
+  );
+
+  server.tool(
+    'environment_alias_set',
+    'Create or atomically repoint an environment alias at a target environment.',
+    { alias: z.string(), targetEnvironmentId: z.string(), space: z.string().optional() },
+    async (args) => {
+      const spaceId = args.space ?? DEFAULT_SPACE;
+      guard(SCOPES.spaceAdmin, { spaceId, environmentId: DEFAULT_ENV });
+      return ok(await setEnvironmentAlias(ctx, spaceId, args.alias, args.targetEnvironmentId));
+    },
+  );
+
+  server.tool(
+    'environment_alias_delete',
+    'Delete an environment alias (the target environment is untouched).',
+    { alias: z.string(), space: z.string().optional() },
+    async (args) => {
+      const spaceId = args.space ?? DEFAULT_SPACE;
+      guard(SCOPES.spaceAdmin, { spaceId, environmentId: DEFAULT_ENV });
+      await deleteEnvironmentAlias(ctx, spaceId, args.alias);
+      return ok({ deleted: args.alias });
     },
   );
 

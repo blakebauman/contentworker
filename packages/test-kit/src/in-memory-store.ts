@@ -34,6 +34,7 @@ import type {
   EntryQuery,
   EntryRepo,
   EntryWithFields,
+  EnvironmentAlias,
   OutboxRepo,
   PublishedAsset,
   PublishedEntry,
@@ -66,6 +67,7 @@ export class InMemoryContentStore implements ContentStore {
   private readonly outboxData: { event: DomainEvent; relayed: boolean }[] = [];
 
   private readonly environmentData = new Map<string, { id: string; name: string }[]>();
+  private readonly aliasData = new Map<string, EnvironmentAlias>();
 
   readonly spaces: SpaceRepo = {
     getConfig: async (scope) => this.spaceConfigs.get(scope.spaceId) ?? null,
@@ -79,6 +81,17 @@ export class InMemoryContentStore implements ContentStore {
       this.environmentData.set(spaceId, list);
     },
     listEnvironments: async (spaceId) => this.environmentData.get(spaceId) ?? [],
+    setAlias: async (spaceId, alias, targetEnvironmentId, at) => {
+      this.aliasData.set(`${spaceId}::${alias}`, { alias, targetEnvironmentId, updatedAt: at });
+    },
+    getAlias: async (spaceId, alias) => this.aliasData.get(`${spaceId}::${alias}`) ?? null,
+    listAliases: async (spaceId) => {
+      const prefix = `${spaceId}::`;
+      return [...this.aliasData.entries()].filter(([k]) => k.startsWith(prefix)).map(([, v]) => v);
+    },
+    deleteAlias: async (spaceId, alias) => {
+      this.aliasData.delete(`${spaceId}::${alias}`);
+    },
   };
 
   readonly contentTypes: ContentTypeRepo = {

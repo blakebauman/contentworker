@@ -116,6 +116,13 @@ export interface Environment {
   readonly name: string;
 }
 
+/** A repointable pointer to a target environment (blue/green serving). */
+export interface EnvironmentAlias {
+  readonly alias: string;
+  readonly targetEnvironmentId: string;
+  readonly updatedAt: string;
+}
+
 /** Space configuration — drives the localization tabs in the editor. */
 export interface SpaceConfig {
   readonly spaceId: string;
@@ -288,6 +295,20 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
     },
     createEnvironment(input: { id: string; name?: string }): Promise<{ id: string }> {
       return req('POST', `${spaceBase}/environments`, input);
+    },
+    /** Environment aliases (repointable blue/green pointers) in the current space. */
+    async listEnvironmentAliases(): Promise<EnvironmentAlias[]> {
+      const r = await req<{ items: EnvironmentAlias[] }>('GET', `${spaceBase}/environment-aliases`);
+      return r.items;
+    },
+    /** Creates or atomically repoints an alias at a target environment. */
+    setEnvironmentAlias(alias: string, targetEnvironmentId: string): Promise<EnvironmentAlias> {
+      return req('PUT', `${spaceBase}/environment-aliases/${encodeURIComponent(alias)}`, {
+        targetEnvironmentId,
+      });
+    },
+    deleteEnvironmentAlias(alias: string): Promise<void> {
+      return req('DELETE', `${spaceBase}/environment-aliases/${encodeURIComponent(alias)}`);
     },
     async listContentTypes(): Promise<ContentType[]> {
       const r = await req<{ items: ContentType[] }>('GET', `${mgmt}/content-types`);
