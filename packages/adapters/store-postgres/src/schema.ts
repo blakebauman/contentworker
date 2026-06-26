@@ -264,6 +264,67 @@ export const scheduledActions = pgTable(
   ],
 );
 
+export const comments = pgTable(
+  'comments',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    entryId: text('entry_id').notNull(),
+    parentId: text('parent_id'),
+    author: text('author').notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.spaceId, t.environmentId, t.id] }),
+    index('comments_by_entry').on(t.spaceId, t.environmentId, t.entryId),
+  ],
+);
+
+export const tasks = pgTable(
+  'tasks',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    entryId: text('entry_id').notNull(),
+    assignee: text('assignee'),
+    body: text('body').notNull(),
+    status: text('status').$type<'open' | 'resolved'>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.spaceId, t.environmentId, t.id] }),
+    index('tasks_by_entry').on(t.spaceId, t.environmentId, t.entryId),
+  ],
+);
+
+export const workflowDefinitions = pgTable(
+  'workflow_definitions',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    steps: jsonb('steps').$type<{ id: string; name: string; requiredScope: string }[]>().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
+);
+
+export const entryWorkflowState = pgTable(
+  'entry_workflow_state',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    entryId: text('entry_id').notNull(),
+    workflowId: text('workflow_id').notNull(),
+    currentStepId: text('current_step_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.entryId] })],
+);
+
 export const outbox = pgTable(
   'outbox',
   {

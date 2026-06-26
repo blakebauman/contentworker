@@ -1,20 +1,26 @@
 import {
+  addComment,
   addEntryToRelease,
   createContentType,
   createEntry,
   createRelease,
+  createTask,
   draftEntry,
   getContentType,
   getPreviewEntry,
   getRelease,
+  listComments,
   listContentTypes,
   listPreviewEntries,
   listReleases,
+  listTasks,
   publishContentType,
   publishEntry,
   publishRelease,
+  resolveTask,
   scheduleAction,
   semanticSearch,
+  transitionEntry,
   unpublishEntry,
   updateEntry,
 } from '@cw/application';
@@ -318,6 +324,94 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentPublish, scopeOf(args));
       return ok(await publishRelease(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  // --- collaboration: comments, tasks, workflow --------------------------
+  server.tool(
+    'comments_list',
+    'List comments on an entry (oldest first; threaded via parentId).',
+    { entryId: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listComments(ctx, scopeOf(args), args.entryId));
+    },
+  );
+
+  server.tool(
+    'comments_add',
+    'Add a comment (or threaded reply) to an entry.',
+    {
+      entryId: z.string(),
+      body: z.string(),
+      author: z.string().optional(),
+      parentId: z.string().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await addComment(ctx, scopeOf(args), {
+          entryId: args.entryId,
+          body: args.body,
+          author: args.author ?? principal.kind,
+          parentId: args.parentId,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'tasks_list',
+    'List tasks on an entry.',
+    { entryId: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(await listTasks(ctx, scopeOf(args), args.entryId));
+    },
+  );
+
+  server.tool(
+    'tasks_create',
+    'Create an editorial task on an entry, optionally assigned to someone.',
+    { entryId: z.string(), body: z.string(), assignee: z.string().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await createTask(ctx, scopeOf(args), {
+          entryId: args.entryId,
+          body: args.body,
+          assignee: args.assignee,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'tasks_resolve',
+    'Mark a task resolved.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(await resolveTask(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  server.tool(
+    'workflow_transition',
+    'Move an entry into a workflow step. The target step may require a scope the ' +
+      'caller must hold (enforced from the workflow definition).',
+    { entryId: z.string(), workflowId: z.string(), toStepId: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok(
+        await transitionEntry(
+          ctx,
+          scopeOf(args),
+          { entryId: args.entryId, workflowId: args.workflowId, toStepId: args.toStepId },
+          principal.scopes,
+        ),
+      );
     },
   );
 

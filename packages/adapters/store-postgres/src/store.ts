@@ -1,6 +1,7 @@
 import {
   type ApiKey,
   type Asset,
+  type Comment,
   type ContentType,
   type DomainEvent,
   type Entry,
@@ -9,7 +10,10 @@ import {
   type Release,
   type ScheduledAction,
   type Scope,
+  type Task,
   type Webhook,
+  type WorkflowDefinition,
+  type WorkflowStep,
   matchesTopic,
   projectFields,
   runEntryQuery,
@@ -19,6 +23,7 @@ import type {
   AgentRunRepo,
   AssetRepo,
   AuthRepo,
+  CommentRepo,
   ContentStore,
   ContentStoreTx,
   ContentTypeRepo,
@@ -33,7 +38,9 @@ import type {
   ScheduledActionRepo,
   ScopedScheduledAction,
   SpaceRepo,
+  TaskRepo,
   WebhookRepo,
+  WorkflowRepo,
 } from '@cw/ports';
 import { and, asc, count, desc, eq, gt, gte, isNull, lte, sum } from 'drizzle-orm';
 import { type PostgresJsDatabase, drizzle } from 'drizzle-orm/postgres-js';
@@ -884,6 +891,203 @@ function makeScheduledActionRepo(db: Db): ScheduledActionRepo {
   };
 }
 
+function makeCommentRepo(db: Db): CommentRepo {
+  const toComment = (r: typeof schema.comments.$inferSelect): Comment => ({
+    id: r.id,
+    entryId: r.entryId,
+    parentId: r.parentId,
+    author: r.author,
+    body: r.body,
+    createdAt: r.createdAt.toISOString(),
+  });
+  return {
+    async create(scope, comment) {
+      await db.insert(schema.comments).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: comment.id,
+        entryId: comment.entryId,
+        parentId: comment.parentId,
+        author: comment.author,
+        body: comment.body,
+        createdAt: new Date(comment.createdAt),
+      });
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.comments)
+        .where(and(scopeFilter(schema.comments, scope), eq(schema.comments.id, id)));
+      return row ? toComment(row) : null;
+    },
+    async listForEntry(scope, entryId) {
+      const rows = await db
+        .select()
+        .from(schema.comments)
+        .where(and(scopeFilter(schema.comments, scope), eq(schema.comments.entryId, entryId)))
+        .orderBy(asc(schema.comments.createdAt));
+      return rows.map(toComment);
+    },
+    async delete(scope, id) {
+      await db
+        .delete(schema.comments)
+        .where(and(scopeFilter(schema.comments, scope), eq(schema.comments.id, id)));
+    },
+  };
+}
+
+function makeTaskRepo(db: Db): TaskRepo {
+  const toTask = (r: typeof schema.tasks.$inferSelect): Task => ({
+    id: r.id,
+    entryId: r.entryId,
+    assignee: r.assignee,
+    body: r.body,
+    status: r.status,
+    createdAt: r.createdAt.toISOString(),
+    resolvedAt: r.resolvedAt?.toISOString(),
+  });
+  const values = (scope: Scope, t: Task) => ({
+    spaceId: scope.spaceId,
+    environmentId: scope.environmentId,
+    id: t.id,
+    entryId: t.entryId,
+    assignee: t.assignee,
+    body: t.body,
+    status: t.status,
+    createdAt: new Date(t.createdAt),
+    resolvedAt: t.resolvedAt ? new Date(t.resolvedAt) : null,
+  });
+  return {
+    async create(scope, task) {
+      await db.insert(schema.tasks).values(values(scope, task));
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.tasks)
+        .where(and(scopeFilter(schema.tasks, scope), eq(schema.tasks.id, id)));
+      return row ? toTask(row) : null;
+    },
+    async listForEntry(scope, entryId) {
+      const rows = await db
+        .select()
+        .from(schema.tasks)
+        .where(and(scopeFilter(schema.tasks, scope), eq(schema.tasks.entryId, entryId)))
+        .orderBy(asc(schema.tasks.createdAt));
+      return rows.map(toTask);
+    },
+    async save(scope, task) {
+      await db
+        .update(schema.tasks)
+        .set({
+          assignee: task.assignee,
+          body: task.body,
+          status: task.status,
+          resolvedAt: task.resolvedAt ? new Date(task.resolvedAt) : null,
+        })
+        .where(and(scopeFilter(schema.tasks, scope), eq(schema.tasks.id, task.id)));
+    },
+    async delete(scope, id) {
+      await db
+        .delete(schema.tasks)
+        .where(and(scopeFilter(schema.tasks, scope), eq(schema.tasks.id, id)));
+    },
+  };
+}
+
+function makeWorkflowRepo(db: Db): WorkflowRepo {
+  const toDef = (r: typeof schema.workflowDefinitions.$inferSelect): WorkflowDefinition => ({
+    id: r.id,
+    name: r.name,
+    steps: r.steps as WorkflowStep[],
+  });
+  return {
+    async saveDefinition(scope, def) {
+      const values = {
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: def.id,
+        name: def.name,
+        steps: [...def.steps],
+      };
+      await db
+        .insert(schema.workflowDefinitions)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [
+            schema.workflowDefinitions.spaceId,
+            schema.workflowDefinitions.environmentId,
+            schema.workflowDefinitions.id,
+          ],
+          set: { name: values.name, steps: values.steps },
+        });
+    },
+    async getDefinition(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.workflowDefinitions)
+        .where(
+          and(
+            scopeFilter(schema.workflowDefinitions, scope),
+            eq(schema.workflowDefinitions.id, id),
+          ),
+        );
+      return row ? toDef(row) : null;
+    },
+    async listDefinitions(scope) {
+      const rows = await db
+        .select()
+        .from(schema.workflowDefinitions)
+        .where(scopeFilter(schema.workflowDefinitions, scope));
+      return rows.map(toDef);
+    },
+    async deleteDefinition(scope, id) {
+      await db
+        .delete(schema.workflowDefinitions)
+        .where(
+          and(
+            scopeFilter(schema.workflowDefinitions, scope),
+            eq(schema.workflowDefinitions.id, id),
+          ),
+        );
+    },
+    async getState(scope, entryId) {
+      const [row] = await db
+        .select()
+        .from(schema.entryWorkflowState)
+        .where(
+          and(
+            scopeFilter(schema.entryWorkflowState, scope),
+            eq(schema.entryWorkflowState.entryId, entryId),
+          ),
+        );
+      return row
+        ? { entryId: row.entryId, workflowId: row.workflowId, currentStepId: row.currentStepId }
+        : null;
+    },
+    async saveState(scope, state) {
+      const values = {
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        entryId: state.entryId,
+        workflowId: state.workflowId,
+        currentStepId: state.currentStepId,
+      };
+      await db
+        .insert(schema.entryWorkflowState)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [
+            schema.entryWorkflowState.spaceId,
+            schema.entryWorkflowState.environmentId,
+            schema.entryWorkflowState.entryId,
+          ],
+          set: { workflowId: values.workflowId, currentStepId: values.currentStepId },
+        });
+    },
+  };
+}
+
 export function createPostgresStore(
   connectionString: string,
 ): ContentStore & { close(): Promise<void> } {
@@ -900,6 +1104,9 @@ export function createPostgresStore(
     agentRuns: makeAgentRunRepo(db),
     releases: makeReleaseRepo(db),
     scheduledActions: makeScheduledActionRepo(db),
+    comments: makeCommentRepo(db),
+    tasks: makeTaskRepo(db),
+    workflows: makeWorkflowRepo(db),
     outbox: makeOutboxRepo(db),
     async withTransaction<T>(fn: (tx: ContentStoreTx) => Promise<T>): Promise<T> {
       return db.transaction(async (txdb) => {

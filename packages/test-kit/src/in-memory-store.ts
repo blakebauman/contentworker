@@ -1,15 +1,19 @@
 import {
   type ApiKey,
   type Asset,
+  type Comment,
   type ContentType,
   type DomainEvent,
   type Entry,
   type EntryVersion,
+  type EntryWorkflowState,
   type ReferenceEdge,
   type Release,
   type ReleaseItem,
   type Scope,
+  type Task,
   type Webhook,
+  type WorkflowDefinition,
   matchesTopic,
   projectFields,
   runEntryQuery,
@@ -19,6 +23,7 @@ import type {
   AgentRunRepo,
   AssetRepo,
   AuthRepo,
+  CommentRepo,
   ContentStore,
   ContentStoreTx,
   ContentTypeRepo,
@@ -34,8 +39,10 @@ import type {
   ScopedScheduledAction,
   SpaceConfig,
   SpaceRepo,
+  TaskRepo,
   WebhookDeliveryRecord,
   WebhookRepo,
+  WorkflowRepo,
 } from '@cw/ports';
 
 const scopeKey = (s: Scope) => `${s.spaceId}::${s.environmentId}`;
@@ -378,6 +385,73 @@ export class InMemoryContentStore implements ContentStore {
         .filter((r) => r.action.status === 'pending' && r.action.scheduledFor <= now)
         .sort((a, b) => (a.action.scheduledFor < b.action.scheduledFor ? -1 : 1))
         .slice(0, limit),
+  };
+
+  private readonly commentData = new Map<string, Comment>();
+
+  readonly comments: CommentRepo = {
+    create: async (scope, comment) => {
+      this.commentData.set(`${scopeKey(scope)}::${comment.id}`, comment);
+    },
+    get: async (scope, id) => this.commentData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    listForEntry: async (scope, entryId) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.commentData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v)
+        .filter((c) => c.entryId === entryId)
+        .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    },
+    delete: async (scope, id) => {
+      this.commentData.delete(`${scopeKey(scope)}::${id}`);
+    },
+  };
+
+  private readonly taskData = new Map<string, Task>();
+
+  readonly tasks: TaskRepo = {
+    create: async (scope, task) => {
+      this.taskData.set(`${scopeKey(scope)}::${task.id}`, task);
+    },
+    get: async (scope, id) => this.taskData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    listForEntry: async (scope, entryId) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.taskData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v)
+        .filter((t) => t.entryId === entryId)
+        .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    },
+    save: async (scope, task) => {
+      this.taskData.set(`${scopeKey(scope)}::${task.id}`, task);
+    },
+    delete: async (scope, id) => {
+      this.taskData.delete(`${scopeKey(scope)}::${id}`);
+    },
+  };
+
+  private readonly workflowData = new Map<string, WorkflowDefinition>();
+  private readonly workflowStateData = new Map<string, EntryWorkflowState>();
+
+  readonly workflows: WorkflowRepo = {
+    saveDefinition: async (scope, def) => {
+      this.workflowData.set(`${scopeKey(scope)}::${def.id}`, def);
+    },
+    getDefinition: async (scope, id) => this.workflowData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    listDefinitions: async (scope) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.workflowData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v);
+    },
+    deleteDefinition: async (scope, id) => {
+      this.workflowData.delete(`${scopeKey(scope)}::${id}`);
+    },
+    getState: async (scope, entryId) =>
+      this.workflowStateData.get(`${scopeKey(scope)}::${entryId}`) ?? null,
+    saveState: async (scope, state) => {
+      this.workflowStateData.set(`${scopeKey(scope)}::${state.entryId}`, state);
+    },
   };
 
   readonly outbox: OutboxRepo = {
