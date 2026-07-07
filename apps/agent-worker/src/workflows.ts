@@ -7,7 +7,12 @@ import type { Activities, AgentRunResult, WorkflowInput } from '@cw/agent-runtim
  * through the proxy — which satisfies the same `Activities` interface the
  * in-process runtime uses, so the workflow logic is shared, not duplicated.
  */
-import { enrichWorkflow, moderateWorkflow } from '@cw/agent-runtime/workflows';
+import {
+  curateWorkflow,
+  enrichWorkflow,
+  moderateWorkflow,
+  repurposeWorkflow,
+} from '@cw/agent-runtime/workflows';
 import { proxyActivities } from '@temporalio/workflow';
 
 const activities = proxyActivities<Activities>({
@@ -21,4 +26,12 @@ export async function enrich(input: WorkflowInput): Promise<AgentRunResult> {
 
 export async function moderate(input: WorkflowInput): Promise<AgentRunResult> {
   return moderateWorkflow(activities, input);
+}
+
+export async function curate(input: WorkflowInput): Promise<AgentRunResult> {
+  return curateWorkflow(activities, input);
+}
+
+export async function repurpose(input: WorkflowInput): Promise<AgentRunResult> {
+  return repurposeWorkflow(activities, input);
 }

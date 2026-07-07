@@ -53,10 +53,13 @@ Remaining admin work:
 - [ ] **OpenAPI spec** generated from the Zod route schemas; publish API docs.
 - [ ] **Granular RBAC** — per-content-type and per-field permissions, custom roles
   (beyond the CMA/CDA/CPA kinds + coarse scopes in `domain/auth`).
-- [ ] **Temporal in production** — `TemporalAgentRuntime` + `apps/agent-worker` exist and
-  pass a real ephemeral-server test; remaining: bind it in `apps/worker` (env-driven,
-  currently hardcoded to `InProcessAgentRuntime`), add a Temporal Helm subchart, and build
-  the **curate** and **repurpose** workflows.
+- [x] **Temporal in production** — `AGENT_RUNTIME=temporal` binds `TemporalAgentRuntime`
+  in `apps/worker` (env-driven; in-process remains the default); the **curate** and
+  **repurpose** workflows join enrich/moderate (registered on the Temporal worker, tested
+  against a real ephemeral server); the Helm chart bundles the official Temporal subchart
+  (`temporal.enabled`, persistence on the platform Postgres) and deploys the agent-worker
+  automatically when the durable runtime is selected. _(Temporal Schedules for periodic
+  curate/repurpose runs + HITL via Signals TODO.)_
 - [ ] **Wire the `moderate` agent** — the workflow is implemented, durable-capable, and
   tested, but nothing triggers it in production and no API/MCP surface runs it. Decide the
   trigger (e.g. moderation gate on publish, or an on-demand API/MCP action) and wire it.

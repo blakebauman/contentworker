@@ -7,6 +7,7 @@ import { createRedisCache, createRedisEventBus, createRedisQueue } from '@cw/ada
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { type AgentRuntime, InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
+import { AGENT_TASK_QUEUE, TemporalAgentRuntime } from '@cw/agent-runtime/temporal';
 import {
   type AppContext,
   EVENTS_TOPIC,
@@ -20,6 +21,7 @@ import type { DomainEvent } from '@cw/domain';
 import type { AIProvider, Clock, EmbeddingsProvider, IdGenerator } from '@cw/ports';
 import { logger, startTelemetry, withSpan } from '@cw/telemetry';
 import { LocalEmbeddingsProvider } from '@cw/test-kit';
+import { Client, Connection } from '@temporalio/client';
 import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
 import { createHttpFunctionInvoker } from './function-invoker.js';
@@ -53,9 +55,27 @@ function makeRag(connectionString: string): RagDeps | undefined {
   return { embeddings, vectors };
 }
 
-/** Builds the enrich-on-publish agent runtime when AGENTS_ENRICH is enabled. */
-function makeAgents(ctx: AppContext): AgentRuntime | undefined {
+/**
+ * Builds the enrich-on-publish agent runtime when AGENTS_ENRICH is enabled.
+ * AGENT_RUNTIME=temporal → durable execution on the Temporal cluster (workflows
+ * + activities hosted by @cw/agent-worker); default is in-process (non-durable).
+ */
+async function makeAgents(ctx: AppContext): Promise<AgentRuntime | undefined> {
   if (process.env.AGENTS_ENRICH !== 'true') return undefined;
+  if (process.env.AGENT_RUNTIME === 'temporal') {
+    const address = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
+    const connection = await Connection.connect({ address });
+    const client = new Client({
+      connection,
+      namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+    });
+    logger.info({ temporal: address }, 'agents on Temporal runtime');
+    return new TemporalAgentRuntime(
+      client,
+      process.env.TEMPORAL_TASK_QUEUE ?? AGENT_TASK_QUEUE,
+      ids,
+    );
+  }
   const ai: AIProvider =
     process.env.AI_PROVIDER === 'azure-openai'
       ? createAzureOpenAIProvider()
@@ -75,7 +95,7 @@ async function main() {
   const invoker = createHttpFunctionInvoker();
   const rag = makeRag(databaseUrl as string);
   const ctx: AppContext = { store, clock, ids, cache };
-  const agents = makeAgents(ctx);
+  const agents = await makeAgents(ctx);
   // Autonomy: apply enrichment automatically, or route to human review.
   const autoApply = process.env.AGENTS_AUTO_APPLY === 'true';
 

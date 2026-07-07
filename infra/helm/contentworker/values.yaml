@@ -76,6 +76,72 @@ worker:
     maxReplicas: 5
     targetCPUUtilizationPercentage: 70
 
+# --- Agents ---------------------------------------------------------------------
+# The worker's enrich-on-publish hook plus the durable agent workflows
+# (enrich/moderate/curate/repurpose).
+agents:
+  # Run the enrich agent when entries are published.
+  enrich: false
+  # Apply agent output automatically; false routes proposals to human review.
+  autoApply: false
+  # in-process = non-durable, runs inside the worker (dev / single node).
+  # temporal  = durable execution: deploys the agent-worker (workflow host) and
+  #             the worker starts workflows on the Temporal cluster.
+  runtime: in-process
+  temporal:
+    # Temporal frontend address. Empty = the bundled subchart's frontend
+    # service (<release>-temporal-frontend:7233) when temporal.enabled=true.
+    address: ""
+    namespace: default
+
+# Temporal workflow + activity host (@cw/agent-worker). Deployed automatically
+# when agents.runtime=temporal.
+agentWorker:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+# Bundled self-hosted Temporal cluster (official chart via go.temporal.io/helm-charts;
+# run `helm dependency update` first). Off by default — in cloud you can instead set
+# agents.temporal.address to an existing cluster or Temporal Cloud. Persistence below
+# targets the platform's own Postgres (the bundled dev instance by default — override
+# host/user/password or use existingSecret for managed Postgres; the chart's schema
+# job creates the databases and applies migrations via Helm hooks).
+temporal:
+  enabled: false
+  server:
+    replicaCount: 1
+    config:
+      persistence:
+        defaultStore: default
+        visibilityStore: visibility
+        datastores:
+          default:
+            sql:
+              createDatabase: true
+              manageSchema: true
+              pluginName: postgres12_pgx
+              driverName: postgres12_pgx
+              databaseName: temporal
+              connectAddr: "contentworker-postgres:5432"
+              connectProtocol: tcp
+              user: postgres
+              password: postgres
+          visibility:
+            sql:
+              createDatabase: true
+              manageSchema: true
+              pluginName: postgres12_pgx
+              driverName: postgres12_pgx
+              databaseName: temporal_visibility
+              connectAddr: "contentworker-postgres:5432"
+              connectProtocol: tcp
+              user: postgres
+              password: postgres
+  web:
+    enabled: true
+
 mcpServer:
   enabled: true
   replicas: 2
