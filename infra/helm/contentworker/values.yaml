@@ -77,11 +77,13 @@ worker:
     targetCPUUtilizationPercentage: 70
 
 # --- Agents ---------------------------------------------------------------------
-# The worker's enrich-on-publish hook plus the durable agent workflows
-# (enrich/moderate/curate/repurpose).
+# The worker's on-publish hooks (enrich, moderate) plus the durable agent
+# workflows (enrich/moderate/curate/repurpose).
 agents:
   # Run the enrich agent when entries are published.
   enrich: false
+  # Run the moderation agent when entries are published (classify + hold).
+  moderate: false
   # Apply agent output automatically; false routes proposals to human review.
   autoApply: false
   # in-process = non-durable, runs inside the worker (dev / single node).

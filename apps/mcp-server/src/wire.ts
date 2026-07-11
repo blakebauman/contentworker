@@ -6,7 +6,8 @@ import {
 } from '@cw/adapter-ai-azure-openai';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
-import type { AppContext, RagDeps } from '@cw/application';
+import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
+import type { AgentRunner, AppContext, RagDeps } from '@cw/application';
 import type {
   AIProvider,
   Clock,
@@ -59,6 +60,8 @@ export interface McpDeps {
   readonly ctx: AppContext;
   readonly ai: AIProvider;
   readonly rag: RagDeps;
+  /** Agent-workflow runtime for on-demand agent actions (moderation). */
+  readonly agents: AgentRunner;
   readonly hasher: Hasher;
   /** Root token granting all scopes across all spaces. */
   readonly adminToken: string;
@@ -87,10 +90,14 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
       })
     : new InMemoryVectorStore();
 
+  const ctx: AppContext = { store, clock, ids };
   return {
-    ctx: { store, clock, ids },
+    ctx,
     ai,
     rag: { embeddings, vectors },
+    // On-demand agent actions run in-process (synchronous request/response);
+    // the durable Temporal path serves the worker's on-publish runs.
+    agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),
     hasher,
     adminToken: env.MCP_TOKEN ?? 'dev-mcp-token',
   };

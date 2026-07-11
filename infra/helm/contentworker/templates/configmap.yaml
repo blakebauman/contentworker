@@ -14,6 +14,7 @@ data:
   SEED_DEFAULT_LOCALE: {{ .Values.config.seedDefaultLocale | quote }}
   SEED_LOCALES: {{ .Values.config.seedLocales | quote }}
   AGENTS_ENRICH: {{ .Values.agents.enrich | quote }}
+  AGENTS_MODERATE: {{ .Values.agents.moderate | quote }}
   AGENTS_AUTO_APPLY: {{ .Values.agents.autoApply | quote }}
   {{- if eq .Values.agents.runtime "temporal" }}
   AGENT_RUNTIME: "temporal"

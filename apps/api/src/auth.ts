@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AppContext, RagDeps } from '@cw/application';
+import type { AgentRunner, AppContext, RagDeps } from '@cw/application';
 import { authenticate, recordAudit, resolveEnvironment } from '@cw/application';
 import { type PermissionScope, type Principal, authorize, scopesForKind } from '@cw/domain';
 import type { AIProvider, BlobStore, EventBus, Hasher } from '@cw/ports';
@@ -28,6 +28,8 @@ export interface AuthDeps {
   readonly blob: BlobStore;
   /** AI provider for entry generation. */
   readonly ai: AIProvider;
+  /** Agent-workflow runtime for on-demand agent actions (moderation). */
+  readonly agents: AgentRunner;
   /** Domain-event source for the Live Content API (SSE). */
   readonly bus: EventBus;
 }

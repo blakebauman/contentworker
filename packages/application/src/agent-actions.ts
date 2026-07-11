@@ -11,6 +11,25 @@ import type { AppContext } from './context.js';
 import { getEntry } from './entries.js';
 import { createTask } from './tasks.js';
 
+/**
+ * Structural view of the agent-workflow runtime (`AgentRuntime` in
+ * `@cw/agent-runtime` satisfies it). Declared here because the runtime package
+ * depends on this one, so the application layer names only the shape it needs
+ * and the composition roots bind the concrete runtime.
+ */
+export interface AgentRunner {
+  run(
+    workflow: 'enrich' | 'moderate' | 'curate' | 'repurpose',
+    input: { readonly scope: Scope; readonly entryId: string; readonly autoApply?: boolean },
+  ): Promise<AgentRunOutcome>;
+}
+
+export interface AgentRunOutcome {
+  readonly status: 'completed' | 'needs_review' | 'held' | 'skipped';
+  readonly decisions: string[];
+  readonly usage: { inputTokens: number; outputTokens: number };
+}
+
 export type FindingSeverity = 'info' | 'warning' | 'error';
 
 /** One issue an audit surfaced about an entry. */
@@ -128,4 +147,89 @@ export async function auditEntry(
   });
 
   return { entryId, findings, taskIds, usage: result.usage };
+}
+
+export interface ModerateEntryResult {
+  readonly entryId: string;
+  readonly status: AgentRunOutcome['status'];
+  /** True when the classifier held the entry for a policy violation. */
+  readonly flagged: boolean;
+  readonly decisions: readonly string[];
+  readonly usage: { inputTokens: number; outputTokens: number };
+}
+
+/**
+ * Agent Action: runs the `moderate` workflow against an entry on demand —
+ * classifies its text and records a hold when flagged. Recorded in the agent
+ * cost ledger like every other run.
+ */
+export async function moderateEntry(
+  ctx: AppContext,
+  agents: AgentRunner,
+  scope: Scope,
+  entryId: string,
+): Promise<ModerateEntryResult> {
+  // Surface a 404 for unknown entries instead of the workflow's soft 'skipped'.
+  await getEntry(ctx, scope, entryId);
+  const r = await agents.run('moderate', { scope, entryId });
+  await recordAgentRun(ctx, scope, {
+    workflow: 'moderate',
+    entryId,
+    status: r.status,
+    decisions: r.decisions,
+    usage: r.usage,
+  });
+  return {
+    entryId,
+    status: r.status,
+    flagged: r.status === 'held',
+    decisions: r.decisions,
+    usage: r.usage,
+  };
+}
+
+export interface PublishAgentsConfig {
+  readonly enrich: boolean;
+  readonly moderate: boolean;
+  /** Enrich autonomy: apply generated fields automatically vs. human review. */
+  readonly autoApply: boolean;
+}
+
+export interface PublishAgentRunSummary {
+  readonly workflow: 'enrich' | 'moderate';
+  readonly status: AgentRunOutcome['status'];
+  readonly decisions: readonly string[];
+  readonly usage: { inputTokens: number; outputTokens: number };
+}
+
+/**
+ * Runs the configured agents against a newly published entry and records each
+ * run in the agent ledger. Enrich runs before moderate so moderation classifies
+ * the enriched content. A workflow failure propagates (the queue retries the
+ * event), matching the previous enrich-only behavior.
+ */
+export async function runPublishAgents(
+  ctx: AppContext,
+  agents: AgentRunner,
+  scope: Scope,
+  entryId: string,
+  config: PublishAgentsConfig,
+): Promise<PublishAgentRunSummary[]> {
+  const workflows: ('enrich' | 'moderate')[] = [];
+  if (config.enrich) workflows.push('enrich');
+  if (config.moderate) workflows.push('moderate');
+
+  const runs: PublishAgentRunSummary[] = [];
+  for (const workflow of workflows) {
+    const r = await agents.run(workflow, { scope, entryId, autoApply: config.autoApply });
+    await recordAgentRun(ctx, scope, {
+      workflow,
+      entryId,
+      status: r.status,
+      decisions: r.decisions,
+      usage: r.usage,
+    });
+    runs.push({ workflow, status: r.status, decisions: r.decisions, usage: r.usage });
+  }
+  return runs;
 }

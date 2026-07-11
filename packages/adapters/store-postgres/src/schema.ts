@@ -124,6 +124,11 @@ export const entryPublished = pgTable(
   (t) => [
     primaryKey({ columns: [t.spaceId, t.environmentId, t.entryId] }),
     index('entry_published_by_type').on(t.spaceId, t.environmentId, t.contentTypeApiId),
+    // Full-text leg of hybrid search. Expression must match searchPublished's.
+    index('entry_published_fts').using(
+      'gin',
+      sql`jsonb_to_tsvector('simple', ${t.fields}, '["string"]')`,
+    ),
   ],
 );
 

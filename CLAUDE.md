@@ -107,8 +107,8 @@ The same image runs anywhere; `apps/*/wire.ts` (and `worker/main.ts`) choose ada
 - `BLOB_BUCKET` set → S3 blob store; unset → fake.
 - `AI_PROVIDER` / `EMBEDDINGS_PROVIDER` (`anthropic` default / `azure-openai`).
 - `ROLE` (`all` | `management` | `delivery` | `preview`) gates which API modules mount.
-- Agents: `AGENTS_ENRICH=true` enables the enrich-on-publish agent; `AGENTS_AUTO_APPLY` toggles
-  auto-apply vs. human-in-the-loop review.
+- Agents: `AGENTS_ENRICH=true` / `AGENTS_MODERATE=true` enable the on-publish agents;
+  `AGENTS_AUTO_APPLY` toggles auto-apply vs. human-in-the-loop review.
 
 ### Agent runtime
 

@@ -60,11 +60,18 @@ Remaining admin work:
   (`temporal.enabled`, persistence on the platform Postgres) and deploys the agent-worker
   automatically when the durable runtime is selected. _(Temporal Schedules for periodic
   curate/repurpose runs + HITL via Signals TODO.)_
-- [ ] **Wire the `moderate` agent** — the workflow is implemented, durable-capable, and
-  tested, but nothing triggers it in production and no API/MCP surface runs it. Decide the
-  trigger (e.g. moderation gate on publish, or an on-demand API/MCP action) and wire it.
-- [ ] **Hybrid search** — combine pgvector ANN with Postgres full-text (RRF). Today ANN
-  and full-text are separate paths, and full-text runs JS-side rather than as Postgres FTS.
+- [x] **Wire the `moderate` agent** — `AGENTS_MODERATE=true` runs it on `entry.published`
+  (after enrich, so moderation sees enriched content; `runPublishAgents` in the worker),
+  and it runs on demand via `POST …/entries/:id/moderate` + the `entry_moderate` MCP tool
+  (both call the same `moderateEntry` use-case). A flagged result is a recorded hold
+  (`flagged: true`) in the agent ledger, not a state change — callers decide. _(A hard
+  moderation gate that blocks/unpublishes on flag remains TODO.)_
+- [x] **Hybrid search** — `hybridSearch` fuses pgvector ANN with ranked Postgres FTS
+  (`jsonb_to_tsvector('simple')` + `websearch_to_tsquery` + `ts_rank`, GIN expression index
+  `entry_published_fts`) via Reciprocal Rank Fusion. Default for `GET …/search` (`?mode=`
+  selects a single leg), the GraphQL `search` resolver, and the new `content_search` MCP
+  tool. _(The `EntryQuery.search` list-filter path still runs JS-side — pushing it down to
+  the same tsvector is a follow-up optimization.)_
 
 ## Ops / hardening
 

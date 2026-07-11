@@ -1,3 +1,4 @@
+import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
 import type { AppContext, RagDeps } from '@cw/application';
 import type { AIProvider, BlobStore, EventBus } from '@cw/ports';
 import { Hono } from 'hono';
@@ -41,6 +42,10 @@ export function createApp(
     blob,
     ai,
     bus,
+    // On-demand agent actions are synchronous request/response, so they always
+    // run in-process; the durable Temporal path serves the worker's
+    // on-publish runs (AGENT_RUNTIME=temporal).
+    agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),
   };
 
   const mountManagement = config.role === 'all' || config.role === 'management';

@@ -13,9 +13,9 @@ import {
   EVENTS_TOPIC,
   type RagDeps,
   dispatchEvent,
-  recordAgentRun,
   relayOutbox,
   runDueScheduledActions,
+  runPublishAgents,
 } from '@cw/application';
 import type { DomainEvent } from '@cw/domain';
 import type { AIProvider, Clock, EmbeddingsProvider, IdGenerator } from '@cw/ports';
@@ -55,13 +55,21 @@ function makeRag(connectionString: string): RagDeps | undefined {
   return { embeddings, vectors };
 }
 
+// Which agents run on entry.published, and with what autonomy.
+const agentConfig = {
+  enrich: process.env.AGENTS_ENRICH === 'true',
+  moderate: process.env.AGENTS_MODERATE === 'true',
+  autoApply: process.env.AGENTS_AUTO_APPLY === 'true',
+};
+
 /**
- * Builds the enrich-on-publish agent runtime when AGENTS_ENRICH is enabled.
- * AGENT_RUNTIME=temporal → durable execution on the Temporal cluster (workflows
- * + activities hosted by @cw/agent-worker); default is in-process (non-durable).
+ * Builds the on-publish agent runtime when AGENTS_ENRICH and/or AGENTS_MODERATE
+ * is enabled. AGENT_RUNTIME=temporal → durable execution on the Temporal cluster
+ * (workflows + activities hosted by @cw/agent-worker); default is in-process
+ * (non-durable).
  */
 async function makeAgents(ctx: AppContext): Promise<AgentRuntime | undefined> {
-  if (process.env.AGENTS_ENRICH !== 'true') return undefined;
+  if (!agentConfig.enrich && !agentConfig.moderate) return undefined;
   if (process.env.AGENT_RUNTIME === 'temporal') {
     const address = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
     const connection = await Connection.connect({ address });
@@ -96,11 +104,9 @@ async function main() {
   const rag = makeRag(databaseUrl as string);
   const ctx: AppContext = { store, clock, ids, cache };
   const agents = await makeAgents(ctx);
-  // Autonomy: apply enrichment automatically, or route to human review.
-  const autoApply = process.env.AGENTS_AUTO_APPLY === 'true';
 
   // Consume relayed events: webhook fan-out + cache invalidation + RAG embedding,
-  // then run the enrich agent on newly-published entries.
+  // then run the configured agents (enrich, moderate) on newly-published entries.
   queue.process(EVENTS_TOPIC, async (payload) => {
     const ev = payload as DomainEvent;
     const entryId = 'entryId' in ev ? ev.entryId : undefined;
@@ -112,22 +118,17 @@ async function main() {
           // Fan out to Live Content API subscribers (best-effort, never blocks).
           await bus.publish(ev).catch((err) => logger.error({ err }, 'live publish error'));
           if (agents && ev.type === 'entry.published') {
-            const r = await withSpan(
-              'agent.enrich',
-              () => agents.run('enrich', { scope: ev.scope, entryId: ev.entryId, autoApply }),
+            const runs = await withSpan(
+              'agents.on-publish',
+              () => runPublishAgents(ctx, agents, ev.scope, ev.entryId, agentConfig),
               { 'entry.id': ev.entryId },
             );
-            await recordAgentRun(ctx, ev.scope, {
-              workflow: 'enrich',
-              entryId: ev.entryId,
-              status: r.status,
-              decisions: r.decisions,
-              usage: r.usage,
-            });
-            logger.info(
-              { entryId: ev.entryId, status: r.status, decisions: r.decisions, usage: r.usage },
-              'enrich complete',
-            );
+            for (const r of runs) {
+              logger.info(
+                { entryId: ev.entryId, status: r.status, decisions: r.decisions, usage: r.usage },
+                `${r.workflow} complete`,
+              );
+            }
           }
           logger.info({ type: ev.type, entryId }, 'event dispatched');
         } catch (err) {
@@ -139,7 +140,13 @@ async function main() {
     );
   });
   logger.info(
-    { topic: EVENTS_TOPIC, rag: !!rag, enrich: !!agents, autoApply },
+    {
+      topic: EVENTS_TOPIC,
+      rag: !!rag,
+      enrich: agentConfig.enrich,
+      moderate: agentConfig.moderate,
+      autoApply: agentConfig.autoApply,
+    },
     'worker consuming events',
   );
 

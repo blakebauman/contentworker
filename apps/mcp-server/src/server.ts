@@ -28,6 +28,7 @@ import {
   getContentType,
   getPreviewEntry,
   getRelease,
+  hybridSearch,
   listAIActions,
   listAppExtensions,
   listAssets,
@@ -43,6 +44,7 @@ import {
   listTasks,
   listVersions,
   mergeEnvironments,
+  moderateEntry,
   publishContentType,
   publishEntry,
   publishRelease,
@@ -111,7 +113,7 @@ const entryFields = z.record(z.record(z.any())).describe('fieldApiId -> { locale
  * use-case — so MCP enforces the SAME RBAC as the HTTP API.
  */
 export function buildServer(deps: McpDeps, principal: Principal): McpServer {
-  const { ctx, ai, rag } = deps;
+  const { ctx, ai, rag, agents } = deps;
   const server = new McpServer({ name: 'contentworker', version: '0.1.0' });
   const guard = (scope: PermissionScope, s: Scope) => authorize(principal, scope, s.spaceId);
 
@@ -189,8 +191,20 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
   );
 
   server.tool(
+    'content_search',
+    'Search published content: hybrid semantic (vector) + full-text, fused ' +
+      'with Reciprocal Rank Fusion. Preferred for general queries.',
+    { query: z.string(), topK: z.number().int().positive().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.searchRead, scopeOf(args));
+      return ok(await hybridSearch(rag, ctx, scopeOf(args), args.query, { topK: args.topK }));
+    },
+  );
+
+  server.tool(
     'content_semantic_search',
-    'Semantic search over published content using vector embeddings.',
+    'Semantic search over published content using vector embeddings only ' +
+      '(prefer content_search for general queries).',
     { query: z.string(), topK: z.number().int().positive().optional(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.searchRead, scopeOf(args));
@@ -372,6 +386,17 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           assignee: args.assignee,
         }),
       );
+    },
+  );
+
+  server.tool(
+    'entry_moderate',
+    'Run the moderation agent against an entry: classifies its text and ' +
+      'records a hold when flagged (flagged=true); no state change is made.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(await moderateEntry(ctx, agents, scopeOf(args), args.id));
     },
   );
 

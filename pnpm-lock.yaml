@@ -178,6 +178,9 @@ importers:
       '@cw/adapter-vector-pgvector':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-pgvector
+      '@cw/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@cw/application':
         specifier: workspace:*
         version: link:../../packages/application
@@ -242,6 +245,9 @@ importers:
       '@cw/adapter-vector-pgvector':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-pgvector
+      '@cw/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@cw/application':
         specifier: workspace:*
         version: link:../../packages/application

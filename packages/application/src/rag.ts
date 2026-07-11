@@ -1,5 +1,6 @@
 import type { EntryFields, Scope } from '@cw/domain';
 import type { EmbeddingsProvider, VectorRow, VectorStore } from '@cw/ports';
+import type { AppContext } from './context.js';
 
 export interface RagDeps {
   readonly embeddings: EmbeddingsProvider;
@@ -112,4 +113,78 @@ export async function semanticSearch(
     }
   }
   return [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK);
+}
+
+/** Reciprocal Rank Fusion constant — the standard default from the RRF paper. */
+const RRF_K = 60;
+
+/**
+ * Hybrid search: fuses semantic search (vector ANN) with ranked full-text
+ * search over the published read model via Reciprocal Rank Fusion. RRF works
+ * on ranks, so the legs' incomparable scores (cosine similarity vs. ts_rank)
+ * never need calibrating. Pass `deps: undefined` for a lexical-only search
+ * (no embeddings configured).
+ */
+export async function hybridSearch(
+  deps: RagDeps | undefined,
+  ctx: AppContext,
+  scope: Scope,
+  query: string,
+  opts: { topK?: number } = {},
+): Promise<SearchHit[]> {
+  const topK = opts.topK ?? 10;
+  // Over-fetch per leg so a hit ranked just outside topK in both legs can
+  // still fuse into the final topK.
+  const fetchK = topK * 2;
+  const [semantic, lexical] = await Promise.all([
+    deps ? semanticSearch(deps, scope, query, { topK: fetchK }) : Promise.resolve([]),
+    ctx.store.entries.searchPublished(scope, query, { topK: fetchK }),
+  ]);
+
+  const fused = new Map<string, { score: number; snippet?: string }>();
+  const add = (entryId: string, rank: number, snippet?: string) => {
+    const hit = fused.get(entryId) ?? { score: 0 };
+    hit.score += 1 / (RRF_K + rank + 1);
+    if (!hit.snippet && snippet) hit.snippet = snippet;
+    fused.set(entryId, hit);
+  };
+  semantic.forEach((hit, rank) => add(hit.entryId, rank, hit.snippet));
+  lexical.forEach((hit, rank) => add(hit.entryId, rank));
+
+  const ranked = [...fused.entries()]
+    .sort(([aId, a], [bId, b]) => b.score - a.score || aId.localeCompare(bId))
+    .slice(0, topK);
+
+  // Lexical-only hits carry no chunk text — derive a snippet from the fields.
+  return Promise.all(
+    ranked.map(async ([entryId, hit]) => ({
+      entryId,
+      score: hit.score,
+      snippet: hit.snippet ?? (await snippetFor(ctx, scope, entryId, query)),
+    })),
+  );
+}
+
+/** A short excerpt around the first query-term match in the published text. */
+async function snippetFor(
+  ctx: AppContext,
+  scope: Scope,
+  entryId: string,
+  query: string,
+): Promise<string> {
+  const published = await ctx.store.entries.getPublished(scope, entryId);
+  if (!published) return '';
+  const text = Object.values(extractTextByLocale(published.fields)).join('\n\n');
+  const lower = text.toLowerCase();
+  const term = query
+    .toLowerCase()
+    .split(/\s+/)
+    .find((t) => t && lower.includes(t));
+  const at = term ? lower.indexOf(term) : 0;
+  const start = Math.max(0, at - 60);
+  const slice = text.slice(start, start + 180).trim();
+  if (!slice) return '';
+  const prefix = start > 0 ? '…' : '';
+  const suffix = start + 180 < text.length ? '…' : '';
+  return `${prefix}${slice}${suffix}`;
 }

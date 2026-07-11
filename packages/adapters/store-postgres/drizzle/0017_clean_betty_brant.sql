@@ -1,0 +1,1 @@
+CREATE INDEX "entry_published_fts" ON "entry_published" USING gin (jsonb_to_tsvector('simple', "fields", '["string"]'));

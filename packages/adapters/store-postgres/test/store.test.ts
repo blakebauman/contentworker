@@ -131,6 +131,30 @@ describe.skipIf(!URL)('Postgres store (contract)', () => {
     expect(after.map((e) => e.entry?.id ?? '')).not.toContain(b.entry.id);
   });
 
+  it('ranks published entries with Postgres full-text search', async () => {
+    const twice = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Quantum primer: quantum gates and qubits' } },
+    });
+    const once = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Gardening notes with a quantum aside' } },
+    });
+    await publishEntry(ctx, scope, twice.entry.id);
+    await publishEntry(ctx, scope, once.entry.id);
+
+    // Term frequency drives ts_rank: the double mention ranks first.
+    const hits = await store.entries.searchPublished(scope, 'quantum', { topK: 5 });
+    expect(hits.map((h) => h.entryId)).toEqual([twice.entry.id, once.entry.id]);
+    expect(hits[0]?.score ?? 0).toBeGreaterThan(hits[1]?.score ?? 0);
+
+    // websearch semantics: every term must match.
+    const both = await store.entries.searchPublished(scope, 'quantum gardening', { topK: 5 });
+    expect(both.map((h) => h.entryId)).toEqual([once.entry.id]);
+
+    expect(await store.entries.searchPublished(scope, 'nonexistentterm', { topK: 5 })).toEqual([]);
+  });
+
   it('appends to the outbox transactionally on publish', async () => {
     const e = await createEntry(ctx, scope, {
       contentTypeApiId: 'article',

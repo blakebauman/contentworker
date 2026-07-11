@@ -77,6 +77,7 @@ import {
   listWebhooks,
   listWorkflows,
   mergeEnvironments,
+  moderateEntry,
   parseImageTransform,
   publishAsset,
   publishContentType,
@@ -143,7 +144,7 @@ const BASE = '/spaces/:space/environments/:env';
 
 /** Management API (CMA): authoring + publishing, gated by RBAC scopes. */
 export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
-  const { ctx, hasher, blob, ai, rag } = deps;
+  const { ctx, hasher, blob, ai, rag, agents } = deps;
   const app = new Hono<AuthVars>();
   app.use('/spaces', principalMiddleware(deps));
   app.use('/spaces/*', principalMiddleware(deps));
@@ -384,6 +385,11 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         await c.req.json().catch(() => ({})),
       ),
     ),
+  );
+  // On-demand moderation: classify the entry's text; a flagged result is a
+  // recorded hold (`flagged: true`), not a state change — callers decide.
+  app.post(`${BASE}/entries/:id/moderate`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(await moderateEntry(ctx, agents, scopeOf(c), c.req.param('id'))),
   );
 
   // --- content semantics (vector-backed) ---------------------------------

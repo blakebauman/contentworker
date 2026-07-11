@@ -1,6 +1,7 @@
 import {
   getPublishedAsset,
   getPublishedEntry,
+  hybridSearch,
   listContentTypes,
   listPublishedAssets,
   listPublishedEntries,
@@ -36,12 +37,17 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.use(`${BASE}/*`, principalMiddleware(deps));
   app.use(`${BASE}/*`, environmentMiddleware(deps));
 
+  // Hybrid (semantic + full-text, RRF-fused) by default; ?mode=semantic or
+  // ?mode=lexical selects a single leg.
   app.get(`${BASE}/search`, requireScope(SCOPES.searchRead), async (c) => {
     const q = c.req.query('q') ?? '';
     const topK = c.req.query('top_k');
-    const hits = await semanticSearch(rag, scopeOf(c), q, {
-      topK: topK ? Number(topK) : undefined,
-    });
+    const mode = c.req.query('mode') ?? 'hybrid';
+    const opts = { topK: topK ? Number(topK) : undefined };
+    const hits =
+      mode === 'semantic'
+        ? await semanticSearch(rag, scopeOf(c), q, opts)
+        : await hybridSearch(mode === 'lexical' ? undefined : rag, ctx, scopeOf(c), q, opts);
     return c.json({ hits });
   });
 
@@ -161,7 +167,7 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
           return null;
         }
       },
-      search: (query, topK) => semanticSearch(rag, scope, query, { topK }),
+      search: (query, topK) => hybridSearch(rag, ctx, scope, query, { topK }),
     };
     const schema = buildDeliverySchema(types, resolvers);
     schemaCache.set(key, { hash, schema });

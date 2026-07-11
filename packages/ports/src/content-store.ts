@@ -386,6 +386,13 @@ export interface EntryQuery {
   readonly locale?: LocaleCode;
 }
 
+/** One ranked full-text match from the published read model. */
+export interface TextSearchHit {
+  readonly entryId: string;
+  /** Engine-relative relevance — meaningful only for ordering within one result set. */
+  readonly score: number;
+}
+
 export interface EntryRepo {
   get(scope: Scope, id: string): Promise<EntryWithFields | null>;
   /** Lists draft/current entries (the Preview read path), newest-affected first. */
@@ -407,6 +414,11 @@ export interface EntryRepo {
   removePublished(scope: Scope, entryId: string): Promise<void>;
   getPublished(scope: Scope, id: string): Promise<PublishedEntry | null>;
   listPublished(scope: Scope, query: EntryQuery): Promise<PublishedEntry[]>;
+  /**
+   * Ranked full-text search over published string field values (all locales).
+   * The lexical leg of hybrid search — every query term must match.
+   */
+  searchPublished(scope: Scope, query: string, opts: { topK: number }): Promise<TextSearchHit[]>;
 }
 
 export interface ReferenceRepo {
