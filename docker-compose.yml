@@ -4,14 +4,22 @@
 #
 # API → http://localhost:8787  (CMA: dev-cma-key, CDA: dev-cda-key, CPA: dev-cpa-key)
 # The migrator runs once to apply schema, then the api/worker start.
+#
+# PRODUCTION: do not use this file as-is. Set SEED_DEV=false, rotate all tokens
+# (ADMIN_TOKEN, CMA_KEY, CDA_KEY, CPA_KEY, MCP_TOKEN) via .env, and set
+# REQUIRE_SECURE_SECRETS=true on the API. See docs/configuration.md.
 
 x-app-env: &app-env
   DATABASE_URL: postgres://postgres:postgres@postgres:5432/contentworker
   REDIS_URL: redis://redis:6379
+  # Dockerfile sets NODE_ENV=production; allow dev tokens + SEED_DEV for local compose.
+  REQUIRE_SECURE_SECRETS: "false"
+  # Local deterministic embeddings + pgvector (matches Helm values-local.yaml).
+  EMBEDDINGS_PROVIDER: local
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: contentworker

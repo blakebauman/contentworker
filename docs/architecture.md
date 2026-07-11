@@ -7,7 +7,7 @@ only at the edges.
 ```
             ┌──────────────────────────────────────────────────────────┐
             │                        apps/*                             │
-            │   api   ·   worker   ·   mcp-server   ·   migrator        │
+            │   api   ·   worker   ·   agent-worker   ·   mcp-server   ·   migrator   ·   admin   │
             │   (composition roots: bind adapters → ports)              │
             └───────────────┬───────────────────────┬──────────────────┘
                             │ uses                   │ binds
@@ -72,10 +72,13 @@ interface AppContext {
 }
 ```
 
-One module per capability: `content-types`, `entries`, `publishing`, `delivery`, `preview`,
-`assets`, `webhooks`, `generation`, `rag`, `render`, `spaces`, `auth`, plus `events/relay` and
-`events/dispatch`. These modules are the **only** way state changes — the HTTP API, the MCP
-server, and the worker all call them.
+One module per capability: `content-types`, `entries`, `bulk`, `versioning`, `branching`,
+`audit`, `publishing`, `releases`, `scheduling`, `comments`, `tasks`, `workflows`, `taxonomy`,
+`assets`, `image`, `media-ai`, `delivery`, `preview`, `webhooks`, `functions`, `app-extensions`,
+`generation`, `content-ai`, `ai-actions`, `agent-actions`, `agent-audit`, `rag`, `render`,
+`roles`, `semantics`, `spaces`, `auth`, plus `events/relay` and `events/dispatch`. These modules
+are the **only** way state changes — the HTTP API, the MCP server, the admin SPA, and the worker
+all call them.
 
 ### `packages/adapters/*` — the implementations
 
@@ -87,7 +90,7 @@ Azure OpenAI both implement `AIProvider`. See [Deployment](./deployment.md) for 
 
 In-memory `ContentStore`, fake `BlobStore`, in-memory `VectorStore`, a local
 `EmbeddingsProvider`, and deterministic `Clock`/`IdGenerator`. This is what lets the application
-layer be tested with zero infrastructure (`packages/application/test/pN-*.test.ts`).
+layer be tested with zero infrastructure (`packages/application/test/*.test.ts`).
 
 ### `apps/*` — composition roots
 
@@ -98,19 +101,23 @@ environment variables and selects adapters:
   mount. `wire.ts` builds the `AppContext`, RAG deps, and blob store.
 - **`worker`** — runs the outbox relay loop and consumes the events queue, dispatching to
   webhooks, cache invalidation, RAG indexing, and (optionally) the enrich agent.
-- **`agent-worker`** — a Temporal worker hosting the durable `enrich`/`moderate` workflows on the
-  `contentworker-agents` task queue (the production agent executor).
+- **`agent-worker`** — Temporal worker hosting durable `enrich`/`moderate`/`curate`/`repurpose`
+  workflows on the `contentworker-agents` task queue (when `AGENT_RUNTIME=temporal`).
 - **`mcp-server`** — a stateless streamable-HTTP MCP server exposing the use-cases as tools.
 - **`migrator`** — runs Drizzle migrations (a Kubernetes Job / compose one-shot).
+- **`admin`** — React management SPA; a browser client of the Management API (not a composition
+  root). See [Admin UI](./admin-ui.md).
 
 Two supporting packages sit alongside these: **`packages/agent-runtime`** holds the engine-agnostic
-workflow logic and the in-process executor, and **`packages/graphql-gen`** builds a GraphQL
-Delivery schema from published content types (consumed by the API's `/graphql` route).
+workflow logic and the in-process executor, **`packages/graphql-gen`** builds a GraphQL
+Delivery schema from published content types (consumed by the API's `/graphql` route), and
+**`packages/telemetry`** provides structured logging and OpenTelemetry hooks.
 
 ## The key invariant: one set of use-cases, three callers
 
 ```
    HTTP client ──▶ apps/api ─────┐
+   Admin SPA ────▶ apps/api ─────┤
    AI agent ─────▶ apps/mcp-server ─▶  packages/application use-cases  ─▶ ports ─▶ adapters
    events ───────▶ apps/worker ───┘
 ```
@@ -135,8 +142,10 @@ content table, so one database serves many isolated spaces without row-level sec
 3. The route calls an application use-case (e.g. `publishEntry`).
 4. The use-case runs inside `store.withTransaction`: it writes the denormalized **published read
    model** and appends a **domain event to the outbox** — atomically.
-5. The worker relays the outbox event to the queue and dispatches it: webhooks fire, delivery
-   cache tags are invalidated, vectors are re-indexed.
+5. The worker relays the outbox event to the queue and dispatches it: webhooks fire, user-defined
+   functions run, delivery cache tags are invalidated, vectors are re-indexed, and (optionally)
+   on-publish agents run. The event is also published on the Redis `EventBus` for Live Content
+   SSE subscribers.
 6. A Delivery client `GET`s the published entry with a CDA token; reads hit the denormalized read
    model (and the Redis cache when configured).
 

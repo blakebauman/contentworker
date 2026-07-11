@@ -134,6 +134,20 @@
       "when": 1783795946131,
       "tag": "0018_overconfident_energizer",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783801944617,
+      "tag": "0019_spooky_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783802179936,
+      "tag": "0020_low_prima",
+      "breakpoints": true
     }
   ]
 }

@@ -41,6 +41,7 @@ import type {
   FunctionDefinition,
   FunctionRepo,
   OutboxRepo,
+  PreviewTokenRepo,
   PublishedAsset,
   PublishedEntry,
   ReferenceRepo,
@@ -924,6 +925,53 @@ function makeAuthRepo(db: Db): AuthRepo {
     async revoke(id) {
       await db.update(schema.apiKeys).set({ revoked: true }).where(eq(schema.apiKeys.id, id));
     },
+    async touchLastUsed(id, at) {
+      await db.update(schema.apiKeys).set({ lastUsedAt: at }).where(eq(schema.apiKeys.id, id));
+    },
+  };
+}
+
+function makePreviewTokenRepo(db: Db): PreviewTokenRepo {
+  return {
+    async create(record) {
+      await db.insert(schema.previewTokens).values({
+        id: record.id,
+        spaceId: record.spaceId,
+        environmentId: record.environmentId,
+        entryId: record.entryId,
+        hashedToken: record.hashedToken,
+        expiresAt: record.expiresAt,
+        revoked: record.revoked,
+      });
+    },
+    async findByHash(hashedToken) {
+      const [row] = await db
+        .select()
+        .from(schema.previewTokens)
+        .where(
+          and(
+            eq(schema.previewTokens.hashedToken, hashedToken),
+            eq(schema.previewTokens.revoked, false),
+          ),
+        );
+      return row
+        ? {
+            id: row.id,
+            spaceId: row.spaceId,
+            environmentId: row.environmentId,
+            entryId: row.entryId,
+            hashedToken: row.hashedToken,
+            expiresAt: row.expiresAt,
+            revoked: row.revoked,
+          }
+        : null;
+    },
+    async revoke(id) {
+      await db
+        .update(schema.previewTokens)
+        .set({ revoked: true })
+        .where(eq(schema.previewTokens.id, id));
+    },
   };
 }
 
@@ -1580,6 +1628,7 @@ export function createPostgresStore(
     aiActions: makeAiActionRepo(db),
     functions: makeFunctionRepo(db),
     appExtensions: makeAppExtensionRepo(db),
+    previewTokens: makePreviewTokenRepo(db),
     releases: makeReleaseRepo(db),
     scheduledActions: makeScheduledActionRepo(db),
     comments: makeCommentRepo(db),
@@ -1651,6 +1700,7 @@ const toApiKey = (r: ApiKeyRow): ApiKey => ({
   scopes: r.scopes,
   revoked: r.revoked,
   roleId: r.roleId ?? undefined,
+  lastUsedAt: r.lastUsedAt?.toISOString(),
 });
 
 type RoleRow = typeof schema.roles.$inferSelect;

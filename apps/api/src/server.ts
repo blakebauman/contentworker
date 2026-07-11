@@ -2,12 +2,14 @@ import { logger, startTelemetry } from '@cw/telemetry';
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
+import { validateApiSecrets } from './secure-secrets.js';
 import { seedDev } from './seed.js';
 import { wire } from './wire.js';
 
 startTelemetry('cw-api');
 
 const config = loadConfig();
+validateApiSecrets(config);
 const { ctx, rag, blob, ai, bus } = wire(config);
 
 // Bootstrap dev data (space + keys + demo content) when SEED_DEV is set — the

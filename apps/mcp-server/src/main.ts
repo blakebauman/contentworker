@@ -1,4 +1,9 @@
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
+import {
+  assertSecureSecrets,
+  requireSecureSecretsFromEnv,
+  secureTokenEqual,
+} from '@cw/application';
 import { authenticate } from '@cw/application';
 import { type Principal, scopesForKind } from '@cw/domain';
 import { logger, startTelemetry } from '@cw/telemetry';
@@ -7,14 +12,22 @@ import { buildServer } from './server.js';
 import { wire } from './wire.js';
 
 startTelemetry('cw-mcp');
+
 const deps = wire();
+assertSecureSecrets({
+  requireSecureSecrets: requireSecureSecretsFromEnv(process.env),
+  seedDev: false,
+  adminToken: deps.adminToken,
+  mcpToken: deps.adminToken,
+});
+
 const port = Number(process.env.PORT ?? 8788);
 
 const ADMIN: Principal = { spaceId: '*', kind: 'admin', scopes: [...scopesForKind('cma')] };
 
 /** Resolves the bearer token to a Principal (admin token or hashed API key). */
 async function resolvePrincipal(token: string): Promise<Principal | null> {
-  if (deps.adminToken && token === deps.adminToken) return ADMIN;
+  if (deps.adminToken && secureTokenEqual(token, deps.adminToken)) return ADMIN;
   try {
     return await authenticate(deps.ctx, deps.hasher, token);
   } catch {
@@ -53,6 +66,7 @@ const httpServer = createServer(async (req, res) => {
   const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
   const principal = await resolvePrincipal(token);
   if (!principal) {
+    logger.warn({ path: req.url }, 'mcp: invalid credentials');
     unauthorized(res);
     return;
   }

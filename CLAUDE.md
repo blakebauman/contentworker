@@ -133,3 +133,15 @@ production, under Temporal where each `Activities` method becomes a Temporal Act
 - When adding a use-case, thread `Scope` through, take `AppContext`, and add a test in
   `packages/application/test/` using `@cw/test-kit` fakes. Test files are named for the capability
   under test (e.g. `releases.test.ts`, `query.test.ts`), not for a roadmap phase.
+
+## Claude Code workflow
+
+Project skills (in `.claude/skills/`): `/new-use-case` (scaffold a capability end-to-end),
+`/review-arch` (dependency-rule + dual-surface review), `/db-migrate` (schema.ts → generate →
+inspect SQL), `/ops-check` (helm/compose/CI/env-var parity), `/run-stack` (boot + smoke-test),
+`/test-one` (single package/file/test), `/release-preflight` (local CI parity),
+`/update-docs` (sync docs/ with the code).
+Before committing non-trivial changes, run the review agents (`hexagonal-guardian`,
+`code-reviewer`, `test-coverage-reviewer`); ops work goes to `ops-engineer` / `db-migration-agent`;
+after a feature lands, `docs-keeper` keeps `docs/` truthful.
+Hooks auto-format edited TS with Biome, block hand-edits to `drizzle/`, and flag convention drift.

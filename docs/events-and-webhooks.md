@@ -17,10 +17,17 @@ only when) their state change commits. A background worker relays those events a
         └─ outbox.markRelayed(ids)
                                    │
         apps/worker: queue.process(EVENTS_TOPIC)
-        └─ dispatchEvent(ctx, { sender, cache, rag }, event)
+        └─ dispatchEvent(ctx, { sender, cache, rag, invoker }, event)
              ├─ webhooks  — fan out to subscribers (HMAC-signed)
+             ├─ functions — invoke user-defined HTTP hooks (FunctionInvoker)
              ├─ cache     — invalidate the entry's tag + reverse-reference tags
              └─ rag       — re-index (published) or delete (unpublished) embeddings
+                                   │
+        (after dispatch) bus.publish(event)  →  Live Content SSE subscribers
+                                   │
+        runPublishAgents (optional) on entry.published
+                                   │
+        runDueScheduledActions every SCHEDULE_INTERVAL_MS
 ```
 
 `EVENTS_TOPIC` is `cw.events`.
@@ -50,20 +57,23 @@ idempotent (keyed on `event.id`).
 
 ## Dispatch
 
-`dispatchEvent(ctx, deps, event)` (`events/dispatch.ts`) does three things:
+`dispatchEvent(ctx, deps, event)` (`events/dispatch.ts`) fans out to:
 
-1. **Webhook fan-out.** Looks up active webhooks subscribed to `event.type`, signs each payload,
-   POSTs it via the `WebhookSender`, and records a `WebhookDelivery` (status, status code, error,
-   attempts).
-2. **Cache invalidation** (on `entry.published` / `entry.unpublished`). Builds a tag set of the
-   entry's own tag plus the tags of every entry that embeds it (via the reference graph), then
-   calls `cache.invalidateTag` for each — so embedded copies refresh too. The tag format is
-   `entry:{spaceId}:{envId}:{entryId}`.
-3. **RAG indexing.** On `entry.published`, `indexEntryEmbeddings` (chunk → embed → upsert); on
-   `entry.unpublished`, `removeEntryEmbeddings`.
+1. **Webhook fan-out** — active subscribers for `event.type`, HMAC-signed POST, delivery log.
+2. **User-defined functions** — `FunctionInvoker` POSTs to registered HTTP functions for matching
+   event types (`packages/application/src/functions.ts`).
+3. **Cache invalidation** (on `entry.published` / `entry.unpublished`) — tag set includes reverse
+   references; `cache.invalidateTag` per tag.
+4. **RAG indexing** — `indexEntryEmbeddings` on publish, `removeEntryEmbeddings` on unpublish.
 
-`DispatchDeps` is `{ sender: WebhookSender, cache?: Cache, rag?: RagDeps }` — cache and RAG are
-optional, so the worker degrades gracefully when Redis or embeddings aren't configured.
+`DispatchDeps` is `{ sender, cache?, rag?, invoker? }` — optional deps degrade gracefully.
+
+After dispatch, the worker publishes the event on the Redis **`EventBus`** for Live Content SSE
+(`GET /delivery/:space/:env/live`). On `entry.published`, optional on-publish agents run via
+`runPublishAgents` when `AGENTS_ENRICH` / `AGENTS_MODERATE` are enabled.
+
+A separate loop calls `runDueScheduledActions` every `SCHEDULE_INTERVAL_MS` (default 5000 ms) to
+execute deferred publish/unpublish actions.
 
 ## Webhooks
 
@@ -91,6 +101,7 @@ HMAC-SHA256 using the webhook's `secret` and POSTs it. Each attempt is logged as
 | `entry.published` | `entryId`, `contentTypeApiId`, `version`, `fields` |
 | `entry.unpublished` | `entryId`, `contentTypeApiId` |
 | `content_type.published` | `contentTypeApiId`, `version` |
+| `release.published` | `releaseId`, `entryIds` |
 
 ## Delivery cache
 

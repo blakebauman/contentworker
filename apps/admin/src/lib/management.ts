@@ -25,6 +25,8 @@ import type {
 } from '@cw/domain';
 
 /** Connection settings for the Management/Preview APIs (a CMA or admin token). */
+export type PersistMode = 'local' | 'session';
+
 export interface Connection {
   readonly baseUrl: string;
   readonly token: string;
@@ -32,6 +34,22 @@ export interface Connection {
   readonly environment: string;
   /** Locale edited in the MVP single-locale form. */
   readonly locale: string;
+  /** Where the bearer token is stored between visits. */
+  readonly persistMode?: PersistMode;
+}
+
+/** Resolved principal from GET /auth/me. */
+export interface PrincipalInfo {
+  readonly spaceId: string;
+  readonly kind: string;
+  readonly scopes: readonly string[];
+  readonly subject?: string;
+  readonly restricted?: boolean;
+}
+
+export interface ManagementClientOptions {
+  /** Called when any request returns 401 — typically clears credentials and redirects. */
+  readonly onUnauthorized?: () => void;
 }
 
 export interface EntryAggregate {
@@ -183,6 +201,28 @@ export interface ApiKeySummary {
   readonly name?: string;
   readonly scopes: string[];
   readonly revoked: boolean;
+  readonly roleId?: string;
+  readonly lastUsedAt?: string;
+}
+
+/** Custom role (granular RBAC). */
+export interface RoleSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly scopes: readonly string[];
+  readonly contentGrants: readonly {
+    contentTypeApiId: string;
+    actions: readonly ('read' | 'write' | 'publish')[];
+    deniedFields?: readonly string[];
+    readOnlyFields?: readonly string[];
+  }[];
+}
+
+export interface PreviewLinkResult {
+  readonly url: string;
+  readonly token: string;
+  readonly expiresAt: string;
 }
 
 /** The one-time result of minting a key — `token` is shown once, never again. */
@@ -321,7 +361,11 @@ export class ApiError extends Error {
  * token (CMA keys carry preview:read, so the same token lists drafts and writes
  * content). Management routes author/publish; Preview routes list drafts.
  */
-export function createManagementClient(conn: Connection, fetchImpl: typeof fetch = fetch) {
+export function createManagementClient(
+  conn: Connection,
+  fetchImpl: typeof fetch = fetch,
+  options: ManagementClientOptions = {},
+) {
   const root = conn.baseUrl.replace(/\/$/, '');
   const spaceBase = `${root}/spaces/${conn.space}`;
   const mgmt = `${root}/spaces/${conn.space}/environments/${conn.environment}`;
@@ -336,6 +380,7 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!res.ok) {
+      if (res.status === 401) options.onUnauthorized?.();
       const text = await res.text().catch(() => '');
       throw new ApiError(res.status, `${method} ${url} → ${res.status} ${text}`);
     }
@@ -343,6 +388,9 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
   }
 
   return {
+    getPrincipal(): Promise<PrincipalInfo> {
+      return req('GET', `${root}/auth/me`);
+    },
     getSpaceConfig(): Promise<SpaceConfig> {
       return req('GET', `${mgmt}/space-config`);
     },
@@ -769,11 +817,42 @@ export function createManagementClient(conn: Connection, fetchImpl: typeof fetch
       return r.items;
     },
     /** Mints a key; the returned `token` is shown once and never retrievable again. */
-    createApiKey(input: { kind: ApiKeyKind; name?: string }): Promise<CreatedApiKey> {
+    createApiKey(input: {
+      kind: ApiKeyKind;
+      name?: string;
+      roleId?: string;
+    }): Promise<CreatedApiKey> {
       return req('POST', `${spaceBase}/api-keys`, input);
     },
     revokeApiKey(id: string): Promise<void> {
       return req('DELETE', `${spaceBase}/api-keys/${encodeURIComponent(id)}`);
+    },
+
+    // --- settings: roles (space-scoped) ----------------------------------
+    async listRoles(): Promise<RoleSummary[]> {
+      const r = await req<{ items: RoleSummary[] }>('GET', `${spaceBase}/roles`);
+      return r.items;
+    },
+    createRole(input: Omit<RoleSummary, 'id'> & { name: string }): Promise<RoleSummary> {
+      return req('POST', `${spaceBase}/roles`, input);
+    },
+    updateRole(id: string, input: Partial<RoleSummary>): Promise<RoleSummary> {
+      return req('PUT', `${spaceBase}/roles/${encodeURIComponent(id)}`, input);
+    },
+    deleteRole(id: string): Promise<void> {
+      return req('DELETE', `${spaceBase}/roles/${encodeURIComponent(id)}`);
+    },
+
+    /** Expiring shareable preview URL for an entry. */
+    createPreviewLink(
+      entryId: string,
+      input?: { ttlHours?: number; previewBaseUrl?: string },
+    ): Promise<PreviewLinkResult> {
+      return req(
+        'POST',
+        `${mgmt}/entries/${encodeURIComponent(entryId)}/preview-link`,
+        input ?? {},
+      );
     },
 
     // --- settings: webhooks (environment-scoped) -------------------------

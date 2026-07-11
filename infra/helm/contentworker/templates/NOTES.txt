@@ -16,6 +16,10 @@ Datastores: {{ if .Values.postgres.bundled }}bundled Postgres{{ else }}external 
 ⚠️  Using a chart-created Secret with inline values — fine for local/dev only.
    For production set secrets.create=false and point secrets.existingSecret at a
    Secret populated by External Secrets Operator.
+
+   ADMIN_TOKEN and MCP_TOKEN must be unique, ≥32 characters, and must not use
+   dev defaults (dev-admin-token / dev-mcp-token). Set REQUIRE_SECURE_SECRETS=true
+   on the API to fail fast on weak credentials.
 {{- end }}
 {{- end }}
 

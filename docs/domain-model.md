@@ -232,8 +232,32 @@ exact event type. Delivery attempts are recorded as `WebhookDelivery` rows for o
 | `entry.published` | `entryId`, `contentTypeApiId`, `version`, `fields` |
 | `entry.unpublished` | `entryId`, `contentTypeApiId` |
 | `content_type.published` | `contentTypeApiId`, `version` |
+| `release.published` | `releaseId`, `entryIds` |
 
 `EventType = DomainEvent['type']`. The stable `id` makes dispatch idempotent.
+
+## Platform aggregates
+
+Beyond core content types and entries, the domain (and store) model several platform capabilities.
+See [API reference](./api-reference.md) for HTTP shapes.
+
+| Aggregate | Purpose |
+| --- | --- |
+| **Release** | Bundle entries/assets for coordinated publish (`release.published` event) |
+| **ScheduledAction** | Deferred publish/unpublish at a future time |
+| **Comment / Task** | Editorial collaboration on entries |
+| **WorkflowDefinition** | Named steps with scope requirements; per-entry workflow state |
+| **ConceptScheme / Concept / Tag** | Controlled vocabulary and free-form tags |
+| **EntryMetadata** | Tags and concept associations on an entry |
+| **Role / ContentTypeGrant** | Granular RBAC (see [Auth & RBAC](./auth-and-rbac.md)) |
+| **AiAction** | Configurable prompt templates runnable against entries |
+| **Function** | User-defined HTTP endpoint invoked on domain events |
+| **AppExtension** | iframe panel registration for the admin UI |
+| **AgentRun** | Audit record for agent workflow executions |
+| **AuditLogEntry** | Space-level change audit |
+| **EnvironmentAlias** | Map a path alias to a concrete environment id |
+
+Asset `metadata` (alt text per locale, tags) lives on the asset aggregate as JSONB.
 
 ## RBAC types
 

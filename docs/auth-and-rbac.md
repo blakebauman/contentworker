@@ -78,8 +78,9 @@ Semantics:
   (requires `space:admin`) and the `roles_list` / `role_create` / `role_update` /
   `role_delete` MCP tools. Mint a bound key with `POST …/api-keys { kind, roleId }`.
 
-Grants currently govern the entry read/write/publish surfaces; GraphQL, search, SSE, and
-assets are governed by coarse scopes.
+Grants govern entry read/write/publish and content-type visibility. **Delivery and Preview**
+list/get endpoints filter ungranted content types and `maskDeniedFields` on responses. Coarse
+scopes still gate search, GraphQL, SSE, and assets at the route level.
 
 ## API keys at rest
 
@@ -104,9 +105,11 @@ the presented bearer token and looks it up by hash (`AuthRepo.findByHash`).
 ```ts
 interface Principal {
   spaceId: string;                       // a specific space, or '*' for admin/root
-  kind: ApiKeyKind | 'admin';
+  kind: ApiKeyKind | 'admin' | 'user';
   scopes: readonly string[];
   contentGrants?: readonly ContentTypeGrant[];  // from the key's role; undefined = unrestricted
+  subject?: string;                      // OIDC subject/email when kind is `user`
+  sessionId?: string;                    // session revocation id for OIDC users
 }
 ```
 
@@ -114,6 +117,11 @@ interface Principal {
   `UnauthorizedError` on miss.
 - The **admin token** (`ADMIN_TOKEN` / `MCP_TOKEN`) short-circuits to a wildcard principal
   (`spaceId: '*'`, all CMA scopes). Use it only for provisioning/bootstrap.
+- **`GET /auth/me`** returns the resolved principal summary (used by the admin connect UI).
+- **Preview links** — `POST …/entries/:id/preview-link` mints an expiring token; CPA
+  `GET …/entries/:id?preview_token=…` accepts it without a bearer header.
+- **Admin SSO** — optional `@cw/admin-bff` OIDC flow mints delegated CMA keys bound to roles
+  (see [Configuration](./configuration.md#admin-bff-oidc-sso)).
 
 ## The authorization decision
 
@@ -132,15 +140,18 @@ use-case. A failure surfaces as **403** (`forbidden`); an unauthenticated reques
 
 ## Scope → operation map
 
-| Scope | Use-cases / endpoints |
+| Scope | Use-cases / endpoints (representative) |
 | --- | --- |
-| `content:write` | `createEntry`, `updateEntry`, `createAsset`, `draftEntry` |
-| `content:publish` | `publishEntry`, `unpublishEntry`, `publishAsset`, `unpublishAsset`, `publishContentType` |
-| `content:manage` | `createContentType`, `updateContentType` |
-| `preview:read` | `getPreviewEntry`, `listPreviewEntries`, `getContentType`, `listContentTypes` |
-| `delivery:read` | `getPublishedEntry`, `listPublishedEntries`, published assets |
-| `search:read` | `semanticSearch` |
-| `space:admin` | `createApiKey`, `listApiKeys`, `createSpace`, `createEnvironment`, webhooks |
+| `content:write` | Entry/asset CRUD, AI generation endpoints, bulk writes, comments/tasks, metadata |
+| `content:publish` | Publish/unpublish entries, assets, content types, releases; scheduled actions |
+| `content:manage` | Content types, workflows, taxonomy, functions, app-extensions, ai-actions, merge |
+| `preview:read` | Preview entries, content types, releases, workflows, collaboration reads |
+| `delivery:read` | Published entries/assets, Live Content SSE, GraphQL |
+| `search:read` | Hybrid/semantic search, related/duplicates/embedding |
+| `space:admin` | Spaces, environments, aliases, API keys, roles, webhooks, audit log, agent runs |
+
+`GET /spaces` returns all spaces for an admin principal (`spaceId: '*'`) or only the key's own
+space for scoped keys.
 
 ## Dev credentials
 

@@ -57,6 +57,7 @@ export interface ContentStore {
   readonly aiActions: AIActionRepo;
   readonly functions: FunctionRepo;
   readonly appExtensions: AppExtensionRepo;
+  readonly previewTokens: PreviewTokenRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -260,6 +261,25 @@ export interface AuthRepo {
   /** Resolve an API key by the hash of its presented token. */
   findByHash(hashedToken: string): Promise<ApiKey | null>;
   list(spaceId: string): Promise<ApiKey[]>;
+  revoke(id: string): Promise<void>;
+  /** Best-effort stamp of last successful use (does not fail auth). */
+  touchLastUsed(id: string, at: Date): Promise<void>;
+}
+
+/** Expiring, entry-scoped tokens for shareable preview links. */
+export interface PreviewTokenRecord {
+  readonly id: string;
+  readonly spaceId: string;
+  readonly environmentId: string;
+  readonly entryId: string;
+  readonly hashedToken: string;
+  readonly expiresAt: Date;
+  readonly revoked: boolean;
+}
+
+export interface PreviewTokenRepo {
+  create(record: PreviewTokenRecord): Promise<void>;
+  findByHash(hashedToken: string): Promise<PreviewTokenRecord | null>;
   revoke(id: string): Promise<void>;
 }
 

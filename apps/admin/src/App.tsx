@@ -6,8 +6,10 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
+import { AuthGate } from './components/AuthGate.js';
 import { AppShell } from './components/layout/AppShell.js';
 import { ClientProvider, useClient } from './lib/client-context.js';
+import { ConnectPage } from './routes/Connect.js';
 
 // Route components are code-split so the initial bundle stays small — heavy
 // dependencies (charts on the dashboard, the rich-text/AI editor, media grid)
@@ -62,34 +64,47 @@ function SettingsRoute() {
 
 const router = createBrowserRouter([
   {
-    element: <AppShell />,
+    element: (
+      <ClientProvider>
+        <AuthGate />
+      </ClientProvider>
+    ),
     children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
-      { path: 'dashboard', element: <DashboardRoute /> },
       {
-        path: 'content',
-        element: <ContentLayout />,
+        element: <AppShell />,
         children: [
-          { index: true, element: <ContentTypesOverview /> },
-          { path: ':typeId', element: <EntriesList /> },
-          { path: ':typeId/new', element: <EntryEditor /> },
-          { path: ':typeId/:entryId', element: <EntryEditor /> },
+          { index: true, element: <Navigate to="/dashboard" replace /> },
+          { path: 'dashboard', element: <DashboardRoute /> },
+          {
+            path: 'content',
+            element: <ContentLayout />,
+            children: [
+              { index: true, element: <ContentTypesOverview /> },
+              { path: ':typeId', element: <EntriesList /> },
+              { path: ':typeId/new', element: <EntryEditor /> },
+              { path: ':typeId/:entryId', element: <EntryEditor /> },
+            ],
+          },
+          { path: 'releases', element: <Releases /> },
+          { path: 'workflows', element: <Workflows /> },
+          { path: 'taxonomy', element: <Taxonomy /> },
+          { path: 'media', element: <MediaRoute /> },
+          { path: 'settings', element: <SettingsRoute /> },
+          { path: 'settings/:section', element: <SettingsRoute /> },
         ],
       },
-      { path: 'releases', element: <Releases /> },
-      { path: 'workflows', element: <Workflows /> },
-      { path: 'taxonomy', element: <Taxonomy /> },
-      { path: 'media', element: <MediaRoute /> },
-      { path: 'settings', element: <SettingsRoute /> },
-      { path: 'settings/:section', element: <SettingsRoute /> },
     ],
+  },
+  {
+    path: '/connect',
+    element: (
+      <ClientProvider>
+        <ConnectPage />
+      </ClientProvider>
+    ),
   },
 ]);
 
 export function App() {
-  return (
-    <ClientProvider>
-      <RouterProvider router={router} />
-    </ClientProvider>
-  );
+  return <RouterProvider router={router} />;
 }

@@ -5,9 +5,13 @@ import { defineConfig } from 'vitest/config';
 
 // Proxy the API surfaces to the backend so the admin can run same-origin (used by
 // the dev server and the Playwright e2e harness; set the connection baseUrl to "").
+// /auth is included for GET /auth/me (connect gate + principal probe).
 const apiTarget = process.env.CW_API_URL ?? 'http://localhost:8787';
 const proxy = Object.fromEntries(
-  ['/spaces', '/preview', '/delivery'].map((p) => [p, { target: apiTarget, changeOrigin: true }]),
+  ['/spaces', '/preview', '/delivery', '/auth'].map((p) => [
+    p,
+    { target: apiTarget, changeOrigin: true },
+  ]),
 );
 // The e2e harness pins the port via CW_ADMIN_PORT; dev uses the default 5173.
 const port = Number(process.env.CW_ADMIN_PORT ?? 5173);

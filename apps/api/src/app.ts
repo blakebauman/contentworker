@@ -3,7 +3,7 @@ import type { AppContext, RagDeps } from '@cw/application';
 import type { AIProvider, BlobStore, EventBus } from '@cw/ports';
 import { Hono } from 'hono';
 import type { AuthDeps } from './auth.js';
-import { sha256Hasher } from './auth.js';
+import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
 import { onError } from './http.js';
 import { deliveryRoutes } from './routes/delivery.js';
@@ -36,7 +36,7 @@ export function createApp(
 
   const deps: AuthDeps = {
     ctx,
-    hasher: sha256Hasher,
+    hasher: createApiHasher(config.tokenPepper),
     adminToken: config.adminToken,
     rag,
     blob,

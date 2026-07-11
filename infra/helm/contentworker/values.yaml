@@ -39,8 +39,10 @@ secrets:
   data:
     DATABASE_URL: "postgres://postgres:postgres@contentworker-postgres:5432/contentworker"
     REDIS_URL: "redis://contentworker-redis:6379"
-    ADMIN_TOKEN: "dev-admin-token"
-    MCP_TOKEN: "dev-mcp-token"
+    # Production: leave empty here and populate via External Secrets Operator.
+    # Local dev: override in values-local.yaml with known dev tokens.
+    ADMIN_TOKEN: ""
+    MCP_TOKEN: ""
     ANTHROPIC_API_KEY: ""
     AZURE_OPENAI_API_KEY: ""
 

@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { useConnection } from './connection.js';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { clearStoredConnection, useConnection } from './connection.js';
 import { type Connection, type ManagementClient, createManagementClient } from './management.js';
 import { useToast } from './toast.js';
 
@@ -13,6 +13,9 @@ interface ClientApi {
   readonly updateConn: (patch: Partial<Connection>) => void;
   readonly client: ManagementClient;
   readonly busy: boolean;
+  readonly authReady: boolean;
+  readonly authenticated: boolean;
+  signOut(): void;
   run(fn: () => Promise<void>): Promise<void>;
 }
 
@@ -27,8 +30,52 @@ export function useClient(): ClientApi {
 export function ClientProvider(props: { children: React.ReactNode }) {
   const toast = useToast();
   const [conn, updateConn] = useConnection();
-  const client = useMemo(() => createManagementClient(conn), [conn]);
   const [busy, setBusy] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+
+  const signOut = useCallback(() => {
+    clearStoredConnection();
+    updateConn({ token: '' });
+    setAuthenticated(false);
+  }, [updateConn]);
+
+  const client = useMemo(
+    () =>
+      createManagementClient(conn, fetch, {
+        onUnauthorized: () => {
+          signOut();
+          if (window.location.pathname !== '/connect') {
+            window.location.assign('/connect');
+          }
+        },
+      }),
+    [conn, signOut],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!conn.token.trim()) {
+      setAuthenticated(false);
+      setAuthReady(true);
+      return;
+    }
+    setAuthReady(false);
+    client
+      .getPrincipal()
+      .then(() => {
+        if (!cancelled) setAuthenticated(true);
+      })
+      .catch(() => {
+        if (!cancelled) setAuthenticated(false);
+      })
+      .finally(() => {
+        if (!cancelled) setAuthReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, conn.token]);
 
   const run = useCallback(
     async (fn: () => Promise<void>) => {
@@ -45,8 +92,8 @@ export function ClientProvider(props: { children: React.ReactNode }) {
   );
 
   const api = useMemo<ClientApi>(
-    () => ({ conn, updateConn, client, busy, run }),
-    [conn, updateConn, client, busy, run],
+    () => ({ conn, updateConn, client, busy, authReady, authenticated, signOut, run }),
+    [conn, updateConn, client, busy, authReady, authenticated, signOut, run],
   );
 
   return <Ctx.Provider value={api}>{props.children}</Ctx.Provider>;

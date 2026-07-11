@@ -2,8 +2,8 @@
 
 The API is a [Hono](https://hono.dev) server (`apps/api`) exposing three role-based surfaces:
 
-- **Management (CMA)** — authoring, publishing, and space administration.
-- **Delivery (CDA)** — read-only published content + semantic search.
+- **Management (CMA)** — authoring, publishing, space administration, AI, releases, workflows.
+- **Delivery (CDA)** — read-only published content, hybrid search, Live Content SSE, GraphQL.
 - **Preview (CPA)** — read-only draft/current content.
 
 Which surfaces mount is controlled by `ROLE` (see [Configuration](./configuration.md)):
@@ -15,22 +15,26 @@ Which surfaces mount is controlled by `ROLE` (see [Configuration](./configuratio
 | `delivery` | Delivery only |
 | `preview` | Preview only |
 
-This lets you run one monolith or split the read-heavy Delivery surface onto its own
-independently-scaled deployment.
-
 ## Authentication
 
-Every endpoint except `/healthz` and `/readyz` requires `Authorization: Bearer <token>`.
+Every endpoint except `/healthz`, `/readyz`, and `/graphiql/:space/:env` requires
+`Authorization: Bearer <token>`.
 
 1. If the token equals the configured **admin token**, the request gets a wildcard admin
    `Principal` (`spaceId: '*'`, all CMA scopes) — used for provisioning/bootstrap.
-2. Otherwise the token is SHA-256 hashed and looked up as an API key; the matched key's space and
-   scopes become the `Principal`.
+2. Otherwise the token is SHA-256 hashed and looked up as an API key; the matched key's space,
+   scopes, and optional role grants become the `Principal`.
 3. An unknown/missing token → **401**.
 
-Each route then calls `requireScope(scope)`, which runs `authorize(principal, scope, :space)` —
-the principal must hold the scope **and** be in the route's space (admin `*` is in every space).
-A failure → **403**. See [Auth & RBAC](./auth-and-rbac.md).
+Each route then calls `requireScope(scope)`, which runs `authorize(principal, scope, :space)`.
+Delivery and Preview list/get endpoints additionally filter by granular `contentGrants` when the
+key is role-bound. See [Auth & RBAC](./auth-and-rbac.md).
+
+## Environment aliases
+
+Path segment `:env` in Management, Delivery, and Preview routes is resolved through
+**environment aliases** (`environment_aliases` table) before use. This supports blue/green-style
+routing without changing client URLs.
 
 ## System endpoints
 
@@ -38,118 +42,267 @@ A failure → **403**. See [Auth & RBAC](./auth-and-rbac.md).
 | --- | --- | --- | --- |
 | GET | `/healthz` | none | `{ "status": "ok" }` |
 | GET | `/readyz` | none | `{ "status": "ready", "role": "<role>" }` |
+| GET | `/graphiql/:space/:env` | none | GraphiQL HTML shell (queries still need a CDA token) |
+
+---
+
+## Shared query language
+
+Delivery and Preview entry list endpoints, and GraphQL resolvers, share the query parser in
+`apps/api/src/query.ts`. In addition to `content_type`, `locale`, `limit`, `skip`, `since`, and
+`include`:
+
+| Parameter | Syntax | Meaning |
+| --- | --- | --- |
+| Field filter | `fields.<apiId>=v` | Equals |
+| Field filter (op) | `fields.<apiId>[op]=v` | `op` ∈ `ne`, `in`, `nin`, `gt`, `gte`, `lt`, `lte`, `exists`, `match` |
+| System field | `sys.publishedAt[gt]=<iso>` | Filter on `sys.*` pseudo-fields |
+| Sort | `order=fields.title,-sys.publishedAt` | Comma-separated; `-` prefix = descending |
+| Projection | `select=fields.title,fields.body` | Return only listed field apiIds |
+| Full-text | `query=foo` | FTS over string fields (published model on Delivery) |
 
 ---
 
 ## Management API (CMA)
 
-Base paths: `/spaces` and `/spaces/:space/environments/:env`.
+Base paths: `/spaces` and `…` = `/spaces/:space/environments/:env`.
 
 ### Spaces & environments
 
 | Method | Path | Scope | Description |
 | --- | --- | --- | --- |
-| POST | `/spaces` | `space:admin` | Create a space (body: id, name, defaultLocale, locales, fallbacks, environments) |
-| POST | `/spaces/:space/environments` | `space:admin` | Create an environment — body `{ id, name }` |
+| GET | `/spaces` | auth | List spaces (admin: all; scoped key: own space) |
+| POST | `/spaces` | `space:admin` | Create a space |
+| GET | `/spaces/:space/environments` | `preview:read` | List environments |
+| POST | `/spaces/:space/environments` | `space:admin` | Create environment `{ id, name }` |
+| GET | `/spaces/:space/environment-aliases` | `preview:read` | List aliases |
+| PUT | `/spaces/:space/environment-aliases/:alias` | `space:admin` | Set alias → environment id |
+| DELETE | `/spaces/:space/environment-aliases/:alias` | `space:admin` | Remove alias |
+| GET | `/spaces/:space/audit-log` | `space:admin` | Space audit log (`?limit`, `?skip`) |
+| GET | `/spaces/:space/compare` | `preview:read` | Compare two environments (`?from`, `?to`) |
+| POST | `/spaces/:space/merge` | `content:manage` | Merge environment branch |
 
-### API keys
+### API keys & roles
 
 | Method | Path | Scope | Description |
 | --- | --- | --- | --- |
-| GET | `/spaces/:space/api-keys` | `space:admin` | List keys → `{ items: ApiKey[] }` |
-| POST | `/spaces/:space/api-keys` | `space:admin` | Mint a key — body includes `kind`. Returns `{ id, kind, token }`; the raw `token` is shown **once** (only its hash is stored) |
+| GET | `/spaces/:space/api-keys` | `space:admin` | List keys |
+| POST | `/spaces/:space/api-keys` | `space:admin` | Mint key (`kind`, optional `roleId`) — raw `token` once |
+| DELETE | `/spaces/:space/api-keys/:id` | `space:admin` | Revoke key |
+| GET | `/spaces/:space/roles` | `space:admin` | List roles |
+| POST | `/spaces/:space/roles` | `space:admin` | Create role |
+| GET | `/spaces/:space/roles/:id` | `space:admin` | Get role |
+| PUT | `/spaces/:space/roles/:id` | `space:admin` | Update role |
+| DELETE | `/spaces/:space/roles/:id` | `space:admin` | Delete role (refused if keys bound) |
 
-### Content types
+### Space config & content types
 
 | Method | Path | Scope | Description |
 | --- | --- | --- | --- |
-| GET | `…/content-types` | `preview:read` | List → `{ items: ContentType[] }` |
-| POST | `…/content-types` | `content:manage` | Create/update a content type (body: apiId, name, displayField, fields[]) |
+| GET | `…/space-config` | `preview:read` | Space settings for the environment |
+| GET | `…/content-types` | `preview:read` | List content types |
+| POST | `…/content-types` | `content:manage` | Create/update content type |
 | GET | `…/content-types/:apiId` | `preview:read` | Get one |
-| POST | `…/content-types/:apiId/published` | `content:publish` | Publish the definition (emits `content_type.published`) |
+| POST | `…/content-types/:apiId/published` | `content:publish` | Publish definition |
 
-### Entries
+### Entries — CRUD & publishing
 
 | Method | Path | Scope | Description |
 | --- | --- | --- | --- |
-| POST | `…/entries` | `content:write` | Create a draft entry — body `{ contentTypeApiId, fields }`. Validated against the model |
-| GET | `…/entries/:id` | `preview:read` | Get the current (draft) entry |
-| PUT | `…/entries/:id` | `content:write` | Save a new draft version — body `{ fields }` |
-| POST | `…/entries/:id/published` | `content:publish` | Publish (checks referential integrity; emits `entry.published`) |
-| DELETE | `…/entries/:id/published` | `content:publish` | Unpublish (emits `entry.unpublished`) |
+| POST | `…/entries` | `content:write` | Create draft `{ contentTypeApiId, fields }` |
+| GET | `…/entries/:id` | `preview:read` | Get current entry (RBAC-filtered fields) |
+| PUT | `…/entries/:id` | `content:write` | Save new draft version |
+| POST | `…/entries/:id/published` | `content:publish` | Publish |
+| DELETE | `…/entries/:id/published` | `content:publish` | Unpublish |
+| GET | `…/entries/:id/reverse-references` | `preview:read` | Entries linking to this one |
+
+### Entries — AI & semantics
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| POST | `…/entries/generate` | `content:write` | Generate draft fields from prompt |
+| POST | `…/entries/canvas` | `content:write` | Multi-field canvas generation |
+| POST | `…/entries/:id/translate` | `content:write` | Translate fields to locales |
+| POST | `…/entries/:id/summarize` | `content:write` | Summarize entry text |
+| POST | `…/entries/:id/autofill` | `content:write` | Fill empty fields |
+| POST | `…/entries/:id/suggest-tags` | `content:write` | Suggest taxonomy tags |
+| POST | `…/entries/:id/audit` | `content:write` | AI content audit |
+| POST | `…/entries/:id/moderate` | `content:write` | Run moderation agent |
+| GET | `…/entries/:id/related` | `search:read` | Semantically related entries |
+| GET | `…/entries/:id/duplicates` | `search:read` | Near-duplicate detection |
+| GET | `…/entries/:id/embedding` | `search:read` | Embedding vector metadata |
+
+### Entries — versioning & bulk
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/entries/:id/versions` | `preview:read` | Version list |
+| GET | `…/entries/:id/versions/diff` | `preview:read` | Diff two versions (`?from`, `?to`) |
+| GET | `…/entries/:id/versions/:version` | `preview:read` | Get specific version |
+| POST | `…/entries/:id/versions/:version/restore` | `content:write` | Restore version as new draft |
+| POST | `…/bulk/entries` | `content:write` | Bulk create/update |
+| POST | `…/bulk/entries/publish` | `content:publish` | Bulk publish |
+| POST | `…/bulk/entries/unpublish` | `content:publish` | Bulk unpublish |
+
+### Entry metadata & taxonomy associations
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/entries/:id/metadata` | `preview:read` | Tags + concepts on entry |
+| PUT | `…/entries/:id/metadata` | `content:write` | Set tags/concepts |
 
 ### Assets
 
 | Method | Path | Scope | Description |
 | --- | --- | --- | --- |
-| POST | `…/assets` | `content:write` | Create a draft asset; returns metadata + a presigned upload `{ url, headers }` |
-| GET | `…/assets/:id` | `preview:read` | Get an asset (draft or published) |
-| POST | `…/assets/:id/published` | `content:publish` | Publish the asset |
-| DELETE | `…/assets/:id/published` | `content:publish` | Unpublish the asset |
+| GET | `…/assets` | `preview:read` | List assets |
+| POST | `…/assets` | `content:write` | Create draft + presigned upload URL |
+| GET | `…/assets/:id` | `preview:read` | Get asset |
+| PATCH | `…/assets/:id/metadata` | `content:write` | Update alt text / tags metadata |
+| GET | `…/assets/:id/usage` | `preview:read` | Reference usage |
+| GET | `…/assets/:id/transform` | `preview:read` | Image transform URL |
+| POST | `…/assets/:id/alt-text` | `content:write` | AI alt-text generation |
+| POST | `…/assets/:id/auto-tag` | `content:write` | AI auto-tagging |
+| POST | `…/assets/:id/published` | `content:publish` | Publish asset |
+| DELETE | `…/assets/:id/published` | `content:publish` | Unpublish asset |
+
+### Releases
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/releases` | `preview:read` | List releases |
+| POST | `…/releases` | `content:write` | Create release |
+| GET | `…/releases/:id` | `preview:read` | Get release |
+| DELETE | `…/releases/:id` | `content:write` | Delete draft release |
+| POST | `…/releases/:id/items` | `content:write` | Add entity to release |
+| DELETE | `…/releases/:id/items/:entityId` | `content:write` | Remove item |
+| POST | `…/releases/:id/published` | `content:publish` | Publish release bundle |
+
+### Scheduled actions
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/scheduled-actions` | `preview:read` | List scheduled publish/unpublish |
+| POST | `…/scheduled-actions` | `content:publish` | Schedule action |
+| DELETE | `…/scheduled-actions/:id` | `content:publish` | Cancel scheduled action |
+
+### Collaboration
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/entries/:id/comments` | `preview:read` | List comments |
+| POST | `…/entries/:id/comments` | `content:write` | Add comment |
+| DELETE | `…/comments/:id` | `content:write` | Delete comment |
+| GET | `…/entries/:id/tasks` | `preview:read` | List tasks |
+| POST | `…/entries/:id/tasks` | `content:write` | Create task |
+| PUT | `…/tasks/:id` | `content:write` | Update task status/assignee |
+| DELETE | `…/tasks/:id` | `content:write` | Delete task |
+
+### Workflows
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/workflows` | `preview:read` | List workflow definitions |
+| POST | `…/workflows` | `content:manage` | Define workflow |
+| GET | `…/workflows/:id` | `preview:read` | Get workflow |
+| DELETE | `…/workflows/:id` | `content:manage` | Delete workflow |
+| GET | `…/entries/:id/workflow` | `preview:read` | Entry workflow state |
+| POST | `…/entries/:id/workflow/transition` | `preview:read` | Transition step (step scope enforced in use-case) |
+
+### Taxonomy
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/taxonomy/schemes` | `preview:read` | List concept schemes |
+| POST | `…/taxonomy/schemes` | `content:manage` | Create scheme |
+| DELETE | `…/taxonomy/schemes/:id` | `content:manage` | Delete scheme |
+| GET | `…/taxonomy/concepts` | `preview:read` | List concepts (`?scheme`) |
+| POST | `…/taxonomy/concepts` | `content:manage` | Create concept |
+| PUT | `…/taxonomy/concepts/:id/broader` | `content:manage` | Set broader concept |
+| DELETE | `…/taxonomy/concepts/:id` | `content:manage` | Delete concept |
+| GET | `…/taxonomy/tags` | `preview:read` | List tags |
+| POST | `…/taxonomy/tags` | `content:manage` | Create tag |
+| DELETE | `…/taxonomy/tags/:id` | `content:manage` | Delete tag |
+
+### Platform configuration
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/functions` | `preview:read` | List event-triggered HTTP functions |
+| POST | `…/functions` | `content:manage` | Register function |
+| DELETE | `…/functions/:id` | `content:manage` | Delete function |
+| GET | `…/app-extensions` | `preview:read` | List admin iframe extensions |
+| POST | `…/app-extensions` | `content:manage` | Register extension |
+| DELETE | `…/app-extensions/:id` | `content:manage` | Delete extension |
+| GET | `…/ai-actions` | `preview:read` | List AI action templates |
+| POST | `…/ai-actions` | `content:manage` | Create AI action |
+| DELETE | `…/ai-actions/:id` | `content:manage` | Delete AI action |
+| POST | `…/ai-actions/:id/run` | `content:write` | Run AI action on an entry |
+| GET | `…/agent-runs` | `space:admin` | List agent run audit records |
+| GET | `…/agent-runs/usage` | `space:admin` | Token usage aggregates |
 
 ### Webhooks
 
 | Method | Path | Scope | Description |
 | --- | --- | --- | --- |
-| GET | `…/webhooks` | `space:admin` | List → `{ items: Webhook[] }` |
-| POST | `…/webhooks` | `space:admin` | Create — body `{ url, topics[], secret, active?, headers? }` |
-
-> `…` abbreviates `/spaces/:space/environments/:env`.
+| GET | `…/webhooks` | `space:admin` | List webhooks |
+| POST | `…/webhooks` | `space:admin` | Create webhook |
+| PUT | `…/webhooks/:id` | `space:admin` | Update webhook |
+| DELETE | `…/webhooks/:id` | `space:admin` | Delete webhook |
+| GET | `…/webhooks/:id/deliveries` | `space:admin` | Delivery log |
 
 ---
 
 ## Delivery API (CDA)
 
-Base path: `/delivery/:space/:env`. Reads the denormalized **published** read model (served from
-the Redis cache when configured).
+Base path: `/delivery/:space/:env`. Reads the denormalized **published** read model (Redis cache
+when configured). List/get responses apply granular RBAC when the key is role-bound.
 
 | Method | Path | Scope | Description |
 | --- | --- | --- | --- |
-| GET | `/delivery/:space/:env/entries` | `delivery:read` | List published entries → `{ items, total }` |
+| GET | `/delivery/:space/:env/entries` | `delivery:read` | List published entries |
 | GET | `/delivery/:space/:env/entries/:id` | `delivery:read` | Get one published entry |
-| GET | `/delivery/:space/:env/assets` | `delivery:read` | List published assets → `{ items, total }` |
+| GET | `/delivery/:space/:env/assets` | `delivery:read` | List published assets |
 | GET | `/delivery/:space/:env/assets/:id` | `delivery:read` | Get one published asset |
-| GET | `/delivery/:space/:env/search` | `search:read` | Semantic search → `{ hits: SearchHit[] }` |
-| GET/POST | `/delivery/:space/:env/graphql` | `delivery:read` | GraphQL Delivery endpoint (see below) |
+| GET | `/delivery/:space/:env/search` | `search:read` | Search — **hybrid by default** |
+| GET | `/delivery/:space/:env/live` | `delivery:read` | **SSE** Live Content stream |
+| GET | `/delivery/:space/:env/assets/:id/transform` | `delivery:read` | Image transform redirect |
+| GET/POST | `/delivery/:space/:env/graphql` | `delivery:read` | GraphQL Delivery endpoint |
 
-**Query parameters**
+**Common query parameters:** shared [query language](#shared-query-language) plus `locale`,
+`include` (reference depth 0–5), `limit`, `skip`, `since` (delta sync).
 
-- Entries: `content_type` (filter by apiId), `locale` (flatten to one locale with fallback),
-  `include` (reference-embedding depth, 0–5), `limit`, `skip`.
-- Single entry: `locale`, `include`.
-- Assets: `limit`.
-- Search: `q` (required), `top_k`.
+**Search parameters:** `q` (required), `top_k`, `mode` = `hybrid` (default) | `semantic` |
+`lexical`.
 
-A delivered entry is shaped `{ id, contentType, fields, publishedAt }`; with `?locale=` the
-`fields` are flattened to that locale, and with `?include=N` linked entries are embedded up to
-depth N (cycle-guarded).
+A delivered entry is `{ id, contentType, fields, publishedAt }`; with `?locale=` fields flatten to
+that locale; with `?include=N` linked entries embed up to depth N (cycle-guarded).
 
 ### GraphQL Delivery
 
-`ALL /delivery/:space/:env/graphql` (scope `delivery:read`) serves a GraphQL schema **generated
-from your published content types** by `@cw/graphql-gen` — each content type becomes a GraphQL
-object type, with root fields for single entries, collections, assets, and search. The schema is
-cached per `(space, environment)` and keyed on the set of content-type `apiId@version`, so it
-rebuilds automatically when the model changes.
+`ALL /delivery/:space/:env/graphql` serves a schema **generated from published content types** by
+`@cw/graphql-gen`. Cached per `(space, environment)` keyed on content-type versions.
 
-- Send the query as `?query=` (GET) or a JSON body `{ query, variables?, operationName? }` (POST).
-- Resolvers call the same use-cases as REST (`getPublishedEntry`, `listPublishedEntries`,
-  `getPublishedAsset`, `semanticSearch`), with locale flattening and `include: 1` link resolution.
-- A missing query → **400** `{ errors: [...] }`; GraphQL execution errors come back in the
-  standard `{ data, errors }` envelope.
+- Query via `?query=` (GET) or JSON body `{ query, variables?, operationName? }` (POST).
+- Resolvers call the same use-cases as REST with locale flattening and link resolution.
+
+### Live Content (SSE)
+
+`GET /delivery/:space/:env/live` opens a Server-Sent Events stream. After domain events are
+dispatched, the worker publishes them on the Redis `EventBus`; the API fans them out to connected
+clients. Use for real-time cache invalidation or live previews on the read side.
 
 ---
 
 ## Preview API (CPA)
 
-Base path: `/preview/:space/:env`. Reads **draft/current** versions (for editor previews).
+Base path: `/preview/:space/:env`. Reads **draft/current** versions. Supports the same
+[query language](#shared-query-language) as Delivery. Granular RBAC applies on list/get.
 
 | Method | Path | Scope | Description |
 | --- | --- | --- | --- |
-| GET | `/preview/:space/:env/entries` | `preview:read` | List current entries → `{ items, total }` |
+| GET | `/preview/:space/:env/entries` | `preview:read` | List current entries |
 | GET | `/preview/:space/:env/entries/:id` | `preview:read` | Get one current entry |
-
-**Query parameters:** `content_type`, `locale`.
 
 ---
 
@@ -176,3 +329,4 @@ The `onError` middleware maps domain errors to HTTP responses. The body is alway
   even for non-localized fields (use the default locale).
 - The same operations are exposed as **MCP tools** for AI agents — see
   [AI, agents & search](./ai-agents-and-search.md).
+- The [Admin UI](./admin-ui.md) is a browser client of these Management endpoints.
