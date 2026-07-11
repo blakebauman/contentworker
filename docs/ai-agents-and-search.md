@@ -94,7 +94,24 @@ On `entry.unpublished`, `removeEntryEmbeddings` deletes the entry's vectors.
 
 The pgvector adapter (`@cw/adapter-vector-pgvector`) stores vectors in a self-initializing
 `content_embeddings` table with an HNSW cosine index and records `model_id`/`dimensions` so an
-embedding-model swap is detectable. Exposed at `GET /delivery/:space/:env/search`.
+embedding-model swap is detectable.
+
+**Hybrid search** (`hybridSearch(deps, ctx, scope, query, { topK = 10 })`) fuses two legs with
+Reciprocal Rank Fusion (`score = Σ 1/(60 + rank)` — rank-based, so the legs' incomparable
+scores never need calibrating):
+
+- **Semantic** — `semanticSearch` above.
+- **Full-text** — `EntryRepo.searchPublished`, ranked Postgres FTS over the published read
+  model: `jsonb_to_tsvector('simple', fields, '["string"]')` matched with
+  `websearch_to_tsquery` and ordered by `ts_rank`, backed by the `entry_published_fts` GIN
+  expression index. The `simple` regconfig keeps tokenization locale-neutral (content is
+  multilingual); the semantic leg supplies linguistic fuzziness. The in-memory store mirrors
+  the semantics (every term must match, term-frequency scoring) so hybrid search is testable
+  with `@cw/test-kit`.
+
+Lexical-only hits derive their snippet from the published fields. Exposed at
+`GET /delivery/:space/:env/search` (hybrid by default; `?mode=semantic` / `?mode=lexical`
+selects one leg), the GraphQL `search` resolver, and the `content_search` MCP tool.
 
 ## MCP server
 
@@ -118,7 +135,9 @@ use-case, and `space`/`environment` default to the seeded values when omitted.
 | `entries_publish` | `content:publish` | `publishEntry` |
 | `entries_unpublish` | `content:publish` | `unpublishEntry` |
 | `generate_draft` | `content:write` | `draftEntry` |
+| `content_search` | `search:read` | `hybridSearch` |
 | `content_semantic_search` | `search:read` | `semanticSearch` |
+| `entry_moderate` | `content:write` | `moderateEntry` |
 
 Because the tools are thin wrappers over the use-cases, the MCP surface inherits all validation,
 referential integrity, RBAC, and event emission for free.
@@ -177,5 +196,12 @@ interface AgentRunResult {
 }
 ```
 
-The worker runs the `enrich` workflow on `entry.published` events when `AGENTS_ENRICH=true`;
-`AGENTS_AUTO_APPLY` toggles auto-apply vs. routing to human review.
+The worker runs the on-publish workflows on `entry.published` events: `AGENTS_ENRICH=true`
+enables `enrich`, `AGENTS_MODERATE=true` enables `moderate` (enrich runs first so moderation
+classifies the enriched content), and `AGENTS_AUTO_APPLY` toggles auto-apply vs. routing
+enrichment to human review. Every run is recorded in the agent ledger.
+
+Moderation is also available on demand — `POST .../entries/:id/moderate` (Management API) and
+the `entry_moderate` MCP tool both call the same `moderateEntry` use-case, which runs the
+workflow in-process and returns `{ flagged, status, decisions, usage }`. A flagged result is a
+recorded hold, not a state change: callers (or a webhook consumer) decide whether to unpublish.

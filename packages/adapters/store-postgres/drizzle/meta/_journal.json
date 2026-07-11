@@ -120,6 +120,20 @@
       "when": 1782454831812,
       "tag": "0016_real_boomerang",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783795310904,
+      "tag": "0017_clean_betty_brant",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783795946131,
+      "tag": "0018_overconfident_energizer",
+      "breakpoints": true
     }
   ]
 }

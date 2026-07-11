@@ -178,6 +178,9 @@ importers:
       '@cw/adapter-vector-pgvector':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-pgvector
+      '@cw/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@cw/application':
         specifier: workspace:*
         version: link:../../packages/application
@@ -242,6 +245,9 @@ importers:
       '@cw/adapter-vector-pgvector':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-pgvector
+      '@cw/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@cw/application':
         specifier: workspace:*
         version: link:../../packages/application
@@ -340,6 +346,9 @@ importers:
       '@cw/test-kit':
         specifier: workspace:*
         version: link:../../packages/test-kit
+      '@temporalio/client':
+        specifier: ^1.11.6
+        version: 1.18.1
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1
@@ -521,6 +530,9 @@ importers:
       '@cw/ports':
         specifier: workspace:*
         version: link:../ports
+      '@temporalio/client':
+        specifier: ^1.11.6
+        version: 1.18.1
     devDependencies:
       '@cw/test-kit':
         specifier: workspace:*

@@ -40,6 +40,47 @@ The three key kinds (`ApiKeyKind`):
 
 A key may be minted with an explicit scope override; otherwise it receives its kind's defaults.
 
+## Custom roles (granular RBAC)
+
+A **role** is a named, space-scoped permission set assignable to API keys — the layer below
+coarse scopes. It carries a scope set plus per-content-type grants:
+
+```ts
+interface Role {
+  id: string;
+  spaceId: string;
+  name: string;
+  description?: string;
+  scopes: readonly string[];               // same vocabulary as SCOPES
+  contentGrants: readonly ContentTypeGrant[];
+}
+
+interface ContentTypeGrant {
+  contentTypeApiId: string;                // exact apiId, or '*' for all types
+  actions: readonly ('read' | 'write' | 'publish')[];
+  deniedFields?: readonly string[];        // masked on read, rejected on write
+  readOnlyFields?: readonly string[];      // readable, rejected on write
+}
+```
+
+Semantics:
+
+- **Roles are live**: a role-bound key resolves the role's scopes and grants on **every**
+  request (`authenticate`), so editing a role instantly changes what every bound key can do.
+  Deleting a role is refused while active keys reference it; a dangling reference fails closed.
+- **Exact grant wins over `'*'`**; a type with no matching grant is denied entirely.
+- **Enforcement points** (identical for HTTP and MCP): entry create/update check
+  `authorizeContent(principal, 'write', ct)` + `assertWritableFields`; publish/unpublish check
+  the `publish` action; management/preview/delivery reads filter out ungranted types and
+  `maskDeniedFields` on what remains. Keys without a role (`contentGrants === undefined`) are
+  unrestricted at this layer — coarse scopes alone apply, preserving pre-role behavior.
+- Managed at `GET/POST /spaces/:space/roles`, `GET/PUT/DELETE /spaces/:space/roles/:id`
+  (requires `space:admin`) and the `roles_list` / `role_create` / `role_update` /
+  `role_delete` MCP tools. Mint a bound key with `POST …/api-keys { kind, roleId }`.
+
+Grants currently govern the entry read/write/publish surfaces; GraphQL, search, SSE, and
+assets are governed by coarse scopes.
+
 ## API keys at rest
 
 ```ts
@@ -49,8 +90,9 @@ interface ApiKey {
   kind: ApiKeyKind;
   name: string;
   hashedToken: string;       // SHA-256 of the raw token — the raw token is NEVER stored
-  scopes: readonly string[];
+  scopes: readonly string[]; // display snapshot; role-bound keys resolve live from the role
   revoked: boolean;
+  roleId?: string;           // custom role binding (granular RBAC)
 }
 ```
 
@@ -64,6 +106,7 @@ interface Principal {
   spaceId: string;                       // a specific space, or '*' for admin/root
   kind: ApiKeyKind | 'admin';
   scopes: readonly string[];
+  contentGrants?: readonly ContentTypeGrant[];  // from the key's role; undefined = unrestricted
 }
 ```
 

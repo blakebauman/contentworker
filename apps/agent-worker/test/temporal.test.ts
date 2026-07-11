@@ -78,4 +78,105 @@ describe('Temporal agent execution (real ephemeral server)', () => {
     const got = await store.entries.get(scope, entry.entry.id);
     expect(got?.fields.summary?.['en-US']).toBe('A short generated summary.');
   }, 120_000);
+
+  it('runs the repurpose workflow durably: channel variants come back as a review proposal', async () => {
+    const store = new InMemoryContentStore();
+    const ctx: AppContext = { store, clock: new FixedClock(), ids: new SequenceIdGenerator('r') };
+    await createSpace(ctx, { spaceId: 'blog', name: 'Blog', defaultLocale: 'en-US' });
+    await createContentType(ctx, scope, {
+      apiId: 'note',
+      name: 'Note',
+      displayField: 'title',
+      fields: [
+        {
+          apiId: 'title',
+          name: 'Title',
+          type: 'Symbol',
+          localized: false,
+          required: true,
+          position: 0,
+        },
+      ],
+    });
+    const entry = await createEntry(ctx, scope, {
+      contentTypeApiId: 'note',
+      fields: { title: { 'en-US': 'Release notes for v2' } },
+    });
+
+    const ai = new StubAIProvider(() => ({
+      summary: 'v2 ships faster queries.',
+      socialPost: 'v2 is out!',
+      emailTeaser: 'See what shipped in v2.',
+    }));
+    const worker = await Worker.create({
+      connection: testEnv.nativeConnection,
+      taskQueue: 'agents-test',
+      workflowsPath: fileURLToPath(new URL('../src/workflows.ts', import.meta.url)),
+      activities: makeActivities({ ctx, ai }),
+    });
+
+    const result = await worker.runUntil(
+      testEnv.client.workflow.execute('repurpose', {
+        taskQueue: 'agents-test',
+        workflowId: `wf-repurpose-${entry.entry.id}`,
+        args: [{ scope, entryId: entry.entry.id }],
+      }),
+    );
+
+    expect(result.status).toBe('needs_review');
+    expect(result.proposed?.socialPost?.['en-US']).toBe('v2 is out!');
+    // Variants are proposals only — the entry itself is untouched.
+    expect((await store.entries.get(scope, entry.entry.id))?.entry.currentVersion).toBe(1);
+  }, 120_000);
+
+  it('runs the moderate workflow durably: a flagged entry is held and recorded', async () => {
+    const store = new InMemoryContentStore();
+    const ctx: AppContext = { store, clock: new FixedClock(), ids: new SequenceIdGenerator('m') };
+    await createSpace(ctx, { spaceId: 'blog', name: 'Blog', defaultLocale: 'en-US' });
+    await createContentType(ctx, scope, {
+      apiId: 'post',
+      name: 'Post',
+      displayField: 'title',
+      fields: [
+        {
+          apiId: 'title',
+          name: 'Title',
+          type: 'Symbol',
+          localized: false,
+          required: true,
+          position: 0,
+        },
+      ],
+    });
+    const entry = await createEntry(ctx, scope, {
+      contentTypeApiId: 'post',
+      fields: { title: { 'en-US': 'Something objectionable' } },
+    });
+
+    const ai = new StubAIProvider(() => ({ flagged: true, categories: ['harassment'] }));
+    const recorded: string[] = [];
+    const worker = await Worker.create({
+      connection: testEnv.nativeConnection,
+      taskQueue: 'agents-test',
+      workflowsPath: fileURLToPath(new URL('../src/workflows.ts', import.meta.url)),
+      activities: makeActivities({
+        ctx,
+        ai,
+        onRecord: async (_scope, _entryId, note) => void recorded.push(note),
+      }),
+    });
+
+    const result = await worker.runUntil(
+      testEnv.client.workflow.execute('moderate', {
+        taskQueue: 'agents-test',
+        workflowId: `wf-moderate-${entry.entry.id}`,
+        args: [{ scope, entryId: entry.entry.id }],
+      }),
+    );
+
+    expect(result.status).toBe('held');
+    expect(result.decisions[0]).toContain('harassment');
+    // The hold decision went through the record activity.
+    expect(recorded).toEqual(['moderation hold: harassment']);
+  }, 120_000);
 });

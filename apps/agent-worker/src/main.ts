@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
+import { AGENT_TASK_QUEUE } from '@cw/agent-runtime/temporal';
 import { logger, startTelemetry } from '@cw/telemetry';
 import { NativeConnection, Worker } from '@temporalio/worker';
-import { AGENT_TASK_QUEUE } from './runtime.js';
 import { wireActivities } from './wire.js';
 
 startTelemetry('cw-agent-worker');

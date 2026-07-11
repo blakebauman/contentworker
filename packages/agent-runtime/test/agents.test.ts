@@ -116,6 +116,115 @@ describe('P8: durable agents (in-process executor)', () => {
     expect(second.status).toBe('skipped');
   });
 
+  it('curate improves filled fields and applies changed values when autoApply=true', async () => {
+    const id = await seed(ctx);
+    // Fill both empty fields so curate has values to improve.
+    const fill = new StubAIProvider(() => ({
+      summary: 'a rough draft summary',
+      seoDescription: 'meta',
+    }));
+    await new InProcessAgentRuntime(makeActivities({ ctx, ai: fill })).run('enrich', {
+      scope,
+      entryId: id,
+      autoApply: true,
+    });
+
+    // Model improves summary but returns seoDescription unchanged → only summary applies.
+    const improve = new StubAIProvider(() => ({
+      summary: 'A polished, concise summary.',
+      seoDescription: 'meta',
+    }));
+    const runtime = new InProcessAgentRuntime(makeActivities({ ctx, ai: improve }));
+    const result = await runtime.run('curate', { scope, entryId: id, autoApply: true });
+
+    expect(result.status).toBe('completed');
+    expect(result.decisions[0]).toBe('curated summary');
+    const got = await ctx.store.entries.get(scope, id);
+    expect(got?.fields.summary?.['en-US']).toBe('A polished, concise summary.');
+    // Display field untouched.
+    expect(got?.fields.title?.['en-US']).toBe('Postgres indexing tips');
+  });
+
+  it('curate routes to review when autoApply=false, leaving the entry unchanged', async () => {
+    const id = await seed(ctx);
+    const fill = new StubAIProvider(() => ({ summary: 'draft', seoDescription: 'meta' }));
+    await new InProcessAgentRuntime(makeActivities({ ctx, ai: fill })).run('enrich', {
+      scope,
+      entryId: id,
+      autoApply: true,
+    });
+    const before = (await ctx.store.entries.get(scope, id))?.entry.currentVersion;
+
+    const improve = new StubAIProvider(() => ({
+      summary: 'much better draft',
+      seoDescription: 'better meta',
+    }));
+    const result = await new InProcessAgentRuntime(makeActivities({ ctx, ai: improve })).run(
+      'curate',
+      { scope, entryId: id, autoApply: false },
+    );
+
+    expect(result.status).toBe('needs_review');
+    expect(result.proposed?.summary?.['en-US']).toBe('much better draft');
+    expect((await ctx.store.entries.get(scope, id))?.entry.currentVersion).toBe(before);
+  });
+
+  it('curate completes without changes when the model returns identical values', async () => {
+    const id = await seed(ctx);
+    const fill = new StubAIProvider(() => ({ summary: 'already perfect', seoDescription: 'meta' }));
+    const runtime = new InProcessAgentRuntime(makeActivities({ ctx, ai: fill }));
+    await runtime.run('enrich', { scope, entryId: id, autoApply: true });
+    const before = (await ctx.store.entries.get(scope, id))?.entry.currentVersion;
+
+    // Same stub returns the same value → nothing differs → no new version.
+    const result = await runtime.run('curate', { scope, entryId: id, autoApply: true });
+    expect(result.status).toBe('completed');
+    expect(result.decisions).toContain('no improvements needed');
+    expect((await ctx.store.entries.get(scope, id))?.entry.currentVersion).toBe(before);
+  });
+
+  it('curate skips when no non-display text fields are filled', async () => {
+    const id = await seed(ctx); // only the display field (title) has a value
+    const ai = new StubAIProvider(() => ({}));
+    const result = await new InProcessAgentRuntime(makeActivities({ ctx, ai })).run('curate', {
+      scope,
+      entryId: id,
+      autoApply: true,
+    });
+    expect(result.status).toBe('skipped');
+    expect(result.decisions).toContain('no filled fields to curate');
+  });
+
+  it('repurpose always proposes channel variants for review and records them', async () => {
+    const id = await seed(ctx);
+    const records: string[] = [];
+    const ai = new StubAIProvider(() => ({
+      summary: 'Short summary of the post.',
+      socialPost: 'Indexes make Postgres fast — here is how.',
+      emailTeaser: 'This week: Postgres indexing tips.',
+    }));
+    const result = await new InProcessAgentRuntime(
+      makeActivities({ ctx, ai, onRecord: (_s, _e, note) => void records.push(note) }),
+    ).run('repurpose', { scope, entryId: id, autoApply: true });
+
+    // Variants are not entry fields — never applied, always reviewed.
+    expect(result.status).toBe('needs_review');
+    expect(result.proposed?.socialPost?.['en-US']).toBe(
+      'Indexes make Postgres fast — here is how.',
+    );
+    expect(records[0]).toContain('repurpose proposes');
+    expect((await ctx.store.entries.get(scope, id))?.entry.currentVersion).toBe(1);
+  });
+
+  it('curate and repurpose skip missing entries', async () => {
+    const ai = new StubAIProvider(() => ({}));
+    const runtime = new InProcessAgentRuntime(makeActivities({ ctx, ai }));
+    const curate = await runtime.run('curate', { scope, entryId: 'nope' });
+    const repurpose = await runtime.run('repurpose', { scope, entryId: 'nope' });
+    expect(curate.status).toBe('skipped');
+    expect(repurpose.status).toBe('skipped');
+  });
+
   it('moderate holds flagged content and passes clean content', async () => {
     const id = await seed(ctx);
     const records: string[] = [];

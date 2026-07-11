@@ -14,12 +14,14 @@ import {
   createEntry,
   createFunction,
   createRelease,
+  createRole,
   createScheme,
   createTag,
   createTask,
   deleteAppExtension,
   deleteEnvironmentAlias,
   deleteFunction,
+  deleteRole,
   diffVersions,
   draftEntry,
   findDuplicates,
@@ -28,6 +30,7 @@ import {
   getContentType,
   getPreviewEntry,
   getRelease,
+  hybridSearch,
   listAIActions,
   listAppExtensions,
   listAssets,
@@ -39,10 +42,12 @@ import {
   listFunctions,
   listPreviewEntries,
   listReleases,
+  listRoles,
   listTags,
   listTasks,
   listVersions,
   mergeEnvironments,
+  moderateEntry,
   publishContentType,
   publishEntry,
   publishRelease,
@@ -62,15 +67,21 @@ import {
   translateEntry,
   unpublishEntry,
   updateEntry,
+  updateRole,
 } from '@cw/application';
 import {
+  type ContentAction,
   type EntryFields,
   FIELD_TYPES,
   type PermissionScope,
   type Principal,
   SCOPES,
   type Scope,
+  assertWritableFields,
   authorize,
+  authorizeContent,
+  canAccessContentType,
+  maskDeniedFields,
 } from '@cw/domain';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -111,9 +122,17 @@ const entryFields = z.record(z.record(z.any())).describe('fieldApiId -> { locale
  * use-case — so MCP enforces the SAME RBAC as the HTTP API.
  */
 export function buildServer(deps: McpDeps, principal: Principal): McpServer {
-  const { ctx, ai, rag } = deps;
+  const { ctx, ai, rag, agents } = deps;
   const server = new McpServer({ name: 'contentworker', version: '0.1.0' });
   const guard = (scope: PermissionScope, s: Scope) => authorize(principal, scope, s.spaceId);
+  // Granular RBAC: content-level check for role-bound principals (unrestricted
+  // principals short-circuit inside the domain helpers). Same enforcement as
+  // the HTTP API, resolving the entry's content type when needed.
+  const guardEntry = async (s: Scope, id: string, action: ContentAction) => {
+    if (!principal.contentGrants) return;
+    const entry = await getPreviewEntry(ctx, s, id);
+    authorizeContent(principal, action, entry.contentType);
+  };
 
   // --- read / query / search ---------------------------------------------
   server.tool(
@@ -163,17 +182,21 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     },
     async (args) => {
       guard(SCOPES.previewRead, scopeOf(args));
+      const items = await listPreviewEntries(ctx, scopeOf(args), {
+        contentTypeApiId: args.contentType,
+        limit: args.limit,
+        skip: args.skip,
+        locale: args.locale,
+        filters: args.filters,
+        order: args.order,
+        select: args.select,
+        search: args.search,
+      });
+      // Granular RBAC: drop entries of ungranted types, mask denied fields.
       return ok(
-        await listPreviewEntries(ctx, scopeOf(args), {
-          contentTypeApiId: args.contentType,
-          limit: args.limit,
-          skip: args.skip,
-          locale: args.locale,
-          filters: args.filters,
-          order: args.order,
-          select: args.select,
-          search: args.search,
-        }),
+        items
+          .filter((e) => canAccessContentType(principal, 'read', e.contentType))
+          .map((e) => ({ ...e, fields: maskDeniedFields(principal, e.contentType, e.fields) })),
       );
     },
   );
@@ -184,13 +207,30 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     { id: z.string(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.previewRead, scopeOf(args));
-      return ok(await getPreviewEntry(ctx, scopeOf(args), args.id));
+      const entry = await getPreviewEntry(ctx, scopeOf(args), args.id);
+      authorizeContent(principal, 'read', entry.contentType);
+      return ok({
+        ...entry,
+        fields: maskDeniedFields(principal, entry.contentType, entry.fields),
+      });
+    },
+  );
+
+  server.tool(
+    'content_search',
+    'Search published content: hybrid semantic (vector) + full-text, fused ' +
+      'with Reciprocal Rank Fusion. Preferred for general queries.',
+    { query: z.string(), topK: z.number().int().positive().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.searchRead, scopeOf(args));
+      return ok(await hybridSearch(rag, ctx, scopeOf(args), args.query, { topK: args.topK }));
     },
   );
 
   server.tool(
     'content_semantic_search',
-    'Semantic search over published content using vector embeddings.',
+    'Semantic search over published content using vector embeddings only ' +
+      '(prefer content_search for general queries).',
     { query: z.string(), topK: z.number().int().positive().optional(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.searchRead, scopeOf(args));
@@ -376,6 +416,17 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
   );
 
   server.tool(
+    'entry_moderate',
+    'Run the moderation agent against an entry: classifies its text and ' +
+      'records a hold when flagged (flagged=true); no state change is made.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(await moderateEntry(ctx, agents, scopeOf(args), args.id));
+    },
+  );
+
+  server.tool(
     'entries_bulk_action',
     'Publish or unpublish many entries in one call; returns a per-item summary.',
     {
@@ -385,7 +436,85 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     },
     async (args) => {
       guard(SCOPES.contentPublish, scopeOf(args));
+      for (const id of args.ids) await guardEntry(scopeOf(args), id, 'publish');
       return ok(await bulkEntryAction(ctx, scopeOf(args), args.action, args.ids));
+    },
+  );
+
+  // --- roles (granular RBAC, admin) ----------------------------------------
+  const grantShape = z.object({
+    contentTypeApiId: z.string().describe("content type apiId, or '*' for all"),
+    actions: z.array(z.enum(['read', 'write', 'publish'])),
+    deniedFields: z.array(z.string()).optional(),
+    readOnlyFields: z.array(z.string()).optional(),
+  });
+
+  server.tool(
+    'roles_list',
+    'List the custom roles (granular RBAC) defined in a space.',
+    scopeArgs,
+    async (args) => {
+      guard(SCOPES.spaceAdmin, scopeOf(args));
+      return ok(await listRoles(ctx, scopeOf(args).spaceId));
+    },
+  );
+
+  server.tool(
+    'role_create',
+    'Create a custom role: a scope set plus per-content-type grants with ' +
+      'optional per-field deny/read-only rules. Assign it via api_key roleId.',
+    {
+      name: z.string(),
+      description: z.string().optional(),
+      scopes: z.array(z.string()).describe('permission scopes, e.g. content:write'),
+      contentGrants: z.array(grantShape).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.spaceAdmin, scopeOf(args));
+      return ok(
+        await createRole(ctx, scopeOf(args).spaceId, {
+          name: args.name,
+          description: args.description,
+          scopes: args.scopes,
+          contentGrants: args.contentGrants,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'role_update',
+    'Replace a role definition; keys bound to it pick the change up live.',
+    {
+      id: z.string(),
+      name: z.string(),
+      description: z.string().optional(),
+      scopes: z.array(z.string()),
+      contentGrants: z.array(grantShape).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.spaceAdmin, scopeOf(args));
+      return ok(
+        await updateRole(ctx, scopeOf(args).spaceId, args.id, {
+          name: args.name,
+          description: args.description,
+          scopes: args.scopes,
+          contentGrants: args.contentGrants,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'role_delete',
+    'Delete a role (refused while any active API key still references it).',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.spaceAdmin, scopeOf(args));
+      await deleteRole(ctx, scopeOf(args).spaceId, args.id);
+      return ok({ deleted: args.id });
     },
   );
 
@@ -586,6 +715,8 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     { contentType: z.string(), fields: entryFields, ...scopeArgs },
     async (args) => {
       guard(SCOPES.contentWrite, scopeOf(args));
+      authorizeContent(principal, 'write', args.contentType);
+      assertWritableFields(principal, args.contentType, args.fields ?? {});
       return ok(
         await createEntry(ctx, scopeOf(args), {
           contentTypeApiId: args.contentType,
@@ -601,6 +732,11 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     { id: z.string(), fields: entryFields, ...scopeArgs },
     async (args) => {
       guard(SCOPES.contentWrite, scopeOf(args));
+      if (principal.contentGrants) {
+        const entry = await getPreviewEntry(ctx, scopeOf(args), args.id);
+        authorizeContent(principal, 'write', entry.contentType);
+        assertWritableFields(principal, entry.contentType, args.fields ?? {});
+      }
       return ok(await updateEntry(ctx, scopeOf(args), args.id, args.fields as EntryFields));
     },
   );
@@ -611,6 +747,7 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     { id: z.string(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.contentPublish, scopeOf(args));
+      await guardEntry(scopeOf(args), args.id, 'publish');
       return ok(await publishEntry(ctx, scopeOf(args), args.id));
     },
   );
@@ -621,6 +758,7 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     { id: z.string(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.contentPublish, scopeOf(args));
+      await guardEntry(scopeOf(args), args.id, 'publish');
       return ok(await unpublishEntry(ctx, scopeOf(args), args.id));
     },
   );

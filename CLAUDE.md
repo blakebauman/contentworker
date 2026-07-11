@@ -98,6 +98,9 @@ When adding a capability, add the use-case in `@cw/application` and expose it th
 - **Auth:** API keys are stored only as SHA-256 hashes; `principalMiddleware` resolves a bearer
   token to a `Principal`, and `requireScope`/`authorize` enforce RBAC scopes per route, checked
   against the route's `:space`. The admin token short-circuits to a wildcard (`spaceId: '*'`) principal.
+  Granular RBAC: keys may bind a custom `Role` (live-resolved) whose `ContentTypeGrant`s add
+  per-content-type read/write/publish checks and per-field deny/read-only rules
+  (`authorizeContent`/`maskDeniedFields`/`assertWritableFields` in `domain/auth`).
 
 ### Adapter selection is env-driven (12-factor)
 
@@ -107,8 +110,8 @@ The same image runs anywhere; `apps/*/wire.ts` (and `worker/main.ts`) choose ada
 - `BLOB_BUCKET` set → S3 blob store; unset → fake.
 - `AI_PROVIDER` / `EMBEDDINGS_PROVIDER` (`anthropic` default / `azure-openai`).
 - `ROLE` (`all` | `management` | `delivery` | `preview`) gates which API modules mount.
-- Agents: `AGENTS_ENRICH=true` enables the enrich-on-publish agent; `AGENTS_AUTO_APPLY` toggles
-  auto-apply vs. human-in-the-loop review.
+- Agents: `AGENTS_ENRICH=true` / `AGENTS_MODERATE=true` enable the on-publish agents;
+  `AGENTS_AUTO_APPLY` toggles auto-apply vs. human-in-the-loop review.
 
 ### Agent runtime
 

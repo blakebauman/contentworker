@@ -1,9 +1,13 @@
+import { createHash } from 'node:crypto';
 import type { AppContext } from '@cw/application';
 import {
+  authenticate,
+  createApiKey,
   createAppExtension,
   createContentType,
   createEntry,
   createFunction,
+  createRole,
   createSpace,
   deleteFunction,
   getEntry,
@@ -11,10 +15,12 @@ import {
   listAppExtensions,
   listFunctions,
   listPublishedEntries,
+  listRoles,
   publishContentType,
   publishEntry,
   unpublishEntry,
   updateEntry,
+  updateRole,
 } from '@cw/application';
 import type { Clock, IdGenerator } from '@cw/ports';
 import { v7 as uuidv7 } from 'uuid';
@@ -131,6 +137,30 @@ describe.skipIf(!URL)('Postgres store (contract)', () => {
     expect(after.map((e) => e.entry?.id ?? '')).not.toContain(b.entry.id);
   });
 
+  it('ranks published entries with Postgres full-text search', async () => {
+    const twice = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Quantum primer: quantum gates and qubits' } },
+    });
+    const once = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Gardening notes with a quantum aside' } },
+    });
+    await publishEntry(ctx, scope, twice.entry.id);
+    await publishEntry(ctx, scope, once.entry.id);
+
+    // Term frequency drives ts_rank: the double mention ranks first.
+    const hits = await store.entries.searchPublished(scope, 'quantum', { topK: 5 });
+    expect(hits.map((h) => h.entryId)).toEqual([twice.entry.id, once.entry.id]);
+    expect(hits[0]?.score ?? 0).toBeGreaterThan(hits[1]?.score ?? 0);
+
+    // websearch semantics: every term must match.
+    const both = await store.entries.searchPublished(scope, 'quantum gardening', { topK: 5 });
+    expect(both.map((h) => h.entryId)).toEqual([once.entry.id]);
+
+    expect(await store.entries.searchPublished(scope, 'nonexistentterm', { topK: 5 })).toEqual([]);
+  });
+
   it('appends to the outbox transactionally on publish', async () => {
     const e = await createEntry(ctx, scope, {
       contentTypeApiId: 'article',
@@ -139,6 +169,38 @@ describe.skipIf(!URL)('Postgres store (contract)', () => {
     await publishEntry(ctx, scope, e.entry.id);
     const pending = await store.outbox.readPending(100);
     expect(pending.some((ev) => ev.type === 'entry.published')).toBe(true);
+  });
+
+  it('round-trips roles and role-bound API keys (granular RBAC)', async () => {
+    const role = await createRole(ctx, spaceId, {
+      name: 'Editor',
+      description: 'Posts only',
+      scopes: ['content:write', 'preview:read'],
+      contentGrants: [
+        { contentTypeApiId: 'article', actions: ['read', 'write'], deniedFields: ['views'] },
+      ],
+    });
+    const listed = await listRoles(ctx, spaceId);
+    expect(listed.map((r) => r.id)).toContain(role.id);
+
+    const hasher = { hash: (v: string) => createHash('sha256').update(v).digest('hex') };
+    const { token } = await createApiKey(ctx, hasher, {
+      spaceId,
+      kind: 'cma',
+      roleId: role.id,
+    });
+    const principal = await authenticate(ctx, hasher, token);
+    expect(principal.scopes).toEqual(['content:write', 'preview:read']);
+    expect(principal.contentGrants?.[0]?.deniedFields).toEqual(['views']);
+
+    await updateRole(ctx, spaceId, role.id, {
+      name: 'Editor',
+      scopes: ['preview:read'],
+      contentGrants: [{ contentTypeApiId: '*', actions: ['read'] }],
+    });
+    const after = await authenticate(ctx, hasher, token);
+    expect(after.scopes).toEqual(['preview:read']);
+    expect(after.contentGrants?.[0]?.contentTypeApiId).toBe('*');
   });
 
   it('round-trips the functions repo', async () => {

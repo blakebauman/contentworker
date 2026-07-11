@@ -12,21 +12,22 @@
   "dependencies": {
     "@cw/adapter-ai-anthropic": "workspace:*",
     "@cw/adapter-ai-azure-openai": "workspace:*",
+    "@cw/adapter-blob-s3": "workspace:*",
     "@cw/adapter-redis": "workspace:*",
     "@cw/adapter-store-postgres": "workspace:*",
     "@cw/adapter-vector-pgvector": "workspace:*",
+    "@cw/agent-runtime": "workspace:*",
     "@cw/application": "workspace:*",
     "@cw/domain": "workspace:*",
+    "@cw/graphql-gen": "workspace:*",
     "@cw/ports": "workspace:*",
+    "@cw/telemetry": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "@hono/node-server": "^1.13.7",
+    "graphql": "^16.10.0",
     "hono": "^4.6.14",
     "ioredis": "^5.4.2",
-    "uuid": "^11.0.3",
-    "@cw/adapter-blob-s3": "workspace:*",
-    "@cw/graphql-gen": "workspace:*",
-    "graphql": "^16.10.0",
-    "@cw/telemetry": "workspace:*"
+    "uuid": "^11.0.3"
   },
   "devDependencies": {
     "@cw/sdk-core": "workspace:*",

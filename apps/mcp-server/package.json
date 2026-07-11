@@ -13,14 +13,15 @@
     "@cw/adapter-ai-azure-openai": "workspace:*",
     "@cw/adapter-store-postgres": "workspace:*",
     "@cw/adapter-vector-pgvector": "workspace:*",
+    "@cw/agent-runtime": "workspace:*",
     "@cw/application": "workspace:*",
     "@cw/domain": "workspace:*",
     "@cw/ports": "workspace:*",
+    "@cw/telemetry": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.13.0",
     "uuid": "^11.0.3",
-    "zod": "^3.24.1",
-    "@cw/telemetry": "workspace:*"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

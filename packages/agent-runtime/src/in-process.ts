@@ -5,7 +5,12 @@ import type {
   WorkflowInput,
   WorkflowName,
 } from './types.js';
-import { enrichWorkflow, moderateWorkflow } from './workflows.js';
+import {
+  curateWorkflow,
+  enrichWorkflow,
+  moderateWorkflow,
+  repurposeWorkflow,
+} from './workflows.js';
 
 /**
  * Runs workflows directly in the calling process — the default executor for dev,
@@ -23,6 +28,10 @@ export class InProcessAgentRuntime implements AgentRuntime {
         return enrichWorkflow(this.activities, input);
       case 'moderate':
         return moderateWorkflow(this.activities, input);
+      case 'curate':
+        return curateWorkflow(this.activities, input);
+      case 'repurpose':
+        return repurposeWorkflow(this.activities, input);
     }
   }
 }

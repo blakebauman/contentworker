@@ -1,6 +1,7 @@
 import type {
   AssetFile,
   AssetMetadata,
+  ContentTypeGrant,
   DomainEvent,
   EntryFields,
   LocalizedValue,
@@ -124,6 +125,11 @@ export const entryPublished = pgTable(
   (t) => [
     primaryKey({ columns: [t.spaceId, t.environmentId, t.entryId] }),
     index('entry_published_by_type').on(t.spaceId, t.environmentId, t.contentTypeApiId),
+    // Full-text leg of hybrid search. Expression must match searchPublished's.
+    index('entry_published_fts').using(
+      'gin',
+      sql`jsonb_to_tsvector('simple', ${t.fields}, '["string"]')`,
+    ),
   ],
 );
 
@@ -185,12 +191,31 @@ export const apiKeys = pgTable(
     hashedToken: text('hashed_token').notNull(),
     scopes: jsonb('scopes').$type<string[]>().notNull(),
     revoked: boolean('revoked').notNull().default(false),
+    // Granular RBAC: when set, permissions resolve live from this role.
+    roleId: text('role_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex('api_keys_hashed_token').on(t.hashedToken),
     index('api_keys_by_space').on(t.spaceId),
   ],
+);
+
+// Custom roles (granular RBAC): a named scope set plus per-content-type
+// grants (with per-field deny/read-only rules), referenced by api_keys.role_id.
+export const roles = pgTable(
+  'roles',
+  {
+    spaceId: text('space_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    scopes: jsonb('scopes').$type<string[]>().notNull(),
+    contentGrants: jsonb('content_grants').$type<ContentTypeGrant[]>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.id] })],
 );
 
 export const agentRuns = pgTable(

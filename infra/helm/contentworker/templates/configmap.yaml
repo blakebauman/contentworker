@@ -13,6 +13,14 @@ data:
   SEED_ENV_ID: {{ .Values.config.seedEnvId | quote }}
   SEED_DEFAULT_LOCALE: {{ .Values.config.seedDefaultLocale | quote }}
   SEED_LOCALES: {{ .Values.config.seedLocales | quote }}
+  AGENTS_ENRICH: {{ .Values.agents.enrich | quote }}
+  AGENTS_MODERATE: {{ .Values.agents.moderate | quote }}
+  AGENTS_AUTO_APPLY: {{ .Values.agents.autoApply | quote }}
+  {{- if eq .Values.agents.runtime "temporal" }}
+  AGENT_RUNTIME: "temporal"
+  TEMPORAL_ADDRESS: {{ .Values.agents.temporal.address | default (printf "%s-temporal-frontend:7233" .Release.Name) | quote }}
+  TEMPORAL_NAMESPACE: {{ .Values.agents.temporal.namespace | quote }}
+  {{- end }}
   {{- range $k, $v := .Values.config.extraEnv }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}

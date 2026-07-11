@@ -19,6 +19,7 @@ import type {
   ReferenceEdge,
   Release,
   ReleaseItem,
+  Role,
   ScheduledAction,
   Scope,
   Tag,
@@ -44,6 +45,7 @@ export interface ContentStore {
   readonly references: ReferenceRepo;
   readonly webhooks: WebhookRepo;
   readonly auth: AuthRepo;
+  readonly roles: RoleRepo;
   readonly agentRuns: AgentRunRepo;
   readonly releases: ReleaseRepo;
   readonly scheduledActions: ScheduledActionRepo;
@@ -261,6 +263,15 @@ export interface AuthRepo {
   revoke(id: string): Promise<void>;
 }
 
+/** Custom roles (granular RBAC) — space-scoped, referenced by API keys. */
+export interface RoleRepo {
+  /** Creates or replaces (by id) a role. */
+  save(role: Role): Promise<void>;
+  get(spaceId: string, id: string): Promise<Role | null>;
+  list(spaceId: string): Promise<Role[]>;
+  delete(spaceId: string, id: string): Promise<void>;
+}
+
 /** The transactional view of the store handed to `withTransaction`. */
 export interface ContentStoreTx {
   readonly contentTypes: ContentTypeRepo;
@@ -386,6 +397,13 @@ export interface EntryQuery {
   readonly locale?: LocaleCode;
 }
 
+/** One ranked full-text match from the published read model. */
+export interface TextSearchHit {
+  readonly entryId: string;
+  /** Engine-relative relevance — meaningful only for ordering within one result set. */
+  readonly score: number;
+}
+
 export interface EntryRepo {
   get(scope: Scope, id: string): Promise<EntryWithFields | null>;
   /** Lists draft/current entries (the Preview read path), newest-affected first. */
@@ -407,6 +425,11 @@ export interface EntryRepo {
   removePublished(scope: Scope, entryId: string): Promise<void>;
   getPublished(scope: Scope, id: string): Promise<PublishedEntry | null>;
   listPublished(scope: Scope, query: EntryQuery): Promise<PublishedEntry[]>;
+  /**
+   * Ranked full-text search over published string field values (all locales).
+   * The lexical leg of hybrid search — every query term must match.
+   */
+  searchPublished(scope: Scope, query: string, opts: { topK: number }): Promise<TextSearchHit[]>;
 }
 
 export interface ReferenceRepo {

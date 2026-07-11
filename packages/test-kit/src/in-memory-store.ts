@@ -13,6 +13,7 @@ import {
   type ReferenceEdge,
   type Release,
   type ReleaseItem,
+  type Role,
   type Scope,
   type Tag,
   type Task,
@@ -48,6 +49,7 @@ import type {
   PublishedEntry,
   ReferenceRepo,
   ReleaseRepo,
+  RoleRepo,
   ScheduledActionRepo,
   ScopedScheduledAction,
   SpaceConfig,
@@ -209,6 +211,44 @@ export class InMemoryContentStore implements ContentStore {
         fields: projectFields(r.fields, query.select as string[]),
       }));
     },
+    searchPublished: async (scope, query, opts) => {
+      // Mirrors the Postgres adapter's websearch_to_tsquery semantics: every
+      // term must be present; score is total term frequency across all string
+      // field values (all locales).
+      const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+      if (terms.length === 0) return [];
+      const prefix = `${scopeKey(scope)}::`;
+      const hits: { entryId: string; score: number }[] = [];
+      for (const [key, row] of this.publishedData.entries()) {
+        if (!key.startsWith(prefix)) continue;
+        const texts: string[] = [];
+        for (const localized of Object.values(row.fields)) {
+          for (const value of Object.values(localized)) {
+            if (typeof value === 'string') texts.push(value.toLowerCase());
+          }
+        }
+        const haystack = texts.join(' ');
+        let score = 0;
+        let matchedAll = true;
+        for (const term of terms) {
+          let count = 0;
+          let at = haystack.indexOf(term);
+          while (at !== -1) {
+            count += 1;
+            at = haystack.indexOf(term, at + term.length);
+          }
+          if (count === 0) {
+            matchedAll = false;
+            break;
+          }
+          score += count;
+        }
+        if (matchedAll) hits.push({ entryId: row.entryId, score });
+      }
+      return hits
+        .sort((a, b) => b.score - a.score || a.entryId.localeCompare(b.entryId))
+        .slice(0, opts.topK);
+    },
   };
 
   private readonly assetData = new Map<string, Asset>();
@@ -328,6 +368,19 @@ export class InMemoryContentStore implements ContentStore {
     revoke: async (id) => {
       const existing = this.apiKeyData.get(id);
       if (existing) this.apiKeyData.set(id, { ...existing, revoked: true });
+    },
+  };
+
+  private readonly roleData = new Map<string, Role>();
+
+  readonly roles: RoleRepo = {
+    save: async (role) => {
+      this.roleData.set(`${role.spaceId}::${role.id}`, role);
+    },
+    get: async (spaceId, id) => this.roleData.get(`${spaceId}::${id}`) ?? null,
+    list: async (spaceId) => [...this.roleData.values()].filter((r) => r.spaceId === spaceId),
+    delete: async (spaceId, id) => {
+      this.roleData.delete(`${spaceId}::${id}`);
     },
   };
 

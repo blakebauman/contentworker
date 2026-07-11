@@ -82,6 +82,7 @@ Anthropic tier→model: `flagship`→`claude-opus-4-8`, `balanced`→`claude-son
 | --- | --- | --- |
 | `RELAY_INTERVAL_MS` | `1000` | Outbox poll interval |
 | `AGENTS_ENRICH` | `false` | Run the enrich agent on `entry.published` (needs an AI provider) |
+| `AGENTS_MODERATE` | `false` | Run the moderation agent on `entry.published` (classify + hold) |
 | `AGENTS_AUTO_APPLY` | `false` | Auto-apply enrichment vs. route to human review |
 
 The worker **requires** both `DATABASE_URL` and `REDIS_URL`.

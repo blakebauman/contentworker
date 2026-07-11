@@ -11,6 +11,10 @@
     "./workflows": {
       "types": "./src/workflows.ts",
       "default": "./src/workflows.ts"
+    },
+    "./temporal": {
+      "types": "./src/temporal.ts",
+      "default": "./src/temporal.ts"
     }
   },
   "scripts": {
@@ -21,7 +25,8 @@
   "dependencies": {
     "@cw/application": "workspace:*",
     "@cw/domain": "workspace:*",
-    "@cw/ports": "workspace:*"
+    "@cw/ports": "workspace:*",
+    "@temporalio/client": "^1.11.6"
   },
   "devDependencies": {
     "@cw/test-kit": "workspace:*",

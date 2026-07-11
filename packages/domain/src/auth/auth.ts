@@ -35,6 +35,36 @@ export function scopesForKind(kind: ApiKeyKind): PermissionScope[] {
   }
 }
 
+/** Content-level actions a role can grant per content type. */
+export type ContentAction = 'read' | 'write' | 'publish';
+
+/**
+ * Per-content-type grant inside a role. `contentTypeApiId: '*'` matches any
+ * type; an exact apiId wins over the wildcard. Field rules refine access:
+ * denied fields are masked on read and rejected on write; read-only fields
+ * are readable but rejected on write.
+ */
+export interface ContentTypeGrant {
+  readonly contentTypeApiId: string;
+  readonly actions: readonly ContentAction[];
+  readonly deniedFields?: readonly string[];
+  readonly readOnlyFields?: readonly string[];
+}
+
+/**
+ * A named, space-scoped permission set assignable to API keys. Roles are the
+ * live source of truth: a key with a role resolves the role's scopes and
+ * content grants on every request, so editing a role updates every key.
+ */
+export interface Role {
+  readonly id: string;
+  readonly spaceId: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly scopes: readonly string[];
+  readonly contentGrants: readonly ContentTypeGrant[];
+}
+
 /** A stored API key. The raw token is never persisted — only its hash. */
 export interface ApiKey {
   readonly id: string;
@@ -45,6 +75,8 @@ export interface ApiKey {
   readonly hashedToken: string;
   readonly scopes: readonly string[];
   readonly revoked: boolean;
+  /** When set, the key's permissions come from this role (live-resolved). */
+  readonly roleId?: string;
 }
 
 /** The resolved identity of a request. `spaceId === '*'` is the admin/root scope. */
@@ -52,6 +84,12 @@ export interface Principal {
   readonly spaceId: string;
   readonly kind: ApiKeyKind | 'admin';
   readonly scopes: readonly string[];
+  /**
+   * Content-level grants from the principal's role. `undefined` means
+   * unrestricted (kind-based keys and the admin token) — every content type
+   * and field is allowed at the coarse-scope level.
+   */
+  readonly contentGrants?: readonly ContentTypeGrant[];
 }
 
 export class UnauthorizedError extends DomainError {
@@ -82,5 +120,76 @@ export function authorize(
 ): void {
   if (!inScope(principal, targetSpaceId) || !principal.scopes.includes(scope)) {
     throw new ForbiddenError(scope);
+  }
+}
+
+/** The grant governing `contentTypeApiId` — an exact match wins over `'*'`. */
+export function grantFor(
+  principal: Principal,
+  contentTypeApiId: string,
+): ContentTypeGrant | undefined {
+  const grants = principal.contentGrants;
+  if (!grants) return undefined;
+  return (
+    grants.find((g) => g.contentTypeApiId === contentTypeApiId) ??
+    grants.find((g) => g.contentTypeApiId === '*')
+  );
+}
+
+/** True when the principal may perform `action` on the content type. */
+export function canAccessContentType(
+  principal: Principal,
+  action: ContentAction,
+  contentTypeApiId: string,
+): boolean {
+  if (!principal.contentGrants) return true; // unrestricted principal
+  const grant = grantFor(principal, contentTypeApiId);
+  return !!grant && grant.actions.includes(action);
+}
+
+/**
+ * Enforces a content-level grant on top of the coarse scopes. Unrestricted
+ * principals (no role) always pass — coarse `authorize` already ran.
+ */
+export function authorizeContent(
+  principal: Principal,
+  action: ContentAction,
+  contentTypeApiId: string,
+): void {
+  if (!canAccessContentType(principal, action, contentTypeApiId)) {
+    throw new ForbiddenError(`content:${action}:${contentTypeApiId}`);
+  }
+}
+
+/**
+ * Strips the fields this principal may not read from an entry's field map.
+ * Returns the input unchanged for unrestricted principals.
+ */
+export function maskDeniedFields<T>(
+  principal: Principal,
+  contentTypeApiId: string,
+  fields: Record<string, T>,
+): Record<string, T> {
+  const denied = grantFor(principal, contentTypeApiId)?.deniedFields;
+  if (!principal.contentGrants || !denied?.length) return fields;
+  return Object.fromEntries(Object.entries(fields).filter(([apiId]) => !denied.includes(apiId)));
+}
+
+/**
+ * Enforces field-level write rules: writing a denied or read-only field
+ * throws ForbiddenError. No-op for unrestricted principals.
+ */
+export function assertWritableFields(
+  principal: Principal,
+  contentTypeApiId: string,
+  fields: Record<string, unknown>,
+): void {
+  if (!principal.contentGrants) return;
+  const grant = grantFor(principal, contentTypeApiId);
+  const blocked = new Set([...(grant?.deniedFields ?? []), ...(grant?.readOnlyFields ?? [])]);
+  for (const apiId of Object.keys(fields)) {
+    if (blocked.has(apiId)) {
+      throw new ForbiddenError(`content:write:${contentTypeApiId}.${apiId}`);
+    }
   }
 }

@@ -1,5 +1,11 @@
 import { getPreviewEntry, listPreviewEntries } from '@cw/application';
-import { SCOPES, type Scope } from '@cw/domain';
+import {
+  SCOPES,
+  type Scope,
+  authorizeContent,
+  canAccessContentType,
+  maskDeniedFields,
+} from '@cw/domain';
 import { type Context, Hono } from 'hono';
 import {
   type AuthDeps,
@@ -29,14 +35,25 @@ export function previewRoutes(deps: AuthDeps): Hono<AuthVars> {
     const items = await listPreviewEntries(ctx, scopeOf(c), query, {
       locale: c.req.query('locale'),
     });
-    return c.json({ items, total: items.length });
+    // Granular RBAC: drop entries of ungranted types, mask denied fields.
+    const principal = c.get('principal');
+    const visible = items
+      .filter((e) => canAccessContentType(principal, 'read', e.contentType))
+      .map((e) => ({ ...e, fields: maskDeniedFields(principal, e.contentType, e.fields) }));
+    return c.json({ items: visible, total: visible.length });
   });
 
-  app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json(
-      await getPreviewEntry(ctx, scopeOf(c), c.req.param('id'), { locale: c.req.query('locale') }),
-    ),
-  );
+  app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) => {
+    const entry = await getPreviewEntry(ctx, scopeOf(c), c.req.param('id'), {
+      locale: c.req.query('locale'),
+    });
+    const principal = c.get('principal');
+    authorizeContent(principal, 'read', entry.contentType);
+    return c.json({
+      ...entry,
+      fields: maskDeniedFields(principal, entry.contentType, entry.fields),
+    });
+  });
 
   return app;
 }

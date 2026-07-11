@@ -61,8 +61,7 @@ export function makeActivities(deps: ActivitiesDeps): Activities {
       }
       const schema = { type: 'object', properties, required, additionalProperties: false };
       const result = await ai.generate({
-        system:
-          'You enrich CMS entries. Generate concise, natural values for the requested fields, consistent with the provided context.',
+        system: `You work on CMS entries. Generate concise, natural values for the requested fields, consistent with the provided context.${input.instruction ? ` ${input.instruction}` : ''}`,
         prompt: `Context:\n${input.context}\n\nGenerate values for: ${input.fields.map((f) => f.name).join(', ')}.`,
         tier: 'fast',
         maxTokens: 1024,

@@ -1,7 +1,7 @@
 import type { EntryFields, Scope } from '@cw/domain';
 
 /** Names of the agent workflows the runtime can execute. */
-export type WorkflowName = 'enrich' | 'moderate';
+export type WorkflowName = 'enrich' | 'moderate' | 'curate' | 'repurpose';
 
 export interface WorkflowInput {
   readonly scope: Scope;
@@ -59,6 +59,8 @@ export interface GenerateFieldsInput {
   readonly contentTypeApiId: string;
   readonly fields: { apiId: string; name: string }[];
   readonly context: string;
+  /** Task framing for the model (e.g. fill empty fields vs. improve vs. repurpose). */
+  readonly instruction?: string;
 }
 
 export interface Usage {

@@ -10,6 +10,7 @@ import {
   type EntryVersion,
   type ReferenceEdge,
   type Release,
+  type Role,
   type ScheduledAction,
   type Scope,
   type Task,
@@ -44,6 +45,7 @@ import type {
   PublishedEntry,
   ReferenceRepo,
   ReleaseRepo,
+  RoleRepo,
   ScheduledActionRepo,
   ScopedScheduledAction,
   SpaceRepo,
@@ -52,7 +54,7 @@ import type {
   WebhookRepo,
   WorkflowRepo,
 } from '@cw/ports';
-import { and, asc, count, desc, eq, gt, gte, isNull, lte, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte, isNull, lte, sql, sum } from 'drizzle-orm';
 import { type PostgresJsDatabase, drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema.js';
@@ -303,6 +305,24 @@ function makeEntryRepo(db: Db): EntryRepo {
         ...r,
         fields: projectFields(r.fields, query.select as string[]),
       }));
+    },
+    async searchPublished(scope, query, opts) {
+      const q = query.trim();
+      if (!q) return [];
+      // 'simple' regconfig: locale-neutral tokenization (no stemming/stopwords)
+      // — published content is multilingual and the semantic leg of hybrid
+      // search covers linguistic fuzziness. Must match the expression the
+      // entry_published_fts GIN index is built over.
+      const tsv = sql`jsonb_to_tsvector('simple', ${schema.entryPublished.fields}, '["string"]')`;
+      const tsq = sql`websearch_to_tsquery('simple', ${q})`;
+      const rank = sql<number>`ts_rank(${tsv}, ${tsq})`;
+      const rows = await db
+        .select({ entryId: schema.entryPublished.entryId, score: rank })
+        .from(schema.entryPublished)
+        .where(and(scopeFilter(schema.entryPublished, scope), sql`${tsv} @@ ${tsq}`))
+        .orderBy(desc(rank), asc(schema.entryPublished.entryId))
+        .limit(opts.topK);
+      return rows.map((r) => ({ entryId: r.entryId, score: Number(r.score) }));
     },
   };
 }
@@ -828,6 +848,51 @@ function makeAppExtensionRepo(db: Db): AppExtensionRepo {
   };
 }
 
+function makeRoleRepo(db: Db): RoleRepo {
+  return {
+    async save(role) {
+      const values = {
+        spaceId: role.spaceId,
+        id: role.id,
+        name: role.name,
+        description: role.description,
+        scopes: [...role.scopes],
+        contentGrants: [...role.contentGrants],
+        updatedAt: new Date(),
+      };
+      await db
+        .insert(schema.roles)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [schema.roles.spaceId, schema.roles.id],
+          set: {
+            name: values.name,
+            description: values.description,
+            scopes: values.scopes,
+            contentGrants: values.contentGrants,
+            updatedAt: values.updatedAt,
+          },
+        });
+    },
+    async get(spaceId, id) {
+      const [row] = await db
+        .select()
+        .from(schema.roles)
+        .where(and(eq(schema.roles.spaceId, spaceId), eq(schema.roles.id, id)));
+      return row ? toRole(row) : null;
+    },
+    async list(spaceId) {
+      const rows = await db.select().from(schema.roles).where(eq(schema.roles.spaceId, spaceId));
+      return rows.map(toRole);
+    },
+    async delete(spaceId, id) {
+      await db
+        .delete(schema.roles)
+        .where(and(eq(schema.roles.spaceId, spaceId), eq(schema.roles.id, id)));
+    },
+  };
+}
+
 function makeAuthRepo(db: Db): AuthRepo {
   return {
     async createApiKey(key) {
@@ -839,6 +904,7 @@ function makeAuthRepo(db: Db): AuthRepo {
         hashedToken: key.hashedToken,
         scopes: [...key.scopes],
         revoked: key.revoked,
+        roleId: key.roleId,
       });
     },
     async findByHash(hashedToken) {
@@ -1508,6 +1574,7 @@ export function createPostgresStore(
     references: makeReferenceRepo(db),
     webhooks: makeWebhookRepo(db),
     auth: makeAuthRepo(db),
+    roles: makeRoleRepo(db),
     agentRuns: makeAgentRunRepo(db),
     audit: makeAuditRepo(db),
     aiActions: makeAiActionRepo(db),
@@ -1583,6 +1650,17 @@ const toApiKey = (r: ApiKeyRow): ApiKey => ({
   hashedToken: r.hashedToken,
   scopes: r.scopes,
   revoked: r.revoked,
+  roleId: r.roleId ?? undefined,
+});
+
+type RoleRow = typeof schema.roles.$inferSelect;
+const toRole = (r: RoleRow): Role => ({
+  id: r.id,
+  spaceId: r.spaceId,
+  name: r.name,
+  description: r.description ?? undefined,
+  scopes: r.scopes,
+  contentGrants: r.contentGrants,
 });
 
 type WebhookRow = typeof schema.webhooks.$inferSelect;
