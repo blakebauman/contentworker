@@ -18,7 +18,9 @@ docker compose up --build
 Compose auto-loads `docker-compose.override.yml`, which runs the admin as a Vite dev server with
 HMR and bind-mounted source. See [Deployment → Admin service](./deployment.md#admin-service-base-vs-override).
 
-Sign in with the dev admin token (`dev-admin-token` by default) or a space-scoped CMA key.
+Sign in at `/connect` with a CMA key or admin token. In dev, docker-compose seeds `dev-cma-key`
+automatically; production builds require an explicit token. Optional SSO: set `VITE_SSO_LOGIN_URL`
+to your admin BFF `/auth/login` endpoint.
 
 ### Host dev server
 
@@ -29,7 +31,7 @@ pnpm --filter @cw/api start          # or docker compose up api
 pnpm --filter @cw/admin dev          # http://localhost:5173
 ```
 
-The Vite dev server proxies `/spaces`, `/preview`, and `/delivery` to the API (see
+The Vite dev server proxies `/spaces`, `/preview`, `/delivery`, and `/auth` to the API (see
 `apps/admin/vite.config.ts`), so the browser stays same-origin and avoids CORS.
 
 ### Prod-style preview in Docker

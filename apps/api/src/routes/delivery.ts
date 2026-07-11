@@ -50,10 +50,24 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     const topK = c.req.query('top_k');
     const mode = c.req.query('mode') ?? 'hybrid';
     const opts = { topK: topK ? Number(topK) : undefined };
-    const hits =
+    const scope = scopeOf(c);
+    let hits =
       mode === 'semantic'
-        ? await semanticSearch(rag, scopeOf(c), q, opts)
-        : await hybridSearch(mode === 'lexical' ? undefined : rag, ctx, scopeOf(c), q, opts);
+        ? await semanticSearch(rag, scope, q, opts)
+        : await hybridSearch(mode === 'lexical' ? undefined : rag, ctx, scope, q, opts);
+    const principal = c.get('principal');
+    if (principal.contentGrants) {
+      const visible = [];
+      for (const hit of hits) {
+        try {
+          const entry = await getPublishedEntry(ctx, scope, hit.entryId);
+          if (canAccessContentType(principal, 'read', entry.contentType)) visible.push(hit);
+        } catch {
+          /* skip inaccessible */
+        }
+      }
+      hits = visible;
+    }
     return c.json({ hits });
   });
 
@@ -87,6 +101,9 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
 
   app.get(`${BASE}/assets`, requireScope(SCOPES.deliveryRead), async (c) => {
+    if (c.get('principal').contentGrants) {
+      return c.json({ items: [], total: 0 });
+    }
     const limit = c.req.query('limit');
     const items = await listPublishedAssets(ctx, scopeOf(c), {
       limit: limit ? Number(limit) : undefined,
@@ -94,9 +111,12 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.json({ items, total: items.length });
   });
 
-  app.get(`${BASE}/assets/:id`, requireScope(SCOPES.deliveryRead), async (c) =>
-    c.json(await getPublishedAsset(ctx, scopeOf(c), c.req.param('id'))),
-  );
+  app.get(`${BASE}/assets/:id`, requireScope(SCOPES.deliveryRead), async (c) => {
+    if (c.get('principal').contentGrants) {
+      return c.body(null, 403);
+    }
+    return c.json(await getPublishedAsset(ctx, scopeOf(c), c.req.param('id')));
+  });
 
   // Live Content API: an SSE stream of published-content changes for this scope.
   // Optional ?types=entry.published,entry.unpublished filters the event types.
@@ -140,18 +160,25 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
   // rebuilds automatically when the content-type set/versions change.
   const schemaCache = new Map<string, { hash: string; schema: GraphQLSchema }>();
 
-  async function schemaFor(scope: Scope): Promise<GraphQLSchema> {
+  async function schemaFor(
+    scope: Scope,
+    principal: AuthVars['Variables']['principal'],
+  ): Promise<GraphQLSchema> {
     const types = await listContentTypes(ctx, scope);
-    const hash = types
+    const grantedTypes = principal.contentGrants
+      ? types.filter((t) => canAccessContentType(principal, 'read', t.apiId))
+      : types;
+    const hash = grantedTypes
       .map((t) => `${t.apiId}@${t.version}`)
       .sort()
       .join(',');
-    const key = `${scope.spaceId}:${scope.environmentId}`;
+    const key = `${scope.spaceId}:${scope.environmentId}:${principal.kind}`;
     const cached = schemaCache.get(key);
     if (cached && cached.hash === hash) return cached.schema;
 
     const resolvers: DeliveryResolvers = {
       entry: async (contentType, id, locale) => {
+        if (!canAccessContentType(principal, 'read', contentType)) return null;
         try {
           const e = await getPublishedEntry(ctx, scope, id, { locale, include: 1 });
           return e.contentType === contentType ? (e as ResolvedEntry) : null;
@@ -160,6 +187,7 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
         }
       },
       collection: (contentType, args) => {
+        if (!canAccessContentType(principal, 'read', contentType)) return Promise.resolve([]);
         const raw: [string, string][] = [];
         for (const [k, v] of Object.entries(args.where ?? {})) {
           raw.push([k, Array.isArray(v) ? v.join(',') : String(v)]);
@@ -172,19 +200,38 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
           scope,
           { ...parsed, contentTypeApiId: contentType, limit: args.limit, skip: args.skip },
           { locale: args.locale, include: 1 },
+        ).then((items) =>
+          items.map((e) => ({
+            ...e,
+            fields: maskDeniedFields(principal, e.contentType, e.fields),
+          })),
         ) as Promise<ResolvedEntry[]>;
       },
-      asset: async (id, _locale) => {
+      asset: async (_id, _locale) => {
+        if (principal.contentGrants) return null;
         try {
-          const a = await getPublishedAsset(ctx, scope, id);
+          const a = await getPublishedAsset(ctx, scope, _id);
           return { id: a.assetId, file: a.file, title: a.title, description: a.description };
         } catch {
           return null;
         }
       },
-      search: (query, topK) => hybridSearch(rag, ctx, scope, query, { topK }),
+      search: async (query, topK) => {
+        const raw = await hybridSearch(rag, ctx, scope, query, { topK });
+        if (!principal.contentGrants) return raw;
+        const visible = [];
+        for (const hit of raw) {
+          try {
+            const entry = await getPublishedEntry(ctx, scope, hit.entryId);
+            if (canAccessContentType(principal, 'read', entry.contentType)) visible.push(hit);
+          } catch {
+            /* skip */
+          }
+        }
+        return visible;
+      },
     };
-    const schema = buildDeliverySchema(types, resolvers);
+    const schema = buildDeliverySchema(grantedTypes, resolvers);
     schemaCache.set(key, { hash, schema });
     return schema;
   }
@@ -201,7 +248,7 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     const source = (body as { query?: string }).query ?? c.req.query('query');
     if (!source) return c.json({ errors: [{ message: 'No GraphQL query provided' }] }, 400);
     const result = await graphql({
-      schema: await schemaFor(scopeOf(c)),
+      schema: await schemaFor(scopeOf(c), c.get('principal')),
       source,
       variableValues: (body as { variables?: Record<string, unknown> }).variables,
       operationName: (body as { operationName?: string }).operationName,

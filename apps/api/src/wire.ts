@@ -30,7 +30,7 @@ import {
 } from '@cw/test-kit';
 import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
-import { sha256Hasher } from './auth.js';
+import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
 
 const systemClock: Clock = { now: () => new Date() };
@@ -108,6 +108,7 @@ function makeRag(databaseUrl?: string): RagDeps {
  * equivalents seeded with a default space (for dev, tests, and demos).
  */
 export function wire(config: ApiConfig): Wired {
+  const hasher = createApiHasher(config.tokenPepper);
   const closers: (() => Promise<void>)[] = [];
 
   // A cache is only attached when Redis is configured — the worker invalidates
@@ -160,7 +161,7 @@ export function wire(config: ApiConfig): Wired {
       spaceId: config.seed.spaceId,
       kind,
       name: `dev-${kind}`,
-      hashedToken: sha256Hasher.hash(token),
+      hashedToken: hasher.hash(token),
       scopes: scopesForKind(kind),
       revoked: false,
     });

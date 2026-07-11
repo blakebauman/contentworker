@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { createAnthropicProvider } from '@cw/adapter-ai-anthropic';
 import {
   createAzureOpenAIEmbeddings,
@@ -7,6 +6,7 @@ import {
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
+import { createHasher } from '@cw/application';
 import type { AgentRunner, AppContext, RagDeps } from '@cw/application';
 import type {
   AIProvider,
@@ -28,7 +28,6 @@ import { v7 as uuidv7 } from 'uuid';
 const clock: Clock = { now: () => new Date() };
 // UUIDv7 (time-ordered) — consistent with the rest of the platform's PKs.
 const ids: IdGenerator = { newId: () => uuidv7() };
-const hasher: Hasher = { hash: (v) => createHash('sha256').update(v).digest('hex') };
 
 /**
  * AIProvider for the generate_draft tool — same policy as the HTTP API: Azure or
@@ -98,7 +97,7 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
     // On-demand agent actions run in-process (synchronous request/response);
     // the durable Temporal path serves the worker's on-publish runs.
     agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),
-    hasher,
+    hasher: createHasher(env.TOKEN_PEPPER),
     adminToken: env.MCP_TOKEN ?? 'dev-mcp-token',
   };
 }

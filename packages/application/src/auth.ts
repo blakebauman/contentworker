@@ -70,6 +70,8 @@ export async function authenticate(
   if (!token) throw new UnauthorizedError();
   const key = await ctx.store.auth.findByHash(hasher.hash(token));
   if (!key) throw new UnauthorizedError();
+  // Best-effort last-used tracking — must not block authentication.
+  void ctx.store.auth.touchLastUsed(key.id, ctx.clock.now()).catch(() => {});
   if (key.roleId) {
     // Role-bound key: the role is the live source of truth. A dangling
     // roleId (role deleted out-of-band) fails closed.

@@ -11,7 +11,7 @@ import {
 } from '@cw/application';
 import { type ApiKeyKind, type Scope, scopesForKind } from '@cw/domain';
 import { logger } from '@cw/telemetry';
-import { sha256Hasher } from './auth.js';
+import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
 
 /**
@@ -23,6 +23,7 @@ import type { ApiConfig } from './config.js';
  * fresh Postgres stack (docker compose) authenticates and has content to show.
  */
 export async function seedDev(ctx: AppContext, config: ApiConfig): Promise<void> {
+  const hasher = createApiHasher(config.tokenPepper);
   const scope = { spaceId: config.seed.spaceId, environmentId: config.seed.environmentId };
 
   // 1. Space + environment (skip if it already exists).
@@ -44,7 +45,7 @@ export async function seedDev(ctx: AppContext, config: ApiConfig): Promise<void>
     cpa: config.cpaKey,
   };
   for (const [kind, token] of Object.entries(tokens) as [ApiKeyKind, string][]) {
-    const hashedToken = sha256Hasher.hash(token);
+    const hashedToken = hasher.hash(token);
     if (!(await ctx.store.auth.findByHash(hashedToken))) {
       await ctx.store.auth.createApiKey({
         id: ctx.ids.newId(),

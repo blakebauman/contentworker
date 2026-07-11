@@ -19,6 +19,8 @@ export interface ApiConfig {
   readonly cpaKey: string;
   /** Root/admin bearer token — all scopes, all spaces (provisioning). */
   readonly adminToken: string;
+  /** Optional server-side pepper mixed into API key hashes at rest. */
+  readonly tokenPepper?: string;
   /**
    * Dev seeding. The in-memory store always seeds; with a real database this
    * gates an idempotent bootstrap (space + dev keys + a demo type) so a fresh
@@ -48,6 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     cdaKey: env.CDA_KEY ?? 'dev-cda-key',
     cpaKey: env.CPA_KEY ?? 'dev-cpa-key',
     adminToken: env.ADMIN_TOKEN ?? 'dev-admin-token',
+    tokenPepper: env.TOKEN_PEPPER,
     seedDev: env.SEED_DEV === 'true',
     seed: {
       spaceId: env.SEED_SPACE_ID ?? 'space-1',

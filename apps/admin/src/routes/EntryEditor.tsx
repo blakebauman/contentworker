@@ -9,7 +9,7 @@ import { VersionHistory } from '@/components/VersionHistory';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { EntryFields } from '@cw/domain';
-import { PenLine, Sparkles } from 'lucide-react';
+import { Link2, PenLine, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CanvasDialog } from '../components/CanvasDialog.js';
@@ -143,6 +143,17 @@ export function EntryEditor() {
     toast.success(`Mapped ${Object.keys(res.fields).length} field(s) · ${total} tokens`);
   };
 
+  const copyPreviewLink = () => {
+    if (!entryId) return;
+    void run(async () => {
+      const link = await client.createPreviewLink(entryId, {
+        previewBaseUrl: conn.baseUrl || window.location.origin,
+      });
+      await navigator.clipboard.writeText(link.url);
+      toast.success(`Preview link copied (expires ${new Date(link.expiresAt).toLocaleString()})`);
+    });
+  };
+
   if (!selectedType) {
     return <p className="text-muted-foreground">Loading…</p>;
   }
@@ -161,6 +172,11 @@ export function EntryEditor() {
         <Button type="button" variant="outline" onClick={() => setGenOpen(true)}>
           <Sparkles className="size-4" /> Generate with AI
         </Button>
+        {isEdit && entryId && (
+          <Button type="button" variant="outline" onClick={copyPreviewLink}>
+            <Link2 className="size-4" /> Copy preview link
+          </Button>
+        )}
       </PageHeader>
       {initial === null ? (
         <p className="text-muted-foreground">Loading…</p>

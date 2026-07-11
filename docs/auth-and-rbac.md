@@ -105,9 +105,11 @@ the presented bearer token and looks it up by hash (`AuthRepo.findByHash`).
 ```ts
 interface Principal {
   spaceId: string;                       // a specific space, or '*' for admin/root
-  kind: ApiKeyKind | 'admin';
+  kind: ApiKeyKind | 'admin' | 'user';
   scopes: readonly string[];
   contentGrants?: readonly ContentTypeGrant[];  // from the key's role; undefined = unrestricted
+  subject?: string;                      // OIDC subject/email when kind is `user`
+  sessionId?: string;                    // session revocation id for OIDC users
 }
 ```
 
@@ -115,6 +117,11 @@ interface Principal {
   `UnauthorizedError` on miss.
 - The **admin token** (`ADMIN_TOKEN` / `MCP_TOKEN`) short-circuits to a wildcard principal
   (`spaceId: '*'`, all CMA scopes). Use it only for provisioning/bootstrap.
+- **`GET /auth/me`** returns the resolved principal summary (used by the admin connect UI).
+- **Preview links** — `POST …/entries/:id/preview-link` mints an expiring token; CPA
+  `GET …/entries/:id?preview_token=…` accepts it without a bearer header.
+- **Admin SSO** — optional `@cw/admin-bff` OIDC flow mints delegated CMA keys bound to roles
+  (see [Configuration](./configuration.md#admin-bff-oidc-sso)).
 
 ## The authorization decision
 

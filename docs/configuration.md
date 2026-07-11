@@ -32,6 +32,30 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `CPA_KEY` | `dev-cpa-key` | Seeded Content Preview token (read drafts) |
 | `ADMIN_TOKEN` | `dev-admin-token` | Root token — all scopes, all spaces (provisioning) |
 
+### Production hardening
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `REQUIRE_SECURE_SECRETS` | off (auto when `NODE_ENV=production`) | Fail startup on dev default tokens, short secrets, or `SEED_DEV=true`. Set `false` in local docker-compose to allow dev tokens despite `NODE_ENV=production` in the image. |
+| `TOKEN_PEPPER` | — | Server-side pepper mixed into API key hashes at rest |
+| `AUTH_RATE_LIMIT_MAX` | `10` | Failed auth attempts per IP before HTTP 429 |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit sliding window (ms) |
+
+### Admin BFF (OIDC SSO)
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `OIDC_ISSUER` | — | OIDC provider issuer URL |
+| `OIDC_CLIENT_ID` | — | OAuth client id |
+| `OIDC_CLIENT_SECRET` | — | OAuth client secret |
+| `OIDC_REDIRECT_URI` | — | Callback URL (BFF `/auth/callback`) |
+| `OIDC_DEFAULT_SPACE` | `space-1` | Space for delegated CMA keys |
+| `OIDC_GROUP_ROLE_MAP` | `{}` | JSON map of IdP group → role id |
+| `SESSION_SECRET` | — | HMAC secret for the httpOnly session cookie |
+| `SESSION_TTL_HOURS` | `8` | Session lifetime |
+
+Admin SPA: set `VITE_SSO_LOGIN_URL` to the BFF `/auth/login` URL to show **Sign in with SSO**.
+
 In Postgres mode these seeds are not used; create real keys via `POST …/api-keys`.
 
 ## Seeding the in-memory store

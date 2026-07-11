@@ -45,6 +45,8 @@ import type {
   FunctionDefinition,
   FunctionRepo,
   OutboxRepo,
+  PreviewTokenRecord,
+  PreviewTokenRepo,
   PublishedAsset,
   PublishedEntry,
   ReferenceRepo,
@@ -369,6 +371,12 @@ export class InMemoryContentStore implements ContentStore {
       const existing = this.apiKeyData.get(id);
       if (existing) this.apiKeyData.set(id, { ...existing, revoked: true });
     },
+    touchLastUsed: async (id, at) => {
+      const existing = this.apiKeyData.get(id);
+      if (existing) {
+        this.apiKeyData.set(id, { ...existing, lastUsedAt: at.toISOString() });
+      }
+    },
   };
 
   private readonly roleData = new Map<string, Role>();
@@ -659,6 +667,22 @@ export class InMemoryContentStore implements ContentStore {
     },
     delete: async (scope, id) => {
       this.appExtensionData.delete(`${scopeKey(scope)}::${id}`);
+    },
+  };
+
+  private readonly previewTokenData = new Map<string, PreviewTokenRecord>();
+
+  readonly previewTokens: PreviewTokenRepo = {
+    create: async (record) => {
+      this.previewTokenData.set(record.id, record);
+    },
+    findByHash: async (hashedToken) =>
+      [...this.previewTokenData.values()].find(
+        (t) => t.hashedToken === hashedToken && !t.revoked,
+      ) ?? null,
+    revoke: async (id) => {
+      const existing = this.previewTokenData.get(id);
+      if (existing) this.previewTokenData.set(id, { ...existing, revoked: true });
     },
   };
 

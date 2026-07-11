@@ -52,6 +52,7 @@ import {
   type Environment,
   type EnvironmentAlias,
   type ManagementClient,
+  type RoleSummary,
   WEBHOOK_TOPICS,
   type WebhookSummary,
   type WebhookTopic,
@@ -78,6 +79,7 @@ export function Settings(props: {
       <Tabs value={section} onValueChange={onSection}>
         <TabsList>
           <TabsTrigger value="api-keys">API keys</TabsTrigger>
+          <TabsTrigger value="roles">Roles</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
           <TabsTrigger value="environments">Environments</TabsTrigger>
           <TabsTrigger value="ai-actions">AI Actions</TabsTrigger>
@@ -88,6 +90,9 @@ export function Settings(props: {
         </TabsList>
         <TabsContent value="api-keys" className="mt-4">
           <ApiKeys client={client} />
+        </TabsContent>
+        <TabsContent value="roles" className="mt-4">
+          <RolesSettings client={client} />
         </TabsContent>
         <TabsContent value="webhooks" className="mt-4">
           <Webhooks client={client} />
@@ -374,6 +379,96 @@ const KEY_KINDS: { value: ApiKeyKind; label: string }[] = [
   { value: 'cpa', label: 'CPA — Preview (read drafts)' },
   { value: 'cma', label: 'CMA — Management (full author/publish)' },
 ];
+
+function RolesSettings(props: { client: ManagementClient }) {
+  const toast = useToast();
+  const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setRoles(await props.client.listRoles());
+  }, [props.client]);
+
+  useEffect(() => {
+    load().catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
+  }, [load, toast]);
+
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      await props.client.createRole({
+        name: name.trim(),
+        scopes: ['preview:read', 'content:write'],
+        contentGrants: [{ contentTypeApiId: '*', actions: ['read', 'write'] }],
+      });
+      setName('');
+      await load();
+      toast.success('Role created');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      await props.client.deleteRole(id);
+      await load();
+      toast.success('Role deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="font-heading text-base font-medium">Roles</h2>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
+          <Input
+            className="w-64"
+            placeholder="Role name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Button type="submit" disabled={busy}>
+            Create role
+          </Button>
+        </form>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Scopes</TableHead>
+              <TableHead className="w-24" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {roles.map((role) => (
+              <TableRow key={role.id}>
+                <TableCell>{role.name}</TableCell>
+                <TableCell className="text-muted-foreground text-sm">
+                  {role.scopes.join(', ')}
+                </TableCell>
+                <TableCell>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => remove(role.id)}>
+                    Delete
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
 
 function ApiKeys(props: { client: ManagementClient }) {
   const { client } = props;

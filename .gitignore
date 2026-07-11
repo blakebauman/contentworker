@@ -4,6 +4,7 @@ dist/
 *.log
 .env
 .env.local
+.claude/settings.local.json
 coverage/
 .DS_Store
 infra/helm/contentworker/charts/

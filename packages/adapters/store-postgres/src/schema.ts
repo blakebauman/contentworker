@@ -193,6 +193,7 @@ export const apiKeys = pgTable(
     revoked: boolean('revoked').notNull().default(false),
     // Granular RBAC: when set, permissions resolve live from this role.
     roleId: text('role_id'),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -489,6 +490,24 @@ export const entryMetadata = pgTable(
     concepts: jsonb('concepts').$type<string[]>().notNull(),
   },
   (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.entryId] })],
+);
+
+export const previewTokens = pgTable(
+  'preview_tokens',
+  {
+    id: text('id').primaryKey(),
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    entryId: text('entry_id').notNull(),
+    hashedToken: text('hashed_token').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revoked: boolean('revoked').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('preview_tokens_hashed_token').on(t.hashedToken),
+    index('preview_tokens_by_entry').on(t.spaceId, t.environmentId, t.entryId),
+  ],
 );
 
 export const outbox = pgTable(

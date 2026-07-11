@@ -77,12 +77,14 @@ export interface ApiKey {
   readonly revoked: boolean;
   /** When set, the key's permissions come from this role (live-resolved). */
   readonly roleId?: string;
+  /** ISO timestamp of the last successful authentication (optional). */
+  readonly lastUsedAt?: string;
 }
 
 /** The resolved identity of a request. `spaceId === '*'` is the admin/root scope. */
 export interface Principal {
   readonly spaceId: string;
-  readonly kind: ApiKeyKind | 'admin';
+  readonly kind: ApiKeyKind | 'admin' | 'user';
   readonly scopes: readonly string[];
   /**
    * Content-level grants from the principal's role. `undefined` means
@@ -90,6 +92,10 @@ export interface Principal {
    * and field is allowed at the coarse-scope level.
    */
   readonly contentGrants?: readonly ContentTypeGrant[];
+  /** Human identity (OIDC subject or email) when kind is `user`. */
+  readonly subject?: string;
+  /** Session id for revocation when kind is `user`. */
+  readonly sessionId?: string;
 }
 
 export class UnauthorizedError extends DomainError {

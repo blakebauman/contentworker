@@ -1,12 +1,22 @@
-import { getPreviewEntry, listPreviewEntries } from '@cw/application';
 import {
+  authenticate,
+  getPreviewEntry,
+  listPreviewEntries,
+  principalFromPreviewToken,
+  secureTokenEqual,
+} from '@cw/application';
+import {
+  type Principal,
   SCOPES,
   type Scope,
+  authorize,
   authorizeContent,
   canAccessContentType,
   maskDeniedFields,
+  scopesForKind,
 } from '@cw/domain';
 import { type Context, Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import {
   type AuthDeps,
   type AuthVars,
@@ -23,31 +33,69 @@ const scopeOf = (c: Context<AuthVars>): Scope => ({
 
 const BASE = '/preview/:space/:env';
 
+const ADMIN: Principal = {
+  spaceId: '*',
+  kind: 'admin',
+  scopes: [...scopesForKind('cma')],
+};
+
+async function resolvePreviewPrincipal(
+  deps: AuthDeps,
+  c: Context<AuthVars>,
+  entryId: string,
+): Promise<Principal> {
+  const previewToken = c.req.query('preview_token');
+  if (previewToken) {
+    const fromToken = await principalFromPreviewToken(
+      deps.ctx,
+      deps.hasher,
+      scopeOf(c),
+      entryId,
+      previewToken,
+    );
+    if (!fromToken) {
+      throw new HTTPException(401, { message: 'Invalid or expired preview token' });
+    }
+    return fromToken;
+  }
+
+  const token = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  if (deps.adminToken && secureTokenEqual(token, deps.adminToken)) return ADMIN;
+  return authenticate(deps.ctx, deps.hasher, token);
+}
+
 /** Preview API (CPA): read draft/current content. Requires preview:read. */
 export function previewRoutes(deps: AuthDeps): Hono<AuthVars> {
   const { ctx } = deps;
   const app = new Hono<AuthVars>();
-  app.use(`${BASE}/*`, principalMiddleware(deps));
-  app.use(`${BASE}/*`, environmentMiddleware(deps));
 
-  app.get(`${BASE}/entries`, requireScope(SCOPES.previewRead), async (c) => {
-    const query = parseEntryQuery(new URL(c.req.url).searchParams);
-    const items = await listPreviewEntries(ctx, scopeOf(c), query, {
+  app.get(
+    `${BASE}/entries`,
+    principalMiddleware(deps),
+    environmentMiddleware(deps),
+    requireScope(SCOPES.previewRead),
+    async (c) => {
+      const query = parseEntryQuery(new URL(c.req.url).searchParams);
+      const items = await listPreviewEntries(ctx, scopeOf(c), query, {
+        locale: c.req.query('locale'),
+      });
+      const principal = c.get('principal');
+      const visible = items
+        .filter((e) => canAccessContentType(principal, 'read', e.contentType))
+        .map((e) => ({ ...e, fields: maskDeniedFields(principal, e.contentType, e.fields) }));
+      return c.json({ items: visible, total: visible.length });
+    },
+  );
+
+  // Shareable preview links use ?preview_token= instead of a bearer header.
+  app.get(`${BASE}/entries/:id`, environmentMiddleware(deps), async (c) => {
+    const entryId = c.req.param('id');
+    const principal = await resolvePreviewPrincipal(deps, c, entryId);
+    authorize(principal, SCOPES.previewRead, scopeOf(c).spaceId);
+
+    const entry = await getPreviewEntry(ctx, scopeOf(c), entryId, {
       locale: c.req.query('locale'),
     });
-    // Granular RBAC: drop entries of ungranted types, mask denied fields.
-    const principal = c.get('principal');
-    const visible = items
-      .filter((e) => canAccessContentType(principal, 'read', e.contentType))
-      .map((e) => ({ ...e, fields: maskDeniedFields(principal, e.contentType, e.fields) }));
-    return c.json({ items: visible, total: visible.length });
-  });
-
-  app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) => {
-    const entry = await getPreviewEntry(ctx, scopeOf(c), c.req.param('id'), {
-      locale: c.req.query('locale'),
-    });
-    const principal = c.get('principal');
     authorizeContent(principal, 'read', entry.contentType);
     return c.json({
       ...entry,

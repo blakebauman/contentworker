@@ -19,6 +19,7 @@ import {
   createEntry,
   createEnvironment,
   createFunction,
+  createPreviewLink,
   createRelease,
   createRole,
   createScheme,
@@ -147,6 +148,7 @@ const apiKeySummary = (k: ApiKey) => ({
   scopes: k.scopes,
   revoked: k.revoked,
   roleId: k.roleId,
+  lastUsedAt: k.lastUsedAt,
 });
 const webhookSummary = (h: Webhook) => ({
   id: h.id,
@@ -161,12 +163,26 @@ const BASE = '/spaces/:space/environments/:env';
 export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   const { ctx, hasher, blob, ai, rag, agents } = deps;
   const app = new Hono<AuthVars>();
+  app.use('/auth', principalMiddleware(deps));
+  app.use('/auth/*', principalMiddleware(deps));
   app.use('/spaces', principalMiddleware(deps));
   app.use('/spaces/*', principalMiddleware(deps));
   // Resolve environment aliases for any scoped (:env) route.
   app.use('/spaces/:space/environments/:env/*', environmentMiddleware(deps));
   // Record successful mutations to the append-only audit trail.
   app.use('/spaces/:space/*', auditMiddleware(deps));
+
+  /** Lightweight principal probe for admin connection UI and BFF sessions. */
+  app.get('/auth/me', (c) => {
+    const principal = c.get('principal');
+    return c.json({
+      spaceId: principal.spaceId,
+      kind: principal.kind,
+      scopes: principal.scopes,
+      subject: principal.subject,
+      restricted: principal.contentGrants !== undefined,
+    });
+  });
 
   // --- provisioning (admin) ----------------------------------------------
   // Authenticated principals see the spaces they can reach: admin → all,
@@ -336,13 +352,17 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
   // AI-draft an entry's fields. Generated values pass the same validators a
   // human write does, so an agent can't produce an entry a person couldn't.
-  app.post(`${BASE}/entries/generate`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(await draftEntry(ctx, ai, scopeOf(c), await c.req.json())),
-  );
+  app.post(`${BASE}/entries/generate`, requireScope(SCOPES.contentWrite), async (c) => {
+    const body = await c.req.json();
+    authorizeContent(c.get('principal'), 'write', body.contentTypeApiId);
+    return c.json(await draftEntry(ctx, ai, scopeOf(c), body));
+  });
   // Canvas: map free-form prose into structured fields (same validation gate).
-  app.post(`${BASE}/entries/canvas`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(await canvasToEntry(ctx, ai, scopeOf(c), await c.req.json())),
-  );
+  app.post(`${BASE}/entries/canvas`, requireScope(SCOPES.contentWrite), async (c) => {
+    const body = await c.req.json();
+    authorizeContent(c.get('principal'), 'write', body.contentTypeApiId);
+    return c.json(await canvasToEntry(ctx, ai, scopeOf(c), body));
+  });
   app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) => {
     const view = await getEntry(ctx, scopeOf(c), c.req.param('id'));
     const principal = c.get('principal');
@@ -351,6 +371,19 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       ...view,
       fields: maskDeniedFields(principal, view.entry.contentTypeApiId, view.fields),
     });
+  });
+  app.post(`${BASE}/entries/:id/preview-link`, requireScope(SCOPES.contentWrite), async (c) => {
+    await guardEntry(c, c.req.param('id'), 'read');
+    const body = (await c.req.json().catch(() => ({}))) as {
+      ttlHours?: number;
+      previewBaseUrl?: string;
+    };
+    const origin = c.req.header('origin') ?? '';
+    const link = await createPreviewLink(ctx, hasher, scopeOf(c), c.req.param('id'), {
+      ttlHours: body.ttlHours,
+      previewBaseUrl: body.previewBaseUrl ?? origin,
+    });
+    return c.json(link, 201);
   });
   // "What links here": entries/assets that reference this entry.
   app.get(`${BASE}/entries/:id/reverse-references`, requireScope(SCOPES.previewRead), async (c) =>
@@ -460,6 +493,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
 
   // --- content semantics (vector-backed) ---------------------------------
   app.get(`${BASE}/entries/:id/related`, requireScope(SCOPES.searchRead), async (c) => {
+    await guardEntry(c, c.req.param('id'), 'read');
     const topK = c.req.query('top_k');
     return c.json({
       items: await relatedEntries(rag, ctx, scopeOf(c), c.req.param('id'), {
@@ -469,6 +503,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     });
   });
   app.get(`${BASE}/entries/:id/duplicates`, requireScope(SCOPES.searchRead), async (c) => {
+    await guardEntry(c, c.req.param('id'), 'read');
     const threshold = c.req.query('threshold');
     return c.json({
       items: await findDuplicates(rag, ctx, scopeOf(c), c.req.param('id'), {
