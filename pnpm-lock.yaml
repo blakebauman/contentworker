@@ -102,12 +102,6 @@ importers:
 
   apps/admin-bff:
     dependencies:
-      '@cw/application':
-        specifier: workspace:*
-        version: link:../../packages/application
-      '@cw/domain':
-        specifier: workspace:*
-        version: link:../../packages/domain
       '@cw/telemetry':
         specifier: workspace:*
         version: link:../../packages/telemetry
