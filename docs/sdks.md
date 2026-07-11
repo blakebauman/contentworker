@@ -183,6 +183,46 @@ cma.apiKeys.list() / .create({ kind, name }) / .revoke(id)   // admin scope
 - `apiKeys.create` returns the raw token exactly once; only its hash is stored.
 - Failed requests throw `ManagementError` with `status` and the parsed error `body`.
 
+## `@cw/sdk-codegen` — typed field shapes from your content model
+
+Every SDK client is generic over the field shape (`getEntry<F>`, `EntryFields`), and
+`cw-codegen` generates those shapes from a space's actual content types — so entry fields are
+typed end to end instead of `Record<string, unknown>`.
+
+```bash
+# From a live API (any token with preview read):
+cw-codegen --url https://cms.example.com --space space-1 --environment main \
+  --token $CMA_TOKEN --out src/generated/content-types.ts
+
+# From an exported JSON file ({ items: [...] } or a bare array); stdout by default:
+cw-codegen --input content-types.json > content-types.ts
+```
+
+For each content type it emits two interfaces plus shared helpers and lookup maps:
+
+- `<Name>Fields` — Delivery shape (locale-flattened values — request entries with
+  `?locale=`; without one, Delivery returns locale-keyed values, i.e. the draft shape):
+  `Symbol`/`Text`/`Date` → `string`, `Integer`/`Number` → `number`, `Boolean` → `boolean`,
+  `Location` → `{ lat, lon }`, `JSON` → `Record<string, unknown>`, `RichText` →
+  `RichTextDocument`, `Link` → `EntryLink`/`AssetLink`, `Array` → element type `[]`.
+  An `in` validation becomes a literal union (`status: 'draft' | 'live'`) exactly where the
+  domain enforces it (`Symbol`/`Text`/`Integer`/`Number`); `required` controls optionality.
+- `<Name>DraftFields` — Management shape (locale-keyed: `Localized<T>`), usable with
+  `@cw/sdk-management`.
+- `ContentTypeApiId` (union of apiIds), `FieldsByContentType`, and `DraftFieldsByContentType`.
+
+```ts
+import { createDeliveryClient } from '@cw/sdk-core';
+import type { ArticleFields } from './generated/content-types.js';
+
+const client = createDeliveryClient({ baseUrl, space, environment, token });
+const article = await client.getEntry<ArticleFields>('42', { locale: 'en-US' });
+article.fields.title; // string — typed, not unknown
+```
+
+The generator is also importable (`generateTypes(contentTypes)`) for build-tool integration.
+Generated modules are self-contained and compile clean under `strict`.
+
 ## Choosing a client
 
 The five Delivery packages are **read-only** clients, except `@cw/sdk-email`, which

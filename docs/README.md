@@ -19,7 +19,8 @@ These docs describe how contentworker is built and how to run, extend, and integ
 6. **[Events & webhooks](./events-and-webhooks.md)** — the transactional outbox, relay loop,
    dispatch (webhooks, cache, RAG, functions), scheduled actions, Live Content, and agent hooks.
 7. **[SDKs](./sdks.md)** — Delivery clients (`@cw/sdk-core`, web, edge, react-native), the
-   email connector (`@cw/sdk-email`), and the Management client (`@cw/sdk-management`).
+   email connector (`@cw/sdk-email`), the Management client (`@cw/sdk-management`), and
+   `cw-codegen` for typed field shapes.
 8. **[Deployment](./deployment.md)** — Docker, docker-compose (including admin + override),
    and the cloud-agnostic Helm chart with per-cloud (AWS/GCP/Azure/local) values.
 9. **[Configuration](./configuration.md)** — the complete environment-variable reference.
