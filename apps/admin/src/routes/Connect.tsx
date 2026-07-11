@@ -80,11 +80,11 @@ export function ConnectPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {import.meta.env.VITE_SSO_LOGIN_URL && (
-              <Button type="button" variant="secondary" className="w-full" asChild>
-                <a href={import.meta.env.VITE_SSO_LOGIN_URL}>Sign in with SSO</a>
-              </Button>
-            )}
+            <Button type="button" variant="secondary" className="w-full" asChild>
+              <a href={import.meta.env.VITE_SSO_LOGIN_URL || '/auth/oidc/login'}>
+                Sign in with SSO
+              </a>
+            </Button>
             <div className="space-y-1.5">
               <Label htmlFor="connect-base-url">API base URL</Label>
               <Input

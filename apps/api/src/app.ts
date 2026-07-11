@@ -6,6 +6,7 @@ import type { AuthDeps } from './auth.js';
 import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
 import { onError } from './http.js';
+import { oidcRoutes } from './oidc/routes.js';
 import { deliveryRoutes } from './routes/delivery.js';
 import { managementRoutes } from './routes/management.js';
 import { previewRoutes } from './routes/preview.js';
@@ -38,6 +39,7 @@ export function createApp(
     ctx,
     hasher: createApiHasher(config.tokenPepper),
     adminToken: config.adminToken,
+    sessionSecret: config.sessionSecret,
     rag,
     blob,
     ai,
@@ -52,7 +54,10 @@ export function createApp(
   const mountDelivery = config.role === 'all' || config.role === 'delivery';
   const mountPreview = config.role === 'all' || config.role === 'preview';
 
-  if (mountManagement) app.route('/', managementRoutes(deps));
+  if (mountManagement) {
+    app.route('/', oidcRoutes(deps, config));
+    app.route('/', managementRoutes(deps));
+  }
   if (mountDelivery) app.route('/', deliveryRoutes(deps));
   if (mountPreview) app.route('/', previewRoutes(deps));
 

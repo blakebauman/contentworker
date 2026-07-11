@@ -67,6 +67,14 @@ services:
       # real model; unset, the API falls back to a dev stub that returns placeholders.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      SESSION_SECRET: dev-session-secret-not-for-production
+      ADMIN_UI_URL: http://localhost:5173/dashboard
+      OIDC_DEFAULT_SPACE: space-1
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:5173/auth/oidc/callback}
+      OIDC_GROUP_ROLE_MAP: ${OIDC_GROUP_ROLE_MAP:-{}}
     ports:
       - "8787:8787"
     depends_on:
@@ -102,28 +110,6 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-
-  # OIDC SSO backend-for-frontend. Optional: set OIDC_* in .env to enable Sign in with SSO
-  # on the admin connect screen (VITE_SSO_LOGIN_URL=http://localhost:8790/auth/login).
-  admin-auth:
-    build: .
-    command: ["pnpm", "--filter", "@cw/admin-auth", "start"]
-    environment:
-      PORT: "8790"
-      CW_API_URL: http://api:8787
-      ADMIN_TOKEN: dev-admin-token
-      SESSION_SECRET: dev-session-secret-not-for-production
-      OIDC_DEFAULT_SPACE: space-1
-      OIDC_ISSUER: ${OIDC_ISSUER:-}
-      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
-      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
-      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:8790/auth/callback}
-      OIDC_GROUP_ROLE_MAP: ${OIDC_GROUP_ROLE_MAP:-{}}
-    ports:
-      - "8790:8790"
-    depends_on:
-      api:
-        condition: service_started
 
 volumes:
   pgdata:

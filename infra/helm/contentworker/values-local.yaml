@@ -6,6 +6,9 @@ image:
 config:
   aiProvider: anthropic
   embeddingsProvider: local
+  extraEnv:
+    ADMIN_UI_URL: "http://cms.localtest.me/dashboard"
+    # OIDC_* via extraEnv or External Secrets when wiring a real IdP.
 
 # Bundled datastores; the default secret URLs already point at these services.
 postgres:
@@ -21,10 +24,6 @@ secrets:
     ADMIN_TOKEN: "dev-admin-token"
     MCP_TOKEN: "dev-mcp-token"
     SESSION_SECRET: "dev-session-secret-not-for-production"
-
-adminAuth:
-  enabled: true
-  # Set OIDC_* via adminAuth.extraEnv or External Secrets when wiring a real IdP.
 
 api:
   replicas: 1

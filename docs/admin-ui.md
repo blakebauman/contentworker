@@ -19,9 +19,9 @@ Compose auto-loads `docker-compose.override.yml`, which runs the admin as a Vite
 HMR and bind-mounted source. See [Deployment → Admin service](./deployment.md#admin-service-base-vs-override).
 
 Sign in at `/connect` with a CMA key or admin token. In dev, docker-compose seeds `dev-cma-key`
-automatically; production builds require an explicit token. Optional SSO: run `admin-auth` (included
-in `docker compose up`, port **8790**) and set `VITE_SSO_LOGIN_URL=http://localhost:8790/auth/login`
-plus the `OIDC_*` variables in `.env` (see [Configuration → Admin auth](./configuration.md#admin-auth-oidc-sso)).
+automatically; production builds require an explicit token. Optional SSO: configure `OIDC_*` on the
+API and use **Sign in with SSO** on `/connect` (`GET /auth/oidc/login`, proxied via Vite). See
+[Configuration → Admin auth](./configuration.md#admin-auth-oidc-sso-on-cwapi).
 
 ### Host dev server
 

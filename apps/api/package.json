@@ -27,6 +27,7 @@
     "graphql": "^16.10.0",
     "hono": "^4.6.14",
     "ioredis": "^5.4.2",
+    "openid-client": "^6.0.0",
     "uuid": "^11.0.3"
   },
   "devDependencies": {

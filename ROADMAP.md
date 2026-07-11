@@ -37,7 +37,7 @@ Remaining admin work:
 - [x] **Preview-link sharing** — generate/copy a preview URL (and mint a preview token)
   from an entry.
 - [x] **Role editing UI** — role CRUD in Settings + assign a custom role when minting keys.
-- [x] **OIDC/JWT auth** — `@cw/admin-auth` (authorization code + PKCE, httpOnly session,
+- [x] **OIDC/JWT auth** — OIDC on `@cw/api` (authorization code + PKCE, httpOnly session,
   delegated CMA keys); bearer-token connect gate remains the default for local/dev.
 
 ## Platform / SDK

@@ -14,10 +14,6 @@ export function AuthGate() {
     );
   }
 
-  if (!conn.token.trim()) {
-    return <Navigate to="/connect" replace state={{ from: location.pathname }} />;
-  }
-
   if (!authenticated) {
     return <Navigate to="/connect" replace state={{ from: location.pathname }} />;
   }

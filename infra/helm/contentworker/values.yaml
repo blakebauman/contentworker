@@ -154,18 +154,6 @@ mcpServer:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
 
-# Admin OIDC auth service (@cw/admin-auth). Off by default; enable for SSO in front of the admin SPA.
-adminAuth:
-  enabled: false
-  replicas: 1
-  port: 8790
-  # Cluster URL of the Management API (defaults to the bundled api Service).
-  apiUrl: ""
-  extraEnv: {}
-  resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits: { cpu: 500m, memory: 256Mi }
-
 migrator:
   enabled: true
 
