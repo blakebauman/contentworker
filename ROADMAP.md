@@ -37,8 +37,8 @@ Remaining admin work:
   never shown).
 - [ ] **Preview-link sharing** — generate/copy a preview URL (and mint a preview token)
   from an entry.
-- [ ] **Role editing UI** — blocked on granular RBAC (below); access is still coarse
-  CMA/CDA/CPA key kinds.
+- [ ] **Role editing UI** — the platform side (granular RBAC, below) is done; build the
+  admin surface for role CRUD + assigning roles when minting keys.
 - [ ] **OIDC/JWT auth** instead of raw bearer tokens — needs an auth-provider decision.
 
 ## Platform / SDK
@@ -51,8 +51,12 @@ Remaining admin work:
   client (`apps/admin/src/lib/management.ts`) into a published package with codegen'd
   content-type types.
 - [ ] **OpenAPI spec** generated from the Zod route schemas; publish API docs.
-- [ ] **Granular RBAC** — per-content-type and per-field permissions, custom roles
-  (beyond the CMA/CDA/CPA kinds + coarse scopes in `domain/auth`).
+- [x] **Granular RBAC** — custom `Role`s (space-scoped, live-resolved on every request)
+  carry a scope set plus per-content-type grants (`read`/`write`/`publish`) with per-field
+  deny/read-only rules. API keys bind via `roleId`; enforcement is identical on HTTP and MCP
+  (write/publish guards, read filtering + field masking on management/preview/delivery).
+  Roles CRUD at `/spaces/:space/roles` + `role_*` MCP tools. _(GraphQL/search/SSE/assets
+  remain coarse-scope only; per-field rules on those surfaces are a follow-up.)_
 - [x] **Temporal in production** — `AGENT_RUNTIME=temporal` binds `TemporalAgentRuntime`
   in `apps/worker` (env-driven; in-process remains the default); the **curate** and
   **repurpose** workflows join enrich/moderate (registered on the Temporal worker, tested

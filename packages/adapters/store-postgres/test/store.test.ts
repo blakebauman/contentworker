@@ -1,9 +1,13 @@
+import { createHash } from 'node:crypto';
 import type { AppContext } from '@cw/application';
 import {
+  authenticate,
+  createApiKey,
   createAppExtension,
   createContentType,
   createEntry,
   createFunction,
+  createRole,
   createSpace,
   deleteFunction,
   getEntry,
@@ -11,10 +15,12 @@ import {
   listAppExtensions,
   listFunctions,
   listPublishedEntries,
+  listRoles,
   publishContentType,
   publishEntry,
   unpublishEntry,
   updateEntry,
+  updateRole,
 } from '@cw/application';
 import type { Clock, IdGenerator } from '@cw/ports';
 import { v7 as uuidv7 } from 'uuid';
@@ -163,6 +169,38 @@ describe.skipIf(!URL)('Postgres store (contract)', () => {
     await publishEntry(ctx, scope, e.entry.id);
     const pending = await store.outbox.readPending(100);
     expect(pending.some((ev) => ev.type === 'entry.published')).toBe(true);
+  });
+
+  it('round-trips roles and role-bound API keys (granular RBAC)', async () => {
+    const role = await createRole(ctx, spaceId, {
+      name: 'Editor',
+      description: 'Posts only',
+      scopes: ['content:write', 'preview:read'],
+      contentGrants: [
+        { contentTypeApiId: 'article', actions: ['read', 'write'], deniedFields: ['views'] },
+      ],
+    });
+    const listed = await listRoles(ctx, spaceId);
+    expect(listed.map((r) => r.id)).toContain(role.id);
+
+    const hasher = { hash: (v: string) => createHash('sha256').update(v).digest('hex') };
+    const { token } = await createApiKey(ctx, hasher, {
+      spaceId,
+      kind: 'cma',
+      roleId: role.id,
+    });
+    const principal = await authenticate(ctx, hasher, token);
+    expect(principal.scopes).toEqual(['content:write', 'preview:read']);
+    expect(principal.contentGrants?.[0]?.deniedFields).toEqual(['views']);
+
+    await updateRole(ctx, spaceId, role.id, {
+      name: 'Editor',
+      scopes: ['preview:read'],
+      contentGrants: [{ contentTypeApiId: '*', actions: ['read'] }],
+    });
+    const after = await authenticate(ctx, hasher, token);
+    expect(after.scopes).toEqual(['preview:read']);
+    expect(after.contentGrants?.[0]?.contentTypeApiId).toBe('*');
   });
 
   it('round-trips the functions repo', async () => {

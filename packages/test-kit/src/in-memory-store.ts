@@ -13,6 +13,7 @@ import {
   type ReferenceEdge,
   type Release,
   type ReleaseItem,
+  type Role,
   type Scope,
   type Tag,
   type Task,
@@ -48,6 +49,7 @@ import type {
   PublishedEntry,
   ReferenceRepo,
   ReleaseRepo,
+  RoleRepo,
   ScheduledActionRepo,
   ScopedScheduledAction,
   SpaceConfig,
@@ -366,6 +368,19 @@ export class InMemoryContentStore implements ContentStore {
     revoke: async (id) => {
       const existing = this.apiKeyData.get(id);
       if (existing) this.apiKeyData.set(id, { ...existing, revoked: true });
+    },
+  };
+
+  private readonly roleData = new Map<string, Role>();
+
+  readonly roles: RoleRepo = {
+    save: async (role) => {
+      this.roleData.set(`${role.spaceId}::${role.id}`, role);
+    },
+    get: async (spaceId, id) => this.roleData.get(`${spaceId}::${id}`) ?? null,
+    list: async (spaceId) => [...this.roleData.values()].filter((r) => r.spaceId === spaceId),
+    delete: async (spaceId, id) => {
+      this.roleData.delete(`${spaceId}::${id}`);
     },
   };
 

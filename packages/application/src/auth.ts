@@ -16,6 +16,11 @@ export interface CreateApiKeyInput {
   readonly name?: string;
   /** Overrides the default scope set for the kind. */
   readonly scopes?: readonly string[];
+  /**
+   * Bind the key to a custom role (granular RBAC). The role's scopes and
+   * content grants are resolved live on every request, superseding `scopes`.
+   */
+  readonly roleId?: string;
 }
 
 export interface CreatedApiKey {
@@ -33,6 +38,12 @@ export async function createApiKey(
   hasher: Hasher,
   input: CreateApiKeyInput,
 ): Promise<CreatedApiKey> {
+  let roleScopes: readonly string[] | undefined;
+  if (input.roleId) {
+    const role = await ctx.store.roles.get(input.spaceId, input.roleId);
+    if (!role) throw new NotFoundError('Role', input.roleId);
+    roleScopes = role.scopes;
+  }
   const secret = (ctx.ids.newId() + ctx.ids.newId()).replace(/-/g, '');
   const token = `cw_${input.kind}_${secret}`;
   const apiKey: ApiKey = {
@@ -41,8 +52,10 @@ export async function createApiKey(
     kind: input.kind,
     name: input.name,
     hashedToken: hasher.hash(token),
-    scopes: input.scopes ?? scopesForKind(input.kind),
+    // Stored scopes are a snapshot for display; role-bound keys resolve live.
+    scopes: roleScopes ?? input.scopes ?? scopesForKind(input.kind),
     revoked: false,
+    roleId: input.roleId,
   };
   await ctx.store.auth.createApiKey(apiKey);
   return { apiKey, token };
@@ -57,6 +70,18 @@ export async function authenticate(
   if (!token) throw new UnauthorizedError();
   const key = await ctx.store.auth.findByHash(hasher.hash(token));
   if (!key) throw new UnauthorizedError();
+  if (key.roleId) {
+    // Role-bound key: the role is the live source of truth. A dangling
+    // roleId (role deleted out-of-band) fails closed.
+    const role = await ctx.store.roles.get(key.spaceId, key.roleId);
+    if (!role) throw new UnauthorizedError('API key role no longer exists');
+    return {
+      spaceId: key.spaceId,
+      kind: key.kind,
+      scopes: role.scopes,
+      contentGrants: role.contentGrants,
+    };
+  }
   return { spaceId: key.spaceId, kind: key.kind, scopes: key.scopes };
 }
 

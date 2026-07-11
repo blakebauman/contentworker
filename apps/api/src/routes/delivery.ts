@@ -9,7 +9,13 @@ import {
   semanticSearch,
   transformPublishedAssetUrl,
 } from '@cw/application';
-import { SCOPES, type Scope } from '@cw/domain';
+import {
+  SCOPES,
+  type Scope,
+  authorizeContent,
+  canAccessContentType,
+  maskDeniedFields,
+} from '@cw/domain';
 import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '@cw/graphql-gen';
 import { type GraphQLSchema, graphql } from 'graphql';
 import { type Context, Hono } from 'hono';
@@ -58,17 +64,26 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
       locale: c.req.query('locale'),
       include: include ? Number(include) : undefined,
     });
-    return c.json({ items, total: items.length });
+    // Granular RBAC: drop entries of ungranted types, mask denied fields.
+    const principal = c.get('principal');
+    const visible = items
+      .filter((e) => canAccessContentType(principal, 'read', e.contentType))
+      .map((e) => ({ ...e, fields: maskDeniedFields(principal, e.contentType, e.fields) }));
+    return c.json({ items: visible, total: visible.length });
   });
 
   app.get(`${BASE}/entries/:id`, requireScope(SCOPES.deliveryRead), async (c) => {
     const include = c.req.query('include');
-    return c.json(
-      await getPublishedEntry(ctx, scopeOf(c), c.req.param('id'), {
-        locale: c.req.query('locale'),
-        include: include ? Number(include) : undefined,
-      }),
-    );
+    const entry = await getPublishedEntry(ctx, scopeOf(c), c.req.param('id'), {
+      locale: c.req.query('locale'),
+      include: include ? Number(include) : undefined,
+    });
+    const principal = c.get('principal');
+    authorizeContent(principal, 'read', entry.contentType);
+    return c.json({
+      ...entry,
+      fields: maskDeniedFields(principal, entry.contentType, entry.fields),
+    });
   });
 
   app.get(`${BASE}/assets`, requireScope(SCOPES.deliveryRead), async (c) => {

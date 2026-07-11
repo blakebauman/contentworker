@@ -20,6 +20,7 @@ import {
   createEnvironment,
   createFunction,
   createRelease,
+  createRole,
   createScheme,
   createSpace,
   createTag,
@@ -33,6 +34,7 @@ import {
   deleteEnvironmentAlias,
   deleteFunction,
   deleteRelease,
+  deleteRole,
   deleteScheme,
   deleteTag,
   deleteTask,
@@ -51,6 +53,7 @@ import {
   getEntryWorkflowState,
   getRelease,
   getReverseReferences,
+  getRole,
   getSpaceConfig,
   getVersion,
   getWorkflow,
@@ -67,6 +70,7 @@ import {
   listEnvironments,
   listFunctions,
   listReleases,
+  listRoles,
   listScheduledActions,
   listSchemes,
   listSpaces,
@@ -104,9 +108,19 @@ import {
   unpublishAsset,
   unpublishEntry,
   updateEntry,
+  updateRole,
   updateWebhook,
 } from '@cw/application';
-import { type ApiKey, SCOPES, type Scope, type Webhook } from '@cw/domain';
+import {
+  type ApiKey,
+  type ContentAction,
+  SCOPES,
+  type Scope,
+  type Webhook,
+  assertWritableFields,
+  authorizeContent,
+  maskDeniedFields,
+} from '@cw/domain';
 import { type Context, Hono } from 'hono';
 import {
   type AuthDeps,
@@ -132,6 +146,7 @@ const apiKeySummary = (k: ApiKey) => ({
   name: k.name,
   scopes: k.scopes,
   revoked: k.revoked,
+  roleId: k.roleId,
 });
 const webhookSummary = (h: Webhook) => ({
   id: h.id,
@@ -260,6 +275,24 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.body(null, 204);
   });
 
+  // --- roles (granular RBAC, admin) ----------------------------------------
+  app.get('/spaces/:space/roles', requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json({ items: await listRoles(ctx, c.req.param('space')) }),
+  );
+  app.post('/spaces/:space/roles', requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json(await createRole(ctx, c.req.param('space'), await c.req.json()), 201),
+  );
+  app.get('/spaces/:space/roles/:id', requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json(await getRole(ctx, c.req.param('space'), c.req.param('id'))),
+  );
+  app.put('/spaces/:space/roles/:id', requireScope(SCOPES.spaceAdmin), async (c) =>
+    c.json(await updateRole(ctx, c.req.param('space'), c.req.param('id'), await c.req.json())),
+  );
+  app.delete('/spaces/:space/roles/:id', requireScope(SCOPES.spaceAdmin), async (c) => {
+    await deleteRole(ctx, c.req.param('space'), c.req.param('id'));
+    return c.body(null, 204);
+  });
+
   // --- space config (locales) --------------------------------------------
   app.get(`${BASE}/space-config`, requireScope(SCOPES.previewRead), async (c) =>
     c.json(await getSpaceConfig(ctx, scopeOf(c))),
@@ -283,8 +316,22 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // --- entries ------------------------------------------------------------
+  // Granular RBAC: content-level check on top of the coarse scope for
+  // role-bound principals (unrestricted principals short-circuit inside the
+  // domain helpers). Resolves the entry's content type when needed.
+  const guardEntry = async (c: Context<AuthVars>, id: string, action: ContentAction) => {
+    const principal = c.get('principal');
+    if (!principal.contentGrants) return;
+    const { entry } = await getEntry(ctx, scopeOf(c), id);
+    authorizeContent(principal, action, entry.contentTypeApiId);
+  };
+
   app.post(`${BASE}/entries`, requireScope(SCOPES.contentWrite), async (c) => {
-    const view = await createEntry(ctx, scopeOf(c), await c.req.json());
+    const body = await c.req.json();
+    const principal = c.get('principal');
+    authorizeContent(principal, 'write', body.contentTypeApiId);
+    assertWritableFields(principal, body.contentTypeApiId, body.fields ?? {});
+    const view = await createEntry(ctx, scopeOf(c), body);
     return c.json(view, 201);
   });
   // AI-draft an entry's fields. Generated values pass the same validators a
@@ -296,15 +343,27 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.post(`${BASE}/entries/canvas`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(await canvasToEntry(ctx, ai, scopeOf(c), await c.req.json())),
   );
-  app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json(await getEntry(ctx, scopeOf(c), c.req.param('id'))),
-  );
+  app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) => {
+    const view = await getEntry(ctx, scopeOf(c), c.req.param('id'));
+    const principal = c.get('principal');
+    authorizeContent(principal, 'read', view.entry.contentTypeApiId);
+    return c.json({
+      ...view,
+      fields: maskDeniedFields(principal, view.entry.contentTypeApiId, view.fields),
+    });
+  });
   // "What links here": entries/assets that reference this entry.
   app.get(`${BASE}/entries/:id/reverse-references`, requireScope(SCOPES.previewRead), async (c) =>
     c.json({ items: await getReverseReferences(ctx, scopeOf(c), c.req.param('id')) }),
   );
   app.put(`${BASE}/entries/:id`, requireScope(SCOPES.contentWrite), async (c) => {
     const body = await c.req.json();
+    const principal = c.get('principal');
+    if (principal.contentGrants) {
+      const { entry } = await getEntry(ctx, scopeOf(c), c.req.param('id'));
+      authorizeContent(principal, 'write', entry.contentTypeApiId);
+      assertWritableFields(principal, entry.contentTypeApiId, body.fields ?? {});
+    }
     return c.json(await updateEntry(ctx, scopeOf(c), c.req.param('id'), body.fields));
   });
   // --- AI content operations over an entry -------------------------------
@@ -363,14 +422,21 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   // --- bulk operations ---------------------------------------------------
   app.post(`${BASE}/bulk/entries`, requireScope(SCOPES.contentWrite), async (c) => {
     const body = await c.req.json();
+    const principal = c.get('principal');
+    for (const item of body.items ?? []) {
+      authorizeContent(principal, 'write', item.contentTypeApiId);
+      assertWritableFields(principal, item.contentTypeApiId, item.fields ?? {});
+    }
     return c.json(await bulkCreateEntries(ctx, scopeOf(c), body.items ?? []), 201);
   });
   app.post(`${BASE}/bulk/entries/publish`, requireScope(SCOPES.contentPublish), async (c) => {
     const body = await c.req.json();
+    for (const id of body.ids ?? []) await guardEntry(c, id, 'publish');
     return c.json(await bulkEntryAction(ctx, scopeOf(c), 'publish', body.ids ?? []));
   });
   app.post(`${BASE}/bulk/entries/unpublish`, requireScope(SCOPES.contentPublish), async (c) => {
     const body = await c.req.json();
+    for (const id of body.ids ?? []) await guardEntry(c, id, 'publish');
     return c.json(await bulkEntryAction(ctx, scopeOf(c), 'unpublish', body.ids ?? []));
   });
 
@@ -418,12 +484,14 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       }),
     ),
   );
-  app.post(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
-    c.json(await publishEntry(ctx, scopeOf(c), c.req.param('id'))),
-  );
-  app.delete(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
-    c.json(await unpublishEntry(ctx, scopeOf(c), c.req.param('id'))),
-  );
+  app.post(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) => {
+    await guardEntry(c, c.req.param('id'), 'publish');
+    return c.json(await publishEntry(ctx, scopeOf(c), c.req.param('id')));
+  });
+  app.delete(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) => {
+    await guardEntry(c, c.req.param('id'), 'publish');
+    return c.json(await unpublishEntry(ctx, scopeOf(c), c.req.param('id')));
+  });
 
   // --- entry version history ---------------------------------------------
   app.get(`${BASE}/entries/:id/versions`, requireScope(SCOPES.previewRead), async (c) =>

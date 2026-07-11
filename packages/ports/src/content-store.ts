@@ -19,6 +19,7 @@ import type {
   ReferenceEdge,
   Release,
   ReleaseItem,
+  Role,
   ScheduledAction,
   Scope,
   Tag,
@@ -44,6 +45,7 @@ export interface ContentStore {
   readonly references: ReferenceRepo;
   readonly webhooks: WebhookRepo;
   readonly auth: AuthRepo;
+  readonly roles: RoleRepo;
   readonly agentRuns: AgentRunRepo;
   readonly releases: ReleaseRepo;
   readonly scheduledActions: ScheduledActionRepo;
@@ -259,6 +261,15 @@ export interface AuthRepo {
   findByHash(hashedToken: string): Promise<ApiKey | null>;
   list(spaceId: string): Promise<ApiKey[]>;
   revoke(id: string): Promise<void>;
+}
+
+/** Custom roles (granular RBAC) — space-scoped, referenced by API keys. */
+export interface RoleRepo {
+  /** Creates or replaces (by id) a role. */
+  save(role: Role): Promise<void>;
+  get(spaceId: string, id: string): Promise<Role | null>;
+  list(spaceId: string): Promise<Role[]>;
+  delete(spaceId: string, id: string): Promise<void>;
 }
 
 /** The transactional view of the store handed to `withTransaction`. */
