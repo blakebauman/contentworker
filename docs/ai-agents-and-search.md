@@ -122,22 +122,24 @@ use-case, and `space`/`environment` default to the seeded values when omitted.
 
 ### Tools
 
-| Tool | Scope | Delegates to |
-| --- | --- | --- |
-| `model_list_content_types` | `preview:read` | `listContentTypes` |
-| `model_get_content_type` | `preview:read` | `getContentType` |
-| `model_create_content_type` | `content:manage` | `createContentType` |
-| `model_publish_content_type` | `content:publish` | `publishContentType` |
-| `entries_query` | `preview:read` | `listPreviewEntries` |
-| `entries_get` | `preview:read` | `getPreviewEntry` |
-| `entries_create` | `content:write` | `createEntry` |
-| `entries_update` | `content:write` | `updateEntry` |
-| `entries_publish` | `content:publish` | `publishEntry` |
-| `entries_unpublish` | `content:publish` | `unpublishEntry` |
-| `generate_draft` | `content:write` | `draftEntry` |
-| `content_search` | `search:read` | `hybridSearch` |
-| `content_semantic_search` | `search:read` | `semanticSearch` |
-| `entry_moderate` | `content:write` | `moderateEntry` |
+The MCP server exposes **50+ tools** — one per major Management/Delivery capability. Each tool
+calls `authorize` before delegating to the same use-case as the HTTP route.
+
+| Category | Tools |
+| --- | --- |
+| Model | `model_list_content_types`, `model_get_content_type`, `model_create_content_type`, `model_publish_content_type` |
+| Entries | `entries_query`, `entries_get`, `entries_create`, `entries_update`, `entries_publish`, `entries_unpublish`, `entries_bulk_action`, `entries_list_versions`, `entries_diff_versions`, `entries_restore_version`, `entries_set_metadata` |
+| AI | `generate_draft`, `entry_from_canvas`, `entry_translate`, `entry_summarize`, `entry_autofill_field`, `entry_suggest_tags`, `entry_audit`, `entry_moderate` |
+| Search | `content_search` (hybrid), `content_semantic_search`, `content_related`, `content_duplicates` |
+| Roles | `roles_list`, `role_create`, `role_update`, `role_delete` |
+| Releases | `releases_list`, `releases_get`, `releases_create`, `releases_add_entry`, `releases_publish` |
+| Collaboration | `comments_list`, `comments_add`, `tasks_list`, `tasks_create`, `tasks_resolve`, `workflow_transition` |
+| Taxonomy | `taxonomy_list_tags`, `taxonomy_create_tag`, `taxonomy_list_concepts`, `taxonomy_create_concept`, `taxonomy_create_scheme` |
+| Assets | `assets_list`, `asset_set_metadata`, `asset_usage`, `asset_generate_alt_text`, `asset_auto_tag`, `asset_transform_url` |
+| Branching | `environments_compare`, `environments_merge`, `environment_aliases_list`, `environment_alias_set`, `environment_alias_delete` |
+| Platform | `functions_list`, `function_create`, `function_delete`, `app_extensions_list`, `app_extension_create`, `app_extension_delete`, `ai_actions_list`, `ai_action_create`, `ai_action_run`, `schedule_action`, `audit_log_list` |
+
+Canonical list: `apps/mcp-server/src/server.ts`.
 
 Because the tools are thin wrappers over the use-cases, the MCP surface inherits all validation,
 referential integrity, RBAC, and event emission for free.
@@ -147,9 +149,17 @@ referential integrity, RBAC, and event emission for free.
 `packages/agent-runtime` runs durable agent **workflows** behind an engine-agnostic facade.
 
 ```ts
-type WorkflowName = 'enrich' | 'moderate';
+type WorkflowName = 'enrich' | 'moderate' | 'curate' | 'repurpose';
 interface AgentRuntime { run(workflow, input): Promise<AgentRunResult>; }
 ```
+
+On-publish hooks (`AGENTS_ENRICH`, `AGENTS_MODERATE`) run `enrich` then `moderate`. `curate` and
+`repurpose` are available for on-demand orchestration (API/MCP/agent-worker).
+
+`AGENT_RUNTIME=temporal` routes on-publish agents through `TemporalAgentRuntime`
+(`@cw/agent-runtime/temporal`), which starts workflows on the `contentworker-agents` task queue.
+The `apps/agent-worker` hosts the workflow and activity implementations. Default is
+`InProcessAgentRuntime` (non-durable).
 
 The crucial seam is `Activities` — the side-effecting operations (`loadEntry`, `generateFields`,
 `applyFields`, `classify`, `record`). Workflow functions are **pure orchestration** over
@@ -157,13 +167,10 @@ The crucial seam is `Activities` — the side-effecting operations (`loadEntry`,
 
 - **`InProcessAgentRuntime`** — directly in the calling process (dev, tests, single-node). Not
   durable (no crash replay).
-- **Temporal** (production) — the `apps/agent-worker` hosts the same `enrich`/`moderate` workflows
-  in Temporal's deterministic sandbox. The workflow module imports only workflow-safe code (the
-  pure orchestration plus `proxyActivities`), and the real side effects run as Temporal Activities
-  registered with the worker. `TemporalAgentRuntime` (in `agent-worker/src/runtime.ts`) implements
-  the **same** `AgentRuntime` interface as the in-process runtime — it starts a workflow on the
-  `contentworker-agents` task queue and awaits the result — so callers swap executors with no
-  logic change and gain durable retries and crash replay. See `packages/agent-runtime/temporal.md`.
+- **Temporal** (production) — `apps/agent-worker` hosts `enrich`/`moderate`/`curate`/`repurpose`
+  in Temporal's deterministic sandbox. `TemporalAgentRuntime` (`@cw/agent-runtime/temporal`)
+  implements the same `AgentRuntime` interface — callers swap executors with no logic change.
+  See `packages/agent-runtime/temporal.md`.
 
 ### enrich
 
@@ -182,6 +189,23 @@ Fills empty text/symbol fields (excluding the display field) on a freshly-publis
 1. Load the entry; if missing → `skipped`.
 2. `classify` the concatenated text (tier `fast`, strict `{ flagged, categories }` schema).
 3. If flagged → `record` a hold → `held`; else → `completed`.
+
+### curate
+
+Improves already-filled text/symbol fields (excluding the display field) on a published entry:
+
+1. Load the entry; skip if missing or no filled non-display text fields.
+2. `generateFields` with an "improve" instruction; compare proposed vs. current values.
+3. If `autoApply` and values changed → `applyFields` → `completed`; else → `needs_review`.
+
+### repurpose
+
+Derives channel variants (e.g. social, newsletter) from entry text:
+
+1. Load the entry; skip if missing or no text.
+2. `generateFields` with a repurpose instruction for variant fields.
+3. Always records the proposal → `needs_review` (never auto-applies). Pairs with
+   `@cw/sdk-email` for newsletter/campaign flows.
 
 ### Result
 

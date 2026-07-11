@@ -1,7 +1,7 @@
 # SDKs
 
-Three published client packages target the read-only **Delivery API**. They share a model
-(`DeliveredEntry`, `SearchHit`) but differ in surface and footprint.
+Five published client packages target the read-only **Delivery API** (plus an email connector).
+They share a model (`DeliveredEntry`, `SearchHit`) but differ in surface and footprint.
 
 ## `@cw/sdk-core` — framework-agnostic Delivery client
 
@@ -30,10 +30,12 @@ client.query(): EntryQueryBuilder<F>     // fluent builder
 client.clearCache(): void
 ```
 
-- `EntryQuery` = `{ contentType?, locale?, include?, limit?, skip? }`.
+- `EntryQuery` = `{ contentType?, locale?, include?, limit?, skip?, since?, filters?, order?, select?, search? }`.
+- `filters` use the same operators as the HTTP query language (`eq`, `ne`, `in`, `match`, etc.).
 - The fluent builder reads naturally:
   `client.query().contentType('article').locale('en-US').limit(10).fetch()`.
 - `include` controls reference embedding depth (linked entries are nested in `fields`).
+- `client.search()` hits `/search` with hybrid mode by default (same as the API).
 - Failed requests throw `DeliveryError`.
 
 Shapes:
@@ -96,16 +98,37 @@ await client.list('article', { limit: 20, pick: ['title'] });
 Returns `CompactEntry` = `{ id, contentType, fields }` where `fields` is already flattened to the
 client locale (no locale nesting).
 
-## Choosing a client
-
 | Use case | Package |
 | --- | --- |
 | Node/SSR/backend, or building your own integration | `@cw/sdk-core` |
 | React apps | `@cw/sdk-web` |
 | Constrained devices, single-locale, minimal payload | `@cw/sdk-edge` |
+| React Native apps with offline sync | `@cw/sdk-react-native` |
+| Email campaigns from republished content | `@cw/sdk-email` |
 
-All three are **read-only** Delivery clients. For writes/publishing, call the Management API
-directly or drive the MCP tools.
+## `@cw/sdk-react-native` — offline Delivery sync
+
+Hooks and helpers for React Native: offline entry cache, delta sync via `since`, and image URL
+helpers. Builds on `@cw/sdk-core` with AsyncStorage-backed persistence.
+
+```ts
+import { createOfflineDelivery, useOfflineEntries } from '@cw/sdk-react-native';
+```
+
+## `@cw/sdk-email` — ESP connector
+
+Maps delivered entries to email campaign payloads. Includes a Mailchimp adapter for list/campaign
+integration — used by the `repurpose` agent workflow for content-to-newsletter flows.
+
+```ts
+import { createMailchimpConnector, mapEntryToCampaign } from '@cw/sdk-email';
+```
+
+## Choosing a client
+
+All five published client packages are **read-only** Delivery clients except `@cw/sdk-email`,
+which orchestrates outbound email from delivered content. For writes/publishing, call the
+Management API directly or drive the MCP tools.
 
 ## GraphQL
 

@@ -44,14 +44,15 @@ Detailed docs live in [`docs/`](./docs):
 | --- | --- |
 | [Architecture](./docs/architecture.md) | The hexagonal layers, the dependency rule, package map, request/event flows |
 | [Domain model](./docs/domain-model.md) | Field types, validation, entry state machine, locales, references, assets, events |
-| [API reference](./docs/api-reference.md) | Every HTTP endpoint with method, path, required scope, and shape |
-| [Auth & RBAC](./docs/auth-and-rbac.md) | API key kinds, scopes, principals, the `authorize` decision |
-| [AI, agents & search](./docs/ai-agents-and-search.md) | Generation, RAG/embeddings, the MCP tools, the enrich/moderate agent runtime |
-| [Events & webhooks](./docs/events-and-webhooks.md) | The outbox→relay→dispatch pipeline, webhook signing, cache invalidation |
-| [SDKs](./docs/sdks.md) | The core, web (React), and edge delivery clients |
-| [Deployment](./docs/deployment.md) | Docker, docker-compose, the Helm chart, and per-cloud values |
+| [API reference](./docs/api-reference.md) | Every HTTP endpoint, query language, hybrid search, Live Content SSE |
+| [Auth & RBAC](./docs/auth-and-rbac.md) | API key kinds, scopes, custom roles, the `authorize` decision |
+| [AI, agents & search](./docs/ai-agents-and-search.md) | Generation, hybrid search, MCP tools, agent runtime (enrich/moderate/curate/repurpose) |
+| [Events & webhooks](./docs/events-and-webhooks.md) | Outbox→relay→dispatch, functions, scheduled actions, Live Content |
+| [SDKs](./docs/sdks.md) | Delivery clients (core, web, edge, react-native) and email connector |
+| [Deployment](./docs/deployment.md) | Docker, docker-compose (admin + override), Helm chart, per-cloud values |
 | [Configuration](./docs/configuration.md) | The full environment-variable reference |
-| [Development](./docs/development.md) | Workspace commands, testing, conventions, adding a use-case |
+| [Development](./docs/development.md) | Workspace commands, testing, schema, adding a use-case |
+| [Admin UI](./docs/admin-ui.md) | Management SPA at `:5173`, compose HMR, local dev workflow |
 
 For Claude Code specifically, see [`CLAUDE.md`](./CLAUDE.md).
 
@@ -79,12 +80,15 @@ packages/
     core/                   framework-agnostic Delivery client
     web/                    React hooks over the core client
     edge/                   tiny single-locale client for IoT/kiosks
+    react-native/           offline sync hooks for React Native
+    email/                  ESP connector (Mailchimp) for repurpose flows
 apps/
   api/                      Hono Management + Delivery + Preview APIs; composition root in wire.ts
   worker/                   outbox relay + event dispatch + optional enrich agent
-  agent-worker/             Temporal worker hosting the durable enrich/moderate workflows
+  agent-worker/             Temporal worker hosting durable agent workflows
   mcp-server/               stateless streamable-HTTP MCP server for AI agents
   migrator/                 Drizzle migration runner (K8s Job)
+  admin/                    React management SPA (compose/local dev; not in Helm yet)
 infra/
   helm/contentworker/       cloud-agnostic Helm chart + per-cloud values (aws/gcp/azure/local)
 ```

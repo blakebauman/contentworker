@@ -78,8 +78,9 @@ Semantics:
   (requires `space:admin`) and the `roles_list` / `role_create` / `role_update` /
   `role_delete` MCP tools. Mint a bound key with `POST …/api-keys { kind, roleId }`.
 
-Grants currently govern the entry read/write/publish surfaces; GraphQL, search, SSE, and
-assets are governed by coarse scopes.
+Grants govern entry read/write/publish and content-type visibility. **Delivery and Preview**
+list/get endpoints filter ungranted content types and `maskDeniedFields` on responses. Coarse
+scopes still gate search, GraphQL, SSE, and assets at the route level.
 
 ## API keys at rest
 
@@ -132,15 +133,18 @@ use-case. A failure surfaces as **403** (`forbidden`); an unauthenticated reques
 
 ## Scope → operation map
 
-| Scope | Use-cases / endpoints |
+| Scope | Use-cases / endpoints (representative) |
 | --- | --- |
-| `content:write` | `createEntry`, `updateEntry`, `createAsset`, `draftEntry` |
-| `content:publish` | `publishEntry`, `unpublishEntry`, `publishAsset`, `unpublishAsset`, `publishContentType` |
-| `content:manage` | `createContentType`, `updateContentType` |
-| `preview:read` | `getPreviewEntry`, `listPreviewEntries`, `getContentType`, `listContentTypes` |
-| `delivery:read` | `getPublishedEntry`, `listPublishedEntries`, published assets |
-| `search:read` | `semanticSearch` |
-| `space:admin` | `createApiKey`, `listApiKeys`, `createSpace`, `createEnvironment`, webhooks |
+| `content:write` | Entry/asset CRUD, AI generation endpoints, bulk writes, comments/tasks, metadata |
+| `content:publish` | Publish/unpublish entries, assets, content types, releases; scheduled actions |
+| `content:manage` | Content types, workflows, taxonomy, functions, app-extensions, ai-actions, merge |
+| `preview:read` | Preview entries, content types, releases, workflows, collaboration reads |
+| `delivery:read` | Published entries/assets, Live Content SSE, GraphQL |
+| `search:read` | Hybrid/semantic search, related/duplicates/embedding |
+| `space:admin` | Spaces, environments, aliases, API keys, roles, webhooks, audit log, agent runs |
+
+`GET /spaces` returns all spaces for an admin principal (`spaceId: '*'`) or only the key's own
+space for scoped keys.
 
 ## Dev credentials
 

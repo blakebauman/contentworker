@@ -20,19 +20,49 @@ The `Dockerfile` builds one image for all Node services:
 
 ## Local: docker-compose
 
-`docker compose up --build` brings up the full stack:
+`docker compose up --build` brings up the full stack. Compose **auto-merges**
+`docker-compose.yml` with `docker-compose.override.yml` (no `-f` flags needed).
 
 | Service | Image / command | Notes |
 | --- | --- | --- |
-| `postgres` | `postgres:16-alpine` | port 5432, healthchecked |
+| `postgres` | `pgvector/pgvector:pg16` | port 5432, healthchecked; `vector` extension available for semantic search |
 | `redis` | `redis:7-alpine` | port 6379, healthchecked |
 | `migrator` | `@cw/migrator` | one-shot; applies Drizzle migrations before api/worker |
 | `api` | `@cw/api`, `ROLE=all` | http://localhost:8787 |
+| `admin` | `@cw/admin` | http://localhost:5173 — see [Admin UI](./admin-ui.md) |
 | `worker` | `@cw/worker` | outbox relay + dispatch |
 
 Shared env: `DATABASE_URL=postgres://postgres:postgres@postgres:5432/contentworker`,
-`REDIS_URL=redis://redis:6379`. Dev keys: `dev-cma-key`, `dev-cda-key`, `dev-cpa-key`,
-`dev-admin-token`.
+`REDIS_URL=redis://redis:6379`. The API also sets `SEED_DEV=true` and
+`SEED_LOCALES=en-US,de-DE` so a fresh Postgres stack is usable immediately (idempotent
+bootstrap of space, dev keys, and demo content). Dev keys: `dev-cma-key`, `dev-cda-key`,
+`dev-cpa-key`, `dev-admin-token`.
+
+Optional AI: set `ANTHROPIC_API_KEY` in a `.env` file (compose reads it for the `api`
+service). Without it, generation endpoints return dev stubs.
+
+### Admin service: base vs override
+
+`docker-compose.yml` defines the `admin` service as a **prod-style** build:
+`pnpm --filter @cw/admin build && vite preview` (serves the built SPA, proxies API paths to
+`api`).
+
+`docker-compose.override.yml` overrides **only** `admin` for local dev:
+
+- Runs the Vite **dev server** with hot-module reload instead of `build && preview`.
+- Bind-mounts `./apps/admin` and `./packages` so edits on the host reload live.
+- Uses anonymous volumes for `node_modules` so macOS host binaries never leak into the Linux
+  container.
+- Sets `VITE_USE_POLLING=true` so HMR works across the bind mount.
+
+To run the prod-style preview instead, use `docker compose -f docker-compose.yml up` or
+rename/remove the override file.
+
+Run the admin outside Docker with `pnpm --filter @cw/admin dev` (see
+[Admin UI](./admin-ui.md)).
+
+Compose sets `EMBEDDINGS_PROVIDER=local` on api/worker (via shared `x-app-env`) so publish-time
+RAG indexing and hybrid search work out of the box, matching `values-local.yaml`.
 
 ## Kubernetes: Helm
 
@@ -45,7 +75,7 @@ supply only what differs.
 | --- | --- | --- |
 | api | Deployment + Service + HPA | The HTTP API; `ROLE`-gated |
 | worker | Deployment (+ optional HPA) | Outbox relay, dispatch, optional enrich agent |
-| agent-worker | Deployment | Temporal worker for durable enrich/moderate workflows (needs a Temporal cluster) |
+| agent-worker | Deployment (conditional) | Temporal workflow host — only when `agents.runtime=temporal` |
 | mcp-server | Deployment + Service | MCP tool surface |
 | migrator | Job (pre-install/upgrade hook) | Runs migrations before app pods start |
 | postgres / redis | StatefulSet / Deployment | **bundled for local only**; managed services in cloud |
@@ -77,7 +107,33 @@ mcpServer:{ enabled: true, replicas: 2, port: 8788 }
 migrator: { enabled: true }
 postgres: { bundled: false }
 redis:    { bundled: false }
+agents:
+  enrich: false
+  moderate: false
+  autoApply: false
+  runtime: in-process   # or temporal (deploys agent-worker + wires AGENT_RUNTIME)
+temporal:
+  enabled: false        # optional bundled Temporal subchart for local/kind
 ```
+
+The admin SPA is **compose-only** today — there is no Helm workload for it. Production
+admin UIs would be hosted separately (e.g. static assets behind ingress) and pointed at the
+Management API.
+
+### Agents & Temporal
+
+On-publish agents (`enrich`, `moderate`) are controlled by Helm `agents.*` values, which map
+to `AGENTS_ENRICH`, `AGENTS_MODERATE`, `AGENTS_AUTO_APPLY`, and optionally `AGENT_RUNTIME`
+in the ConfigMap.
+
+| `agents.runtime` | Behavior |
+| --- | --- |
+| `in-process` (default) | Worker runs agents in-process via `InProcessAgentRuntime` (non-durable) |
+| `temporal` | Worker starts workflows on Temporal; `agent-worker` Deployment hosts workflow + activity code on the `contentworker-agents` task queue |
+
+When `agents.runtime=temporal`, set `agents.temporal.address` to an existing Temporal cluster
+(or enable the bundled `temporal` subchart for local/kind with `temporal.enabled: true`). The
+`agent-worker` Deployment is rendered only in temporal mode.
 
 ### Per-cloud values
 

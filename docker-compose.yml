@@ -8,10 +8,12 @@
 x-app-env: &app-env
   DATABASE_URL: postgres://postgres:postgres@postgres:5432/contentworker
   REDIS_URL: redis://redis:6379
+  # Local deterministic embeddings + pgvector (matches Helm values-local.yaml).
+  EMBEDDINGS_PROVIDER: local
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: contentworker
