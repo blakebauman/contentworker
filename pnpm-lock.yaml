@@ -100,7 +100,7 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(lightningcss@1.32.0)(terser@5.48.0)
 
-  apps/admin-bff:
+  apps/admin-auth:
     dependencies:
       '@cw/telemetry':
         specifier: workspace:*

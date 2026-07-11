@@ -1,16 +1,16 @@
-{{- if .Values.adminBff.enabled -}}
+{{- if .Values.adminAuth.enabled -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "cw.fullname" . }}-admin-bff
+  name: {{ include "cw.fullname" . }}-admin-auth
   labels: {{- include "cw.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.adminBff.replicas }}
+  replicas: {{ .Values.adminAuth.replicas }}
   selector:
-    matchLabels: {{- include "cw.selectorLabels" (dict "ctx" . "component" "admin-bff") | nindent 6 }}
+    matchLabels: {{- include "cw.selectorLabels" (dict "ctx" . "component" "admin-auth") | nindent 6 }}
   template:
     metadata:
-      labels: {{- include "cw.selectorLabels" (dict "ctx" . "component" "admin-bff") | nindent 8 }}
+      labels: {{- include "cw.selectorLabels" (dict "ctx" . "component" "admin-auth") | nindent 8 }}
     spec:
       serviceAccountName: {{ include "cw.serviceAccountName" . }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -18,15 +18,15 @@ spec:
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
-        - name: admin-bff
+        - name: admin-auth
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["pnpm", "--filter", "@cw/admin-bff", "start"]
+          command: ["pnpm", "--filter", "@cw/admin-auth", "start"]
           env:
             - name: PORT
-              value: {{ .Values.adminBff.port | quote }}
+              value: {{ .Values.adminAuth.port | quote }}
             - name: CW_API_URL
-              value: {{ .Values.adminBff.apiUrl | default (printf "http://%s-api:80" (include "cw.fullname" .)) | quote }}
+              value: {{ .Values.adminAuth.apiUrl | default (printf "http://%s-api:80" (include "cw.fullname" .)) | quote }}
             - name: OIDC_DEFAULT_SPACE
               value: {{ .Values.config.seedSpaceId | quote }}
             - name: SESSION_SECRET
@@ -40,7 +40,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "cw.secretName" . }}
                   key: ADMIN_TOKEN
-            {{- range $k, $v := .Values.adminBff.extraEnv }}
+            {{- range $k, $v := .Values.adminAuth.extraEnv }}
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
@@ -49,23 +49,23 @@ spec:
                 name: {{ include "cw.fullname" . }}-config
           ports:
             - name: http
-              containerPort: {{ .Values.adminBff.port }}
+              containerPort: {{ .Values.adminAuth.port }}
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 5
           livenessProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 10
-          resources: {{- toYaml .Values.adminBff.resources | nindent 12 }}
+          resources: {{- toYaml .Values.adminAuth.resources | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "cw.fullname" . }}-admin-bff
+  name: {{ include "cw.fullname" . }}-admin-auth
   labels: {{- include "cw.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
-  selector: {{- include "cw.selectorLabels" (dict "ctx" . "component" "admin-bff") | nindent 4 }}
+  selector: {{- include "cw.selectorLabels" (dict "ctx" . "component" "admin-auth") | nindent 4 }}
   ports:
     - name: http
       port: 80

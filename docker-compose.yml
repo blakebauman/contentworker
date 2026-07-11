@@ -105,9 +105,9 @@ services:
 
   # OIDC SSO backend-for-frontend. Optional: set OIDC_* in .env to enable Sign in with SSO
   # on the admin connect screen (VITE_SSO_LOGIN_URL=http://localhost:8790/auth/login).
-  admin-bff:
+  admin-auth:
     build: .
-    command: ["pnpm", "--filter", "@cw/admin-bff", "start"]
+    command: ["pnpm", "--filter", "@cw/admin-auth", "start"]
     environment:
       PORT: "8790"
       CW_API_URL: http://api:8787

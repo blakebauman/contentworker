@@ -22,9 +22,9 @@ secrets:
     MCP_TOKEN: "dev-mcp-token"
     SESSION_SECRET: "dev-session-secret-not-for-production"
 
-adminBff:
+adminAuth:
   enabled: true
-  # Set OIDC_* via adminBff.extraEnv or External Secrets when wiring a real IdP.
+  # Set OIDC_* via adminAuth.extraEnv or External Secrets when wiring a real IdP.
 
 api:
   replicas: 1

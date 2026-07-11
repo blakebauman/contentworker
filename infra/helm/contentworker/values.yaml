@@ -154,8 +154,8 @@ mcpServer:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
 
-# Admin OIDC BFF (@cw/admin-bff). Off by default; enable for SSO in front of the admin SPA.
-adminBff:
+# Admin OIDC auth service (@cw/admin-auth). Off by default; enable for SSO in front of the admin SPA.
+adminAuth:
   enabled: false
   replicas: 1
   port: 8790

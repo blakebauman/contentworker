@@ -41,20 +41,20 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `AUTH_RATE_LIMIT_MAX` | `10` | Failed auth attempts per IP before HTTP 429 |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit sliding window (ms) |
 
-### Admin BFF (OIDC SSO)
+### Admin auth (OIDC SSO)
 
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `OIDC_ISSUER` | — | OIDC provider issuer URL |
 | `OIDC_CLIENT_ID` | — | OAuth client id |
 | `OIDC_CLIENT_SECRET` | — | OAuth client secret |
-| `OIDC_REDIRECT_URI` | — | Callback URL (BFF `/auth/callback`) |
+| `OIDC_REDIRECT_URI` | — | Callback URL (`/auth/callback` on admin-auth) |
 | `OIDC_DEFAULT_SPACE` | `space-1` | Space for delegated CMA keys |
 | `OIDC_GROUP_ROLE_MAP` | `{}` | JSON map of IdP group → role id |
 | `SESSION_SECRET` | — | HMAC secret for the httpOnly session cookie |
 | `SESSION_TTL_HOURS` | `8` | Session lifetime |
 
-Admin SPA: set `VITE_SSO_LOGIN_URL` to the BFF `/auth/login` URL to show **Sign in with SSO**.
+Admin SPA: set `VITE_SSO_LOGIN_URL` to the admin-auth `/auth/login` URL to show **Sign in with SSO**.
 
 In Postgres mode these seeds are not used; create real keys via `POST …/api-keys`.
 

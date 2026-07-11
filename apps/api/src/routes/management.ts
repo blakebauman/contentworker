@@ -172,7 +172,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   // Record successful mutations to the append-only audit trail.
   app.use('/spaces/:space/*', auditMiddleware(deps));
 
-  /** Lightweight principal probe for admin connection UI and BFF sessions. */
+  /** Lightweight principal probe for admin connection UI and SSO sessions. */
   app.get('/auth/me', (c) => {
     const principal = c.get('principal');
     return c.json({

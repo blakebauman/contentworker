@@ -1,4 +1,4 @@
-export interface BffConfig {
+export interface AuthConfig {
   readonly port: number;
   readonly sessionSecret: string;
   readonly apiUrl: string;
@@ -13,7 +13,7 @@ export interface BffConfig {
   readonly oidcGroupRoleMap: Record<string, string>;
 }
 
-export function loadBffConfig(env: NodeJS.ProcessEnv = process.env): BffConfig {
+export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
   let oidcGroupRoleMap: Record<string, string> = {};
   if (env.OIDC_GROUP_ROLE_MAP) {
     oidcGroupRoleMap = JSON.parse(env.OIDC_GROUP_ROLE_MAP) as Record<string, string>;
@@ -33,7 +33,7 @@ export function loadBffConfig(env: NodeJS.ProcessEnv = process.env): BffConfig {
   };
 }
 
-export function oidcEnabled(config: BffConfig): boolean {
+export function oidcEnabled(config: AuthConfig): boolean {
   return Boolean(
     config.oidcIssuer && config.oidcClientId && config.oidcClientSecret && config.oidcRedirectUri,
   );

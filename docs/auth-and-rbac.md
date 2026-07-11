@@ -120,8 +120,8 @@ interface Principal {
 - **`GET /auth/me`** returns the resolved principal summary (used by the admin connect UI).
 - **Preview links** — `POST …/entries/:id/preview-link` mints an expiring token; CPA
   `GET …/entries/:id?preview_token=…` accepts it without a bearer header.
-- **Admin SSO** — optional `@cw/admin-bff` OIDC flow mints delegated CMA keys bound to roles
-  (see [Configuration](./configuration.md#admin-bff-oidc-sso)).
+- **Admin SSO** — optional `@cw/admin-auth` OIDC flow mints delegated CMA keys bound to roles
+  (see [Configuration](./configuration.md#admin-auth-oidc-sso)).
 
 ## The authorization decision
 

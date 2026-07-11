@@ -30,7 +30,7 @@ The `Dockerfile` builds one image for all Node services:
 | `migrator` | `@cw/migrator` | one-shot; applies Drizzle migrations before api/worker |
 | `api` | `@cw/api`, `ROLE=all` | http://localhost:8787 |
 | `admin` | `@cw/admin` | http://localhost:5173 — see [Admin UI](./admin-ui.md) |
-| `admin-bff` | `@cw/admin-bff` | http://localhost:8790 — optional OIDC SSO BFF |
+| `admin-auth` | `@cw/admin-auth` | http://localhost:8790 — optional OIDC SSO |
 | `worker` | `@cw/worker` | outbox relay + dispatch |
 
 Shared env: `DATABASE_URL=postgres://postgres:postgres@postgres:5432/contentworker`,
@@ -117,7 +117,7 @@ temporal:
   enabled: false        # optional bundled Temporal subchart for local/kind
 ```
 
-The admin SPA is **compose-only** today. **`admin-bff`** is optional in Helm (`adminBff.enabled`,
+The admin SPA is **compose-only** today. **`admin-auth`** is optional in Helm (`adminAuth.enabled`,
 off by default; enabled in `values-local.yaml`). Production admin UIs would be hosted separately
 (e.g. static assets behind ingress) and pointed at the
 Management API.

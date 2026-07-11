@@ -1,4 +1,4 @@
-import type { BffConfig } from './config.js';
+import type { AuthConfig } from './config.js';
 
 export interface MintedSessionKey {
   readonly token: string;
@@ -7,7 +7,7 @@ export interface MintedSessionKey {
 
 /** Mints a short-lived CMA key via the Management API (admin token). */
 export async function mintDelegatedKey(
-  config: BffConfig,
+  config: AuthConfig,
   subject: string,
   groups: readonly string[],
 ): Promise<MintedSessionKey> {
@@ -40,7 +40,7 @@ export async function mintDelegatedKey(
   return { token: body.token, keyId: body.id };
 }
 
-export async function revokeDelegatedKey(config: BffConfig, keyId: string): Promise<void> {
+export async function revokeDelegatedKey(config: AuthConfig, keyId: string): Promise<void> {
   await fetch(`${config.apiUrl}/spaces/${config.defaultSpace}/api-keys/${keyId}`, {
     method: 'DELETE',
     headers: { authorization: `Bearer ${config.adminToken}` },

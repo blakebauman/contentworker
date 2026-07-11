@@ -3,13 +3,13 @@ import { serve } from '@hono/node-server';
 import { type Context, Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import * as client from 'openid-client';
-import { loadBffConfig, oidcEnabled } from './config.js';
+import { loadAuthConfig, oidcEnabled } from './config.js';
 import { mintDelegatedKey, revokeDelegatedKey } from './delegated-key.js';
 import { type SessionPayload, decodeSession, encodeSession, sessionCookieName } from './session.js';
 
-startTelemetry('cw-admin-bff');
+startTelemetry('cw-admin-auth');
 
-const config = loadBffConfig();
+const config = loadAuthConfig();
 const app = new Hono();
 
 const pendingStates = new Map<string, { createdAt: number }>();
@@ -170,6 +170,6 @@ app.all('/api/*', async (c) => {
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   logger.info(
     { port: info.port, oidc: oidcEnabled(config), api: config.apiUrl },
-    'contentworker admin-bff listening',
+    'contentworker admin-auth listening',
   );
 });
