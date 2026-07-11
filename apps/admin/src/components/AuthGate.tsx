@@ -3,7 +3,7 @@ import { useClient } from '../lib/client-context.js';
 
 /** Redirects unauthenticated users to /connect before any app route loads. */
 export function AuthGate() {
-  const { conn, authReady, authenticated } = useClient();
+  const { authReady, authenticated } = useClient();
   const location = useLocation();
 
   if (!authReady) {
