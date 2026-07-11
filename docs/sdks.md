@@ -1,7 +1,9 @@
 # SDKs
 
-Five published client packages target the read-only **Delivery API** (plus an email connector).
-They share a model (`DeliveredEntry`, `SearchHit`) but differ in surface and footprint.
+Five published client packages target the read-only **Delivery API** (plus an email connector),
+and one — `@cw/sdk-management` — targets the **Management API** for programmatic authoring.
+The Delivery clients share a model (`DeliveredEntry`, `SearchHit`) but differ in surface and
+footprint.
 
 ## `@cw/sdk-core` — framework-agnostic Delivery client
 
@@ -105,6 +107,7 @@ client locale (no locale nesting).
 | Constrained devices, single-locale, minimal payload | `@cw/sdk-edge` |
 | React Native apps with offline sync | `@cw/sdk-react-native` |
 | Email campaigns from republished content | `@cw/sdk-email` |
+| Programmatic authoring/publishing (writes) | `@cw/sdk-management` |
 
 ## `@cw/sdk-react-native` — offline Delivery sync
 
@@ -124,11 +127,67 @@ integration — used by the `repurpose` agent workflow for content-to-newsletter
 import { createMailchimpConnector, mapEntryToCampaign } from '@cw/sdk-email';
 ```
 
+## `@cw/sdk-management` — Management (CMA) client
+
+Zero-dependency client for the Management API: content types, entries (draft → publish →
+version history), assets, releases, scheduled actions, webhooks, and space administration.
+Authenticate with a CMA key or the admin token — the server enforces RBAC scopes per
+operation, so the client is only as powerful as its token.
+
+```ts
+import { createManagementClient } from '@cw/sdk-management';
+
+const cma = createManagementClient({
+  baseUrl: 'https://cms.example.com',
+  space: 'space-1',
+  environment: 'main',
+  token: '<cma-token>',
+  fetch, // optional: inject a fetch (SSR/edge/test)
+});
+```
+
+The surface is namespaced; every method maps 1:1 onto a Management route:
+
+```ts
+cma.me()                                              // principal probe (/auth/me)
+
+cma.contentTypes.list() / .get(apiId) / .create(draft) / .publish(apiId)
+
+cma.entries.create({ contentTypeApiId, fields })      // fields are locale-keyed
+cma.entries.get(id) / .update(id, fields)             // update = new draft version
+cma.entries.publish(id) / .unpublish(id)
+cma.entries.bulkCreate(items) / .bulkPublish(ids) / .bulkUnpublish(ids)
+cma.entries.reverseReferences(id)                     // "what links here"
+cma.entries.versions.list(id) / .get(id, v) / .diff(id, from, to) / .restore(id, v)
+
+cma.assets.create({ fileName, contentType })          // → { asset, upload } (presigned PUT)
+cma.assets.list() / .get(id) / .setMetadata(id, patch) / .usage(id)
+cma.assets.publish(id) / .unpublish(id)
+
+cma.webhooks.list() / .create(input) / .update(id, patch) / .delete(id) / .deliveries(id)
+
+cma.releases.create({ title }) / .addEntry(id, { entityId }) / .removeEntry(id, entityId)
+cma.releases.list() / .get(id) / .publish(id) / .delete(id)
+
+cma.scheduledActions.list({ status? }) / .create(input) / .cancel(id)
+
+cma.environments.list() / .create(id, name)           // space-level
+cma.environments.aliases.list() / .set(alias, envId) / .delete(alias)
+cma.apiKeys.list() / .create({ kind, name }) / .revoke(id)   // admin scope
+```
+
+- Entry `fields` use the Management shape: field apiId → locale → value
+  (e.g. `{ title: { 'en-US': 'Hello' } }`).
+- `assets.create` returns a presigned upload target: PUT the bytes to `upload.url` with
+  `upload.headers`, then `assets.publish(id)` to make it deliverable.
+- `apiKeys.create` returns the raw token exactly once; only its hash is stored.
+- Failed requests throw `ManagementError` with `status` and the parsed error `body`.
+
 ## Choosing a client
 
-All five published client packages are **read-only** Delivery clients except `@cw/sdk-email`,
-which orchestrates outbound email from delivered content. For writes/publishing, call the
-Management API directly or drive the MCP tools.
+The five Delivery packages are **read-only** clients, except `@cw/sdk-email`, which
+orchestrates outbound email from delivered content. For writes/publishing, use
+`@cw/sdk-management`, call the Management API directly, or drive the MCP tools.
 
 ## GraphQL
 
