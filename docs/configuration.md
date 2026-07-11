@@ -41,20 +41,30 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `AUTH_RATE_LIMIT_MAX` | `10` | Failed auth attempts per IP before HTTP 429 |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit sliding window (ms) |
 
-### Admin BFF (OIDC SSO)
+### Admin auth (OIDC SSO on `@cw/api`)
+
+OIDC routes mount on the Management API when `ROLE=all` or `management`:
+
+| Route | Purpose |
+| --- | --- |
+| `GET /auth/oidc/login` | Redirect to IdP |
+| `GET /auth/oidc/callback` | PKCE callback; sets httpOnly session cookie |
+| `POST /auth/logout` | Revokes delegated key + clears cookie |
+| `GET /auth/me` | Principal probe (bearer or session cookie) |
 
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `OIDC_ISSUER` | — | OIDC provider issuer URL |
 | `OIDC_CLIENT_ID` | — | OAuth client id |
 | `OIDC_CLIENT_SECRET` | — | OAuth client secret |
-| `OIDC_REDIRECT_URI` | — | Callback URL (BFF `/auth/callback`) |
+| `OIDC_REDIRECT_URI` | — | Callback URL (`/auth/oidc/callback` on the API origin) |
 | `OIDC_DEFAULT_SPACE` | `space-1` | Space for delegated CMA keys |
 | `OIDC_GROUP_ROLE_MAP` | `{}` | JSON map of IdP group → role id |
 | `SESSION_SECRET` | — | HMAC secret for the httpOnly session cookie |
 | `SESSION_TTL_HOURS` | `8` | Session lifetime |
+| `ADMIN_UI_URL` | `http://localhost:5173/dashboard` | Post-login redirect |
 
-Admin SPA: set `VITE_SSO_LOGIN_URL` to the BFF `/auth/login` URL to show **Sign in with SSO**.
+Admin SPA: proxied `/auth/oidc/login` works same-origin in dev; optional `VITE_SSO_LOGIN_URL` override.
 
 In Postgres mode these seeds are not used; create real keys via `POST …/api-keys`.
 

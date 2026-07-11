@@ -67,6 +67,14 @@ services:
       # real model; unset, the API falls back to a dev stub that returns placeholders.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      SESSION_SECRET: dev-session-secret-not-for-production
+      ADMIN_UI_URL: http://localhost:5173/dashboard
+      OIDC_DEFAULT_SPACE: space-1
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:5173/auth/oidc/callback}
+      OIDC_GROUP_ROLE_MAP: ${OIDC_GROUP_ROLE_MAP:-{}}
     ports:
       - "8787:8787"
     depends_on:
@@ -86,6 +94,7 @@ services:
     environment:
       CW_API_URL: http://api:8787
       CW_ADMIN_PORT: "5173"
+      VITE_SSO_LOGIN_URL: ${VITE_SSO_LOGIN_URL:-}
     ports:
       - "5173:5173"
     depends_on:

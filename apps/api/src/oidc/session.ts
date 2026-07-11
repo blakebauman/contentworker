@@ -48,14 +48,3 @@ export function decodeSession(raw: string | undefined, secret: string): SessionP
     return null;
   }
 }
-
-export function sessionCookieOptions(maxAgeSec: number, secure: boolean): string {
-  const parts = [
-    `Max-Age=${maxAgeSec}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    secure ? 'Secure' : '',
-  ].filter(Boolean);
-  return parts.join('; ');
-}

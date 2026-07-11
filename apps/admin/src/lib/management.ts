@@ -371,12 +371,14 @@ export function createManagementClient(
   const mgmt = `${root}/spaces/${conn.space}/environments/${conn.environment}`;
   const preview = `${root}/preview/${conn.space}/${conn.environment}`;
   const delivery = `${root}/delivery/${conn.space}/${conn.environment}`;
-  const headers = { authorization: `Bearer ${conn.token}`, 'content-type': 'application/json' };
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (conn.token.trim()) headers.authorization = `Bearer ${conn.token}`;
 
   async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
     const res = await fetchImpl(url, {
       method,
       headers,
+      credentials: 'include',
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!res.ok) {

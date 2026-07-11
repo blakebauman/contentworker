@@ -55,11 +55,6 @@ export function ClientProvider(props: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    if (!conn.token.trim()) {
-      setAuthenticated(false);
-      setAuthReady(true);
-      return;
-    }
     setAuthReady(false);
     client
       .getPrincipal()
@@ -75,7 +70,7 @@ export function ClientProvider(props: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [client, conn.token]);
+  }, [client]);
 
   const run = useCallback(
     async (fn: () => Promise<void>) => {

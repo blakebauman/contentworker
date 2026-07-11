@@ -18,6 +18,8 @@ services:
     environment:
       CW_API_URL: http://api:8787
       CW_ADMIN_PORT: "5173"
+      # Set OIDC_* in .env when enabling SSO on the API (see docs/configuration.md).
+      VITE_SSO_LOGIN_URL: ${VITE_SSO_LOGIN_URL:-}
       # Poll the bind-mounted filesystem so HMR sees host edits (see vite.config.ts).
       VITE_USE_POLLING: "true"
     volumes:

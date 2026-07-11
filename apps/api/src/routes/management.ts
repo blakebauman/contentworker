@@ -163,8 +163,6 @@ const BASE = '/spaces/:space/environments/:env';
 export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   const { ctx, hasher, blob, ai, rag, agents } = deps;
   const app = new Hono<AuthVars>();
-  app.use('/auth', principalMiddleware(deps));
-  app.use('/auth/*', principalMiddleware(deps));
   app.use('/spaces', principalMiddleware(deps));
   app.use('/spaces/*', principalMiddleware(deps));
   // Resolve environment aliases for any scoped (:env) route.
@@ -172,8 +170,8 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   // Record successful mutations to the append-only audit trail.
   app.use('/spaces/:space/*', auditMiddleware(deps));
 
-  /** Lightweight principal probe for admin connection UI and BFF sessions. */
-  app.get('/auth/me', (c) => {
+  /** Lightweight principal probe for admin connection UI and SSO sessions. */
+  app.get('/auth/me', principalMiddleware(deps), (c) => {
     const principal = c.get('principal');
     return c.json({
       spaceId: principal.spaceId,

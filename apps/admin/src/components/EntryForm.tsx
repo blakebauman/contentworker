@@ -11,7 +11,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import type { ContentType, EntryFields, FieldDefinition } from '@cw/domain';
+import type { ContentType, EntryFields, FieldDefinition, LocaleConfig } from '@cw/domain';
+import { fallbackChain, resolveLocalizedValue, validateEntryFields } from '@cw/domain';
 import { useMemo, useState } from 'react';
 import type { AppExtension } from '../lib/management.js';
 import { ExtensionFrame } from './ExtensionFrame.js';
@@ -35,6 +36,77 @@ export interface Pickers {
 
 /** Per-field, per-locale working state: `{ apiId: { locale: value } }`. */
 type Values = Record<string, Record<string, unknown>>;
+
+/** Per-field, per-locale validation messages from the domain validator. */
+type FieldErrors = Record<string, string>;
+
+function errorKey(apiId: string, locale: string): string {
+  return `${apiId}:${locale}`;
+}
+
+function fieldsFromValues(
+  contentType: ContentType,
+  values: Values,
+  locales: readonly string[],
+  defaultLocale: string,
+): EntryFields {
+  const out: EntryFields = {};
+  for (const f of contentType.fields) {
+    const byLocale = values[f.apiId] ?? {};
+    const fieldLocales = f.localized ? locales : [defaultLocale];
+    const cleaned: Record<string, unknown> = {};
+    for (const loc of fieldLocales) {
+      const v = byLocale[loc];
+      if (v !== undefined && v !== '') cleaned[loc] = v;
+    }
+    if (Object.keys(cleaned).length > 0) out[f.apiId] = cleaned;
+  }
+  return out;
+}
+
+function issuesToErrors(
+  issues: ReturnType<typeof validateEntryFields>,
+  defaultLocale: string,
+): FieldErrors {
+  const out: FieldErrors = {};
+  for (const issue of issues) {
+    const locale = issue.locale ?? defaultLocale;
+    out[errorKey(issue.field, locale)] = issue.message;
+  }
+  return out;
+}
+
+function formatFallbackPreview(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.length > 80 ? `${value.slice(0, 77)}…` : value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '…';
+}
+
+function fallbackHint(
+  field: FieldDefinition,
+  values: Values,
+  locale: string,
+  localeConfig: LocaleConfig,
+): string | undefined {
+  if (!field.localized || locale === localeConfig.defaultLocale) return undefined;
+  const byLocale = values[field.apiId] ?? {};
+  const current = byLocale[locale];
+  if (current !== undefined && current !== '') return undefined;
+
+  const resolved = resolveLocalizedValue(byLocale, localeConfig, locale);
+  if (resolved === undefined) return undefined;
+
+  for (const loc of fallbackChain(localeConfig, locale)) {
+    if (loc === locale) continue;
+    const v = byLocale[loc];
+    if (v !== undefined && v !== null && v !== '') {
+      return `Falls back to ${loc}: ${formatFallbackPreview(v)}`;
+    }
+  }
+  return undefined;
+}
 
 const cloneInitial = (initial: EntryFields): Values => {
   const out: Values = {};
@@ -62,6 +134,7 @@ export function EntryForm(props: {
   initial: EntryFields;
   locales: readonly string[];
   defaultLocale: string;
+  fallbacks?: Readonly<Record<string, string | null>>;
   pickers: Pickers;
   /** Installed custom field editors; the first matching a field's type replaces its input. */
   fieldEditors?: readonly AppExtension[];
@@ -70,27 +143,40 @@ export function EntryForm(props: {
   onSave: (fields: EntryFields) => void;
   onCancel: () => void;
 }) {
-  const { contentType, locales, defaultLocale, fieldEditors } = props;
+  const { contentType, locales, defaultLocale, fallbacks, fieldEditors } = props;
   const [values, setValues] = useState<Values>(() => cloneInitial(props.initial));
   const [activeLocale, setActiveLocale] = useState(defaultLocale);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const hasLocalized = useMemo(() => contentType.fields.some((f) => f.localized), [contentType]);
 
-  const set = (apiId: string, locale: string, v: unknown) =>
+  const localeConfig = useMemo<LocaleConfig>(
+    () => ({ defaultLocale, locales, fallbacks }),
+    [defaultLocale, locales, fallbacks],
+  );
+
+  const set = (apiId: string, locale: string, v: unknown) => {
+    setFieldErrors((prev) => {
+      const key = errorKey(apiId, locale);
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
     setValues((p) => ({ ...p, [apiId]: { ...p[apiId], [locale]: v } }));
+  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const out: EntryFields = {};
-    for (const f of contentType.fields) {
-      const byLocale = values[f.apiId] ?? {};
-      const fieldLocales = f.localized ? locales : [defaultLocale];
-      const cleaned: Record<string, unknown> = {};
-      for (const loc of fieldLocales) {
-        const v = byLocale[loc];
-        if (v !== undefined && v !== '') cleaned[loc] = v;
-      }
-      if (Object.keys(cleaned).length > 0) out[f.apiId] = cleaned;
+    const out = fieldsFromValues(contentType, values, locales, defaultLocale);
+    const issues = validateEntryFields(contentType, out, {
+      defaultLocale,
+      locales,
+    });
+    if (issues.length > 0) {
+      setFieldErrors(issuesToErrors(issues, defaultLocale));
+      return;
     }
+    setFieldErrors({});
     props.onSave(out);
   };
 
@@ -122,6 +208,11 @@ export function EntryForm(props: {
             const locale = f.localized ? activeLocale : defaultLocale;
             if (!f.localized && activeLocale !== defaultLocale) return null;
             const id = `field-${f.apiId}`;
+            const err = fieldErrors[errorKey(f.apiId, locale)];
+            const hint =
+              f.localized && locales.length > 1
+                ? fallbackHint(f, values, locale, localeConfig)
+                : undefined;
             return (
               <div className="space-y-1.5" key={f.apiId}>
                 <Label htmlFor={id} className="gap-1">
@@ -136,6 +227,7 @@ export function EntryForm(props: {
                   id={id}
                   field={f}
                   value={values[f.apiId]?.[locale]}
+                  invalid={Boolean(err)}
                   pickers={props.pickers}
                   editor={fieldEditors?.find(
                     (e) =>
@@ -145,6 +237,8 @@ export function EntryForm(props: {
                   locale={locale}
                   onChange={(v) => set(f.apiId, locale, v)}
                 />
+                {hint && !err && <p className="text-xs text-muted-foreground">{hint}</p>}
+                {err && <p className="text-xs text-destructive">{err}</p>}
               </div>
             );
           })}
@@ -167,13 +261,15 @@ function FieldInput(props: {
   id: string;
   field: FieldDefinition;
   value: unknown;
+  invalid?: boolean;
   pickers: Pickers;
   editor?: AppExtension;
   editorContext?: EntryContext;
   locale: string;
   onChange: (v: unknown) => void;
 }) {
-  const { id, field, value, onChange, pickers, editor, editorContext, locale } = props;
+  const { id, field, value, invalid, onChange, pickers, editor, editorContext, locale } = props;
+  const inputClass = invalid ? 'border-destructive focus-visible:ring-destructive/30' : undefined;
 
   // A custom field editor extension takes over the input entirely (sandboxed iframe).
   if (editor) {
@@ -208,7 +304,7 @@ function FieldInput(props: {
         value={currentId || NONE}
         onValueChange={(v) => onChange(v === NONE ? undefined : { id: v, linkType })}
       >
-        <SelectTrigger id={id}>
+        <SelectTrigger id={id} className={inputClass}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -239,6 +335,7 @@ function FieldInput(props: {
     return (
       <Input
         id={id}
+        className={inputClass}
         type="number"
         value={value === undefined || value === null ? '' : String(value)}
         onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
@@ -249,6 +346,7 @@ function FieldInput(props: {
     return (
       <Input
         id={id}
+        className={inputClass}
         type="date"
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
@@ -259,6 +357,7 @@ function FieldInput(props: {
     return (
       <Textarea
         id={id}
+        className={inputClass}
         rows={4}
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
@@ -269,6 +368,7 @@ function FieldInput(props: {
     return (
       <Input
         id={id}
+        className={inputClass}
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -278,6 +378,7 @@ function FieldInput(props: {
   return (
     <Textarea
       id={id}
+      className={inputClass}
       rows={3}
       placeholder="JSON value"
       defaultValue={value === undefined ? '' : JSON.stringify(value)}

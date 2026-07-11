@@ -9,9 +9,11 @@ import type { AgentRunner, AppContext, RagDeps } from '@cw/application';
 import { type PermissionScope, type Principal, authorize, scopesForKind } from '@cw/domain';
 import type { AIProvider, BlobStore, EventBus, Hasher } from '@cw/ports';
 import { logger } from '@cw/telemetry';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
+import { getCookie } from 'hono/cookie';
 import { HTTPException } from 'hono/http-exception';
 import { AuthRateLimiter, clientIp } from './auth-rate-limit.js';
+import { decodeSession, sessionCookieName } from './oidc/session.js';
 
 /** Default SHA-256 hasher (no pepper). Prefer {@link createApiHasher} in production. */
 export const sha256Hasher = createHasher();
@@ -43,6 +45,8 @@ export interface AuthDeps {
   readonly agents: AgentRunner;
   /** Domain-event source for the Live Content API (SSE). */
   readonly bus: EventBus;
+  /** Validates admin SSO session cookies when no bearer token is sent. */
+  readonly sessionSecret?: string;
 }
 
 const ADMIN: Principal = {
@@ -69,10 +73,20 @@ async function resolvePrincipal(deps: AuthDeps, token: string): Promise<Principa
   return authenticate(deps.ctx, deps.hasher, token);
 }
 
+function resolveRequestToken(deps: AuthDeps, c: Context): string {
+  const bearer = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  if (bearer) return bearer;
+  if (deps.sessionSecret) {
+    const session = decodeSession(getCookie(c, sessionCookieName()), deps.sessionSecret);
+    if (session) return session.apiToken;
+  }
+  return '';
+}
+
 /**
- * Resolves the bearer token to a Principal and stores it on the context. The
- * admin token short-circuits to a wildcard principal; everything else is looked
- * up as a hashed API key.
+ * Resolves the bearer token (or admin SSO session cookie) to a Principal and
+ * stores it on the context. The admin token short-circuits to a wildcard
+ * principal; everything else is looked up as a hashed API key.
  */
 export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars> {
   return async (c, next) => {
@@ -82,7 +96,7 @@ export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars>
       throw new HTTPException(429, { message: 'Too many authentication attempts' });
     }
 
-    const token = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const token = resolveRequestToken(deps, c);
     try {
       const principal = await resolvePrincipal(deps, token);
       authRateLimiter.clear(ip);

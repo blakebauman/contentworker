@@ -6,7 +6,11 @@ import { useClient } from '../lib/client-context.js';
 import type { SpaceConfig } from '../lib/management.js';
 import type { ContentOutlet } from './content-context.js';
 
-type LocaleConfig = { locales: readonly string[]; defaultLocale: string };
+type LocaleConfig = {
+  locales: readonly string[];
+  defaultLocale: string;
+  fallbacks?: Readonly<Record<string, string | null>>;
+};
 
 /**
  * Content section shell: a secondary nav listing the space's content types,
@@ -29,7 +33,12 @@ export function ContentLayout() {
           client.getSpaceConfig().catch((): SpaceConfig | null => null),
         ]);
         setTypes(ts);
-        if (cfg) setLocaleCfg({ locales: cfg.locales, defaultLocale: cfg.defaultLocale });
+        if (cfg)
+          setLocaleCfg({
+            locales: cfg.locales,
+            defaultLocale: cfg.defaultLocale,
+            fallbacks: cfg.fallbacks,
+          });
       }),
     [client, run],
   );
@@ -42,6 +51,7 @@ export function ContentLayout() {
     types,
     locales: localeCfg.locales,
     defaultLocale: localeCfg.defaultLocale,
+    fallbacks: localeCfg.fallbacks,
     reload,
   };
 

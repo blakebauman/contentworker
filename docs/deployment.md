@@ -116,8 +116,9 @@ temporal:
   enabled: false        # optional bundled Temporal subchart for local/kind
 ```
 
-The admin SPA is **compose-only** today — there is no Helm workload for it. Production
-admin UIs would be hosted separately (e.g. static assets behind ingress) and pointed at the
+The admin SPA is **compose-only** today (no Helm workload). OIDC SSO is configured on the **API**
+(`OIDC_*`, `SESSION_SECRET`, `ADMIN_UI_URL`). Production admin UIs would be hosted separately
+(e.g. static assets behind ingress) and pointed at the
 Management API.
 
 ### Agents & Temporal

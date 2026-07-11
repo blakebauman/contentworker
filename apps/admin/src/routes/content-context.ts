@@ -6,6 +6,7 @@ export interface ContentOutlet {
   readonly types: ContentType[];
   readonly locales: readonly string[];
   readonly defaultLocale: string;
+  readonly fallbacks?: Readonly<Record<string, string | null>>;
   reload(): void;
 }
 

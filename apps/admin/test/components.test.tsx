@@ -64,6 +64,48 @@ describe('EntryForm localization tabs', () => {
   });
 });
 
+describe('EntryForm validation and fallbacks', () => {
+  it('shows a validation error for a required field on save', () => {
+    const requiredType: ContentType = {
+      ...contentType,
+      fields: [field({ apiId: 'title', name: 'Title', localized: true, required: true })],
+    };
+    const onSave = vi.fn();
+    render(
+      <EntryForm
+        contentType={requiredType}
+        initial={{}}
+        locales={['en-US']}
+        defaultLocale="en-US"
+        pickers={{ entries: [], assets: [] }}
+        onSave={onSave}
+        onCancel={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByText('Field is required')).not.toBeNull();
+  });
+
+  it('shows a fallback hint when a locale inherits from the default', () => {
+    const onSave = vi.fn();
+    render(
+      <EntryForm
+        contentType={contentType}
+        initial={{ title: { 'en-US': 'Hello' } }}
+        locales={['en-US', 'de-DE']}
+        defaultLocale="en-US"
+        fallbacks={{ 'de-DE': 'en-US' }}
+        pickers={{ entries: [], assets: [] }}
+        onSave={onSave}
+        onCancel={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'de-DE' }));
+    expect(screen.getByText(/Falls back to en-US: Hello/)).not.toBeNull();
+  });
+});
+
 describe('toasts', () => {
   function Probe() {
     const toast = useToast();

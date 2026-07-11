@@ -34,12 +34,27 @@ export interface ApiConfig {
     defaultLocale: string;
     locales: string[];
   };
+  /** HMAC secret for admin SSO session cookies. */
+  readonly sessionSecret: string;
+  readonly sessionTtlHours: number;
+  /** Post-login redirect for OIDC (admin SPA URL). */
+  readonly adminUiUrl: string;
+  readonly oidcDefaultSpace: string;
+  readonly oidcIssuer?: string;
+  readonly oidcClientId?: string;
+  readonly oidcClientSecret?: string;
+  readonly oidcRedirectUri?: string;
+  readonly oidcGroupRoleMap: Record<string, string>;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const role = (env.ROLE ?? 'all') as Role;
-  if (!['all', 'management', 'delivery', 'preview'].includes(role)) {
+  if (!['all', 'management', 'preview', 'delivery'].includes(role)) {
     throw new Error(`Invalid ROLE "${role}"`);
+  }
+  let oidcGroupRoleMap: Record<string, string> = {};
+  if (env.OIDC_GROUP_ROLE_MAP) {
+    oidcGroupRoleMap = JSON.parse(env.OIDC_GROUP_ROLE_MAP) as Record<string, string>;
   }
   return {
     role,
@@ -58,5 +73,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       defaultLocale: env.SEED_DEFAULT_LOCALE ?? 'en-US',
       locales: (env.SEED_LOCALES ?? 'en-US').split(',').map((s) => s.trim()),
     },
+    sessionSecret: env.SESSION_SECRET ?? 'dev-session-secret-change-me-in-production',
+    sessionTtlHours: Number(env.SESSION_TTL_HOURS ?? 8),
+    adminUiUrl: env.ADMIN_UI_URL ?? 'http://localhost:5173/dashboard',
+    oidcDefaultSpace: env.OIDC_DEFAULT_SPACE ?? env.SEED_SPACE_ID ?? 'space-1',
+    oidcIssuer: env.OIDC_ISSUER,
+    oidcClientId: env.OIDC_CLIENT_ID,
+    oidcClientSecret: env.OIDC_CLIENT_SECRET,
+    oidcRedirectUri: env.OIDC_REDIRECT_URI,
+    oidcGroupRoleMap,
   };
 }
