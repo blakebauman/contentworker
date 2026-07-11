@@ -27,7 +27,7 @@ export function EntryEditor() {
   const navigate = useNavigate();
   const toast = useToast();
   const { client, conn, busy, run } = useClient();
-  const { types, locales, defaultLocale } = useContentOutlet();
+  const { types, locales, defaultLocale, fallbacks } = useContentOutlet();
 
   const isEdit = Boolean(entryId);
   const selectedType = types.find((t) => t.apiId === typeId);
@@ -187,6 +187,7 @@ export function EntryEditor() {
           initial={initial}
           locales={locales}
           defaultLocale={defaultLocale}
+          fallbacks={fallbacks}
           pickers={pickers}
           fieldEditors={extensions.filter((e) => e.target === 'field-editor')}
           entryContext={{

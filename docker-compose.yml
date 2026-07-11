@@ -86,6 +86,7 @@ services:
     environment:
       CW_API_URL: http://api:8787
       CW_ADMIN_PORT: "5173"
+      VITE_SSO_LOGIN_URL: ${VITE_SSO_LOGIN_URL:-}
     ports:
       - "5173:5173"
     depends_on:
@@ -101,6 +102,28 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+
+  # OIDC SSO backend-for-frontend. Optional: set OIDC_* in .env to enable Sign in with SSO
+  # on the admin connect screen (VITE_SSO_LOGIN_URL=http://localhost:8790/auth/login).
+  admin-bff:
+    build: .
+    command: ["pnpm", "--filter", "@cw/admin-bff", "start"]
+    environment:
+      PORT: "8790"
+      CW_API_URL: http://api:8787
+      ADMIN_TOKEN: dev-admin-token
+      SESSION_SECRET: dev-session-secret-not-for-production
+      OIDC_DEFAULT_SPACE: space-1
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:8790/auth/callback}
+      OIDC_GROUP_ROLE_MAP: ${OIDC_GROUP_ROLE_MAP:-{}}
+    ports:
+      - "8790:8790"
+    depends_on:
+      api:
+        condition: service_started
 
 volumes:
   pgdata:

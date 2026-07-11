@@ -20,6 +20,11 @@ secrets:
     REDIS_URL: "redis://cw-contentworker-redis:6379"
     ADMIN_TOKEN: "dev-admin-token"
     MCP_TOKEN: "dev-mcp-token"
+    SESSION_SECRET: "dev-session-secret-not-for-production"
+
+adminBff:
+  enabled: true
+  # Set OIDC_* via adminBff.extraEnv or External Secrets when wiring a real IdP.
 
 api:
   replicas: 1

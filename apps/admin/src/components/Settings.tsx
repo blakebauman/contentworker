@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { KeyRound } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useClient } from '../lib/client-context.js';
 import {
   type ApiKeyKind,
@@ -379,6 +379,7 @@ const KEY_KINDS: { value: ApiKeyKind; label: string }[] = [
   { value: 'cpa', label: 'CPA — Preview (read drafts)' },
   { value: 'cma', label: 'CMA — Management (full author/publish)' },
 ];
+const ROLE_NONE = '__none__';
 
 function RolesSettings(props: { client: ManagementClient }) {
   const toast = useToast();
@@ -474,15 +475,24 @@ function ApiKeys(props: { client: ManagementClient }) {
   const { client } = props;
   const toast = useToast();
   const [keys, setKeys] = useState<ApiKeySummary[]>([]);
+  const [roles, setRoles] = useState<RoleSummary[]>([]);
   const [kind, setKind] = useState<ApiKeyKind>('cda');
+  const [roleId, setRoleId] = useState<string>(ROLE_NONE);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   // The raw token is shown exactly once, right after minting.
   const [minted, setMinted] = useState<CreatedApiKey>();
 
+  const roleName = useMemo(() => {
+    const byId = new Map(roles.map((r) => [r.id, r.name]));
+    return (id?: string) => (id ? (byId.get(id) ?? id) : undefined);
+  }, [roles]);
+
   const load = useCallback(async () => {
     try {
-      setKeys(await client.listApiKeys());
+      const [keyItems, roleItems] = await Promise.all([client.listApiKeys(), client.listRoles()]);
+      setKeys(keyItems);
+      setRoles(roleItems);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -496,9 +506,14 @@ function ApiKeys(props: { client: ManagementClient }) {
     e.preventDefault();
     setBusy(true);
     try {
-      const created = await client.createApiKey({ kind, name: name.trim() || undefined });
+      const created = await client.createApiKey({
+        kind,
+        name: name.trim() || undefined,
+        roleId: roleId === ROLE_NONE ? undefined : roleId,
+      });
       setMinted(created);
       setName('');
+      setRoleId(ROLE_NONE);
       await load();
       toast.success(`${created.kind.toUpperCase()} key created`);
     } catch (err) {
@@ -560,6 +575,19 @@ function ApiKeys(props: { client: ManagementClient }) {
               ))}
             </SelectContent>
           </Select>
+          <Select value={roleId} onValueChange={setRoleId}>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="Role (optional)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ROLE_NONE}>No custom role</SelectItem>
+              {roles.map((r) => (
+                <SelectItem key={r.id} value={r.id}>
+                  {r.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Input
             className="w-48"
             placeholder="Name (optional)"
@@ -576,6 +604,7 @@ function ApiKeys(props: { client: ManagementClient }) {
             <TableRow>
               <TableHead className="w-20">Kind</TableHead>
               <TableHead>Name</TableHead>
+              <TableHead>Role</TableHead>
               <TableHead>Scopes</TableHead>
               <TableHead className="w-24">Status</TableHead>
               <TableHead className="w-24" />
@@ -588,6 +617,9 @@ function ApiKeys(props: { client: ManagementClient }) {
                   <Badge variant="outline">{k.kind.toUpperCase()}</Badge>
                 </TableCell>
                 <TableCell>{k.name ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {k.roleId ? roleName(k.roleId) : '—'}
+                </TableCell>
                 <TableCell className="text-muted-foreground">
                   <div className="max-w-[360px] truncate" title={k.scopes.join(', ')}>
                     {k.scopes.join(', ')}
@@ -608,7 +640,7 @@ function ApiKeys(props: { client: ManagementClient }) {
             ))}
             {keys.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
+                <TableCell colSpan={6} className="text-muted-foreground">
                   No API keys yet.
                 </TableCell>
               </TableRow>

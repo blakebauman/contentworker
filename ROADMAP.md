@@ -32,14 +32,13 @@ delivery SDK family (`@cw/sdk-core`/`web`/`edge`/`react-native`/`email`), the ad
 
 Remaining admin work:
 
-- [ ] **Inline validation surfacing** in entry forms (required/min/max/regex errors at the
-  field) + **locale fallback hints** (fallbacks are already fetched via space-config but
-  never shown).
-- [ ] **Preview-link sharing** — generate/copy a preview URL (and mint a preview token)
+- [x] **Inline validation surfacing** in entry forms (required/min/max/regex errors at the
+  field) + **locale fallback hints** (fallback chain from space-config shown on empty locales).
+- [x] **Preview-link sharing** — generate/copy a preview URL (and mint a preview token)
   from an entry.
-- [ ] **Role editing UI** — the platform side (granular RBAC, below) is done; build the
-  admin surface for role CRUD + assigning roles when minting keys.
-- [ ] **OIDC/JWT auth** instead of raw bearer tokens — needs an auth-provider decision.
+- [x] **Role editing UI** — role CRUD in Settings + assign a custom role when minting keys.
+- [x] **OIDC/JWT auth** — `@cw/admin-bff` (authorization code + PKCE, httpOnly session,
+  delegated CMA keys); bearer-token connect gate remains the default for local/dev.
 
 ## Platform / SDK
 
@@ -84,7 +83,8 @@ Remaining admin work:
   `TEST_DATABASE_URL`/`TEST_REDIS_URL`), admin build.
 - [ ] **OTel metrics** (tracing exists; no meters/counters/histograms) +
   Prometheus/Grafana dashboards; KEDA queue-depth autoscaling for the worker (HPA only).
-- [ ] **Rate limiting** + request-size limits at the API edge.
+- [ ] **Rate limiting** + request-size limits at the API edge. _(Bearer auth rate limiting
+  and production secret guards shipped in #57; edge-wide limits remain.)_
 - [ ] **External Secrets** — docs and per-cloud Helm values exist; add
   `ExternalSecret`/`SecretStore` templates to the chart and produce a live multi-cloud
   deploy proof.
