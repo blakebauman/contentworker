@@ -1,7 +1,6 @@
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import {
   assertSecureSecrets,
-  createHasher,
   requireSecureSecretsFromEnv,
   secureTokenEqual,
 } from '@cw/application';

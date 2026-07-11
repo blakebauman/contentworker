@@ -5,9 +5,9 @@ import {
   resolveEnvironment,
   secureTokenEqual,
 } from '@cw/application';
-import type { AgentRunner, AppContext } from '@cw/application';
+import type { AgentRunner, AppContext, RagDeps } from '@cw/application';
 import { type PermissionScope, type Principal, authorize, scopesForKind } from '@cw/domain';
-import type { AIProvider, BlobStore, EventBus, Hasher, RagDeps } from '@cw/ports';
+import type { AIProvider, BlobStore, EventBus, Hasher } from '@cw/ports';
 import { logger } from '@cw/telemetry';
 import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';

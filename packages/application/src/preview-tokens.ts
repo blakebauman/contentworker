@@ -28,7 +28,7 @@ export async function createPreviewLink(
   entryId: string,
   input: CreatePreviewLinkInput,
 ): Promise<PreviewLink> {
-  const view = await getEntry(ctx, scope, entryId);
+  await getEntry(ctx, scope, entryId);
 
   const ttlHours = input.ttlHours ?? DEFAULT_TTL_HOURS;
   const expiresAt = new Date(ctx.clock.now());

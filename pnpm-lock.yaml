@@ -584,6 +584,9 @@ importers:
       '@cw/test-kit':
         specifier: workspace:*
         version: link:../test-kit
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.0
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(@swc/core@1.15.43)(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)
