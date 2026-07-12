@@ -59,7 +59,7 @@ extension — Neon has it).
 
 ```bash
 docker compose up -d postgres            # or any local Postgres with pgvector
-DATABASE_URL=postgres://cw:cw@localhost:5432/contentworker pnpm --filter @cw/migrator start
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/contentworker pnpm --filter @cw/migrator start
 pnpm --filter @cw/edge dev               # miniflare emulates KV/Queues/DO/Workflows/Vectorize;
                                          # Hyperdrive uses localConnectionString from wrangler.jsonc
 pnpm --filter @cw/edge exec wrangler dev -e demo   # zero-infra demo (in-memory store, dev keys)

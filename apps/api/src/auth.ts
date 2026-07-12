@@ -104,13 +104,21 @@ export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars>
       c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for'),
       c.req.header('x-real-ip'),
     );
+    // No credentials presented → plain 401 with no limiter interaction: an
+    // empty bearer can't brute-force anything, and unauthenticated probes
+    // (e.g. the admin SPA checking for a session) must never exhaust the IP's
+    // failure budget.
+    const token = resolveRequestToken(deps, c);
+    if (!token) {
+      throw new HTTPException(401, { message: 'Invalid or missing API key' });
+    }
+
     const limiter = deps.rateLimiter ?? authRateLimiter;
     if (await limiter.isBlocked(ip)) {
       logger.warn({ ip, path: c.req.path }, 'auth: rate limit exceeded');
       throw new HTTPException(429, { message: 'Too many authentication attempts' });
     }
 
-    const token = resolveRequestToken(deps, c);
     try {
       const principal = await resolvePrincipal(deps, token);
       await limiter.clear(ip);
