@@ -106,6 +106,48 @@ describe('EntryForm validation and fallbacks', () => {
   });
 });
 
+describe('EntryForm rich text', () => {
+  // Interaction coverage (typing, toolbar, embeds) lives in the Playwright e2e
+  // suite — ProseMirror selection/input is unreliable under jsdom.
+  it('mounts the Tiptap editor and renders an existing document', () => {
+    const richType: ContentType = {
+      ...contentType,
+      fields: [field({ apiId: 'body', name: 'Body', type: 'RichText' })],
+    };
+    render(
+      <EntryForm
+        contentType={richType}
+        initial={{
+          body: {
+            'en-US': {
+              nodeType: 'document',
+              content: [
+                {
+                  nodeType: 'heading-1',
+                  content: [{ nodeType: 'text', value: 'Stored title', marks: [] }],
+                },
+                {
+                  nodeType: 'paragraph',
+                  content: [{ nodeType: 'text', value: 'Stored body text', marks: [] }],
+                },
+              ],
+            },
+          },
+        }}
+        locales={['en-US']}
+        defaultLocale="en-US"
+        pickers={{ entries: [], assets: [] }}
+        onSave={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByText('Stored title')).not.toBeNull();
+    expect(screen.getByText('Stored body text')).not.toBeNull();
+    // Formatting toolbar is present.
+    expect(screen.getByRole('button', { name: 'Bold' })).not.toBeNull();
+  });
+});
+
 describe('toasts', () => {
   function Probe() {
     const toast = useToast();

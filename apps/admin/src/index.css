@@ -165,3 +165,60 @@
     @apply font-sans;
   }
 }
+
+/* Rich-text editor (Tiptap/ProseMirror) content styles, scoped to the editor. */
+@layer components {
+  .rich-text-editor {
+    @apply text-foreground;
+  }
+  .rich-text-editor:focus {
+    outline: none;
+  }
+  .rich-text-editor > * + * {
+    @apply mt-2;
+  }
+  .rich-text-editor h1 {
+    @apply mt-4 font-bold text-2xl;
+  }
+  .rich-text-editor h2 {
+    @apply mt-3 font-semibold text-xl;
+  }
+  .rich-text-editor h3 {
+    @apply mt-2 font-semibold text-lg;
+  }
+  .rich-text-editor blockquote {
+    @apply border-border border-l-2 pl-3 text-muted-foreground;
+  }
+  .rich-text-editor ul {
+    @apply list-disc pl-6;
+  }
+  .rich-text-editor ol {
+    @apply list-decimal pl-6;
+  }
+  .rich-text-editor pre {
+    @apply rounded-md bg-muted p-3 font-mono text-xs;
+  }
+  .rich-text-editor code {
+    @apply rounded bg-muted px-1 py-0.5 font-mono text-xs;
+  }
+  .rich-text-editor pre code {
+    @apply bg-transparent p-0;
+  }
+  .rich-text-editor hr {
+    @apply my-3 border-border;
+  }
+  .rich-text-editor a {
+    @apply text-primary underline underline-offset-2;
+  }
+  .rich-text-editor p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    @apply pointer-events-none float-left h-0 text-muted-foreground;
+  }
+  /* ProseMirror cursor affordances (gap cursor between atom blocks). */
+  .rich-text-editor .ProseMirror-gapcursor:after {
+    @apply border-foreground border-t;
+  }
+  .rich-text-editor ::selection {
+    @apply bg-primary/20;
+  }
+}

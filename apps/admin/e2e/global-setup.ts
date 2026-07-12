@@ -39,6 +39,14 @@ export default async function globalSetup() {
           required: false,
           position: 1,
         },
+        {
+          apiId: 'content',
+          name: 'Content',
+          type: 'RichText',
+          localized: false,
+          required: false,
+          position: 2,
+        },
       ],
     }),
   });
