@@ -64,6 +64,92 @@ const HIDDEN_PATHS = new Set(['/openapi.json', '/docs']);
 /** Hono `:param` syntax → OpenAPI `{param}`. */
 const toOpenApiPath = (path: string) => path.replace(/:([A-Za-z0-9_]+)/g, '{$1}');
 
+// ---- Tag taxonomy -----------------------------------------------------------
+// Every operation gets exactly one tag: `doc()`-annotated routes declare
+// theirs; inventory routes are classified by the path rules below (first
+// match wins — specific capabilities before the broad Entries/Spaces
+// catch-alls). Scalar renders the two-level nav from x-tagGroups.
+
+export const TAGS: { name: string; description: string }[] = [
+  { name: 'System', description: 'Liveness/readiness probes.' },
+  { name: 'Auth', description: 'Principal resolution, API keys, and OIDC SSO.' },
+  {
+    name: 'Spaces & environments',
+    description: 'Spaces, environments (branches), aliases, compare/merge, and space config.',
+  },
+  { name: 'Roles & permissions', description: 'Custom roles with content-type + field grants.' },
+  { name: 'Audit', description: 'Append-only audit trail of mutating actions.' },
+  { name: 'Content types', description: 'The content model: types, fields, publishing.' },
+  { name: 'Taxonomy', description: 'Tags, concepts, and concept schemes (SKOS-style).' },
+  { name: 'Entries', description: 'Authoring: drafts, publishing, bulk operations, metadata.' },
+  { name: 'Versions', description: 'Append-only entry version history, diff, and restore.' },
+  { name: 'Assets', description: 'Media: presigned direct uploads, publishing, transforms.' },
+  { name: 'Comments & tasks', description: 'Editorial collaboration on entries.' },
+  { name: 'Workflows', description: 'Editorial workflow definitions and entry transitions.' },
+  {
+    name: 'Releases & scheduling',
+    description: 'Grouped releases and scheduled publish/unpublish actions.',
+  },
+  { name: 'Webhooks', description: 'Signed event webhooks and delivery logs.' },
+  { name: 'Functions', description: 'User-defined HTTP functions invoked on domain events.' },
+  { name: 'Apps', description: 'App extensions (custom field editors, sidebars).' },
+  {
+    name: 'AI & agents',
+    description:
+      'Generation, translation, moderation, semantic tooling, AI actions, and the agent run ledger.',
+  },
+  { name: 'Delivery', description: 'Published content: REST, hybrid search, SSE, GraphQL.' },
+  { name: 'Preview', description: 'Draft/current content for previews.' },
+];
+
+const TAG_GROUPS = [
+  {
+    name: 'Platform',
+    tags: ['System', 'Auth', 'Spaces & environments', 'Roles & permissions', 'Audit'],
+  },
+  { name: 'Content model', tags: ['Content types', 'Taxonomy'] },
+  { name: 'Authoring', tags: ['Entries', 'Versions', 'Assets', 'Comments & tasks', 'Workflows'] },
+  {
+    name: 'Publishing & automation',
+    tags: ['Releases & scheduling', 'Webhooks', 'Functions', 'Apps'],
+  },
+  { name: 'AI', tags: ['AI & agents'] },
+  { name: 'Delivery', tags: ['Delivery', 'Preview'] },
+];
+
+const TAG_RULES: [RegExp, string][] = [
+  [/^\/(healthz|readyz)$/, 'System'],
+  [/^\/auth\//, 'Auth'],
+  [/\/api-keys/, 'Auth'],
+  [/^\/delivery\//, 'Delivery'],
+  [/^\/preview\//, 'Preview'],
+  [/\/content-types/, 'Content types'],
+  [/\/taxonomy\//, 'Taxonomy'],
+  [/\/assets\/\{id\}\/(alt-text|auto-tag)/, 'AI & agents'],
+  [/\/assets/, 'Assets'],
+  [/\/entries\/\{id\}\/versions/, 'Versions'],
+  [/\/entries\/\{id\}\/(comments|tasks)/, 'Comments & tasks'],
+  [/\/(comments|tasks)\/\{id\}$/, 'Comments & tasks'],
+  [/\/workflow(s|\b)/, 'Workflows'],
+  [/\/entries\/(generate|canvas)$/, 'AI & agents'],
+  [
+    /\/entries\/\{id\}\/(autofill|translate|summarize|suggest-tags|duplicates|related|embedding|moderate)/,
+    'AI & agents',
+  ],
+  [/\/(ai-actions|agent-runs)/, 'AI & agents'],
+  [/\/audit(-log)?$/, 'Audit'],
+  [/\/(releases|scheduled-actions)/, 'Releases & scheduling'],
+  [/\/webhooks/, 'Webhooks'],
+  [/\/functions/, 'Functions'],
+  [/\/app-extensions/, 'Apps'],
+  [/\/roles/, 'Roles & permissions'],
+  [/\/entries|\/bulk\//, 'Entries'],
+  [/^\/spaces/, 'Spaces & environments'],
+];
+
+const tagFor = (path: string): string =>
+  TAG_RULES.find(([pattern]) => pattern.test(path))?.[1] ?? 'Spaces & environments';
+
 /**
  * Adds a bare operation for every mounted route the spec doesn't already
  * cover — hono-openapi only emits `describeRoute`-annotated routes, but the
@@ -81,6 +167,7 @@ function addUndescribedRoutes(app: Hono, paths: Record<string, Record<string, un
     paths[path] ??= {};
     paths[path][method] ??= {
       summary: `${route.method} ${path}`,
+      tags: [tagFor(path)],
       parameters: [...path.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => ({
         name: m[1],
         in: 'path',
@@ -122,6 +209,7 @@ export function mountDocs(app: Hono, config: ApiConfig): void {
             },
           },
           security: [{ bearerAuth: [] }],
+          tags: TAGS,
         },
         exclude: ['/openapi.json', '/docs', /^\/graphiql/],
       },
@@ -130,6 +218,18 @@ export function mountDocs(app: Hono, config: ApiConfig): void {
     const paths = (spec.paths ?? {}) as Record<string, Record<string, unknown>>;
     addUndescribedRoutes(app, paths);
     spec.paths = paths;
+    // Scalar/Redoc two-level sidebar. Only list tags this deployment mounts,
+    // so a role-gated spec doesn't render empty groups.
+    const usedTags = new Set(
+      Object.values(paths).flatMap((ops) =>
+        Object.values(ops).flatMap((op) => (op as { tags?: string[] }).tags ?? []),
+      ),
+    );
+    spec.tags = TAGS.filter((t) => usedTags.has(t.name));
+    (spec as Record<string, unknown>)['x-tagGroups'] = TAG_GROUPS.map((group) => ({
+      ...group,
+      tags: group.tags.filter((t) => usedTags.has(t)),
+    })).filter((group) => group.tags.length > 0);
     return c.json(spec);
   });
   app.get('/docs', Scalar({ url: '/openapi.json', pageTitle: 'contentworker API' }));

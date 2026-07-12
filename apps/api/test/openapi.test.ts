@@ -55,6 +55,28 @@ describe('OpenAPI spec + docs UI', () => {
     expect(paths.some((p) => p.startsWith('/spaces/'))).toBe(false);
   });
 
+  it('tags every operation and groups tags for the sidebar', async () => {
+    const app = makeApp();
+    const spec = (await (await app.request('/openapi.json')).json()) as {
+      paths: Record<string, Record<string, { tags?: string[] }>>;
+      tags: { name: string }[];
+      'x-tagGroups': { name: string; tags: string[] }[];
+    };
+    const declared = new Set(spec.tags.map((t) => t.name));
+    const grouped = new Set(spec['x-tagGroups'].flatMap((g) => g.tags));
+    for (const [path, ops] of Object.entries(spec.paths)) {
+      for (const [method, op] of Object.entries(ops)) {
+        expect(op.tags?.length, `${method.toUpperCase()} ${path} has a tag`).toBeGreaterThan(0);
+        for (const tag of op.tags ?? []) {
+          expect(declared.has(tag), `tag "${tag}" declared (${path})`).toBe(true);
+          expect(grouped.has(tag), `tag "${tag}" grouped (${path})`).toBe(true);
+        }
+      }
+    }
+    // Role-gated deployments never render empty groups.
+    expect(spec['x-tagGroups'].every((g) => g.tags.length > 0)).toBe(true);
+  });
+
   it('serves the Scalar UI at /docs', async () => {
     const app = makeApp();
     const res = await app.request('/docs');
