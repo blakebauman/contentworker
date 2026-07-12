@@ -78,7 +78,8 @@ if it fails validation.
 **Indexing** (on `entry.published`, driven by the worker's event dispatch):
 
 1. `removeEntryEmbeddings` clears any existing vectors for the entry (idempotent).
-2. `extractTextByLocale` collects the entry's string values, grouped by locale.
+2. `extractTextByLocale` collects the entry's string values — plus rich-text bodies flattened
+   to plain text via `richTextToPlainText` — grouped by locale.
 3. `chunk(text, 400)` splits each locale's text into ≤ 400-word, word-bounded chunks.
 4. Chunks are embedded (`taskType: 'document'`) and upserted as `VectorRow`s carrying
    `{ scope, entryId, locale, chunkIndex, chunkText, embedding, entryVersion }`.

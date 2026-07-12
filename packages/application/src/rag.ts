@@ -1,3 +1,4 @@
+import { isRichTextDocument, richTextToPlainText } from '@cw/domain';
 import type { EntryFields, Scope } from '@cw/domain';
 import type { EmbeddingsProvider, VectorRow, VectorStore } from '@cw/ports';
 import type { AppContext } from './context.js';
@@ -12,9 +13,15 @@ export function extractTextByLocale(fields: EntryFields): Record<string, string>
   const byLocale: Record<string, string[]> = {};
   for (const localized of Object.values(fields)) {
     for (const [locale, value] of Object.entries(localized)) {
-      if (typeof value === 'string' && value.trim()) {
+      const text =
+        typeof value === 'string'
+          ? value
+          : isRichTextDocument(value)
+            ? richTextToPlainText(value)
+            : '';
+      if (text.trim()) {
         const bucket = byLocale[locale] ?? [];
-        bucket.push(value);
+        bucket.push(text);
         byLocale[locale] = bucket;
       }
     }
