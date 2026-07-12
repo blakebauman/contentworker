@@ -46,11 +46,16 @@
     "@cw/telemetry": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "@hono/node-server": "^1.13.7",
+    "@hono/standard-validator": "^0.2.3",
+    "@scalar/hono-api-reference": "^0.11.9",
     "graphql": "^16.10.0",
     "hono": "^4.6.14",
+    "hono-openapi": "^1.3.1",
     "ioredis": "^5.4.2",
     "openid-client": "^6.0.0",
-    "uuid": "^11.0.3"
+    "uuid": "^11.0.3",
+    "zod": "^4.4.3",
+    "zod-openapi": "^4.2.4"
   },
   "devDependencies": {
     "@cw/sdk-core": "workspace:*",

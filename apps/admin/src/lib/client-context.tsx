@@ -54,9 +54,21 @@ export function ClientProvider(props: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
+    // No token → unauthenticated, no request. Probing with an empty token
+    // 401s, and that 401 used to trigger onUnauthorized → signOut →
+    // updateConn (a fresh conn object even when nothing changed) → client
+    // rebuild → re-probe: an infinite /auth/me loop in the built SPA, whose
+    // stray in-flight 401s could also wipe a just-entered token via the
+    // hard redirect. The probe uses a bare client (no onUnauthorized) so the
+    // session check can only ever set state, never sign out or reload.
+    if (!conn.token) {
+      setAuthenticated(false);
+      setAuthReady(true);
+      return;
+    }
     let cancelled = false;
     setAuthReady(false);
-    client
+    createManagementClient(conn)
       .getPrincipal()
       .then(() => {
         if (!cancelled) setAuthenticated(true);
@@ -70,7 +82,7 @@ export function ClientProvider(props: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [conn]);
 
   const run = useCallback(
     async (fn: () => Promise<void>) => {

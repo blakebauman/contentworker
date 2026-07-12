@@ -1,5 +1,9 @@
 # HTTP API reference
 
+> **Interactive docs:** every deployment serves its own OpenAPI 3.1 spec at
+> `GET /openapi.json` (a complete inventory of the mounted routes — the spec
+> reflects the deployment's `ROLE`) and a browsable Scalar UI at `GET /docs`.
+
 The API is a [Hono](https://hono.dev) server (`apps/api`) exposing three role-based surfaces:
 
 - **Management (CMA)** — authoring, publishing, space administration, AI, releases, workflows.

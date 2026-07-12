@@ -5,6 +5,8 @@ import { Hono } from 'hono';
 import type { AuthDeps, AuthRateLimit } from './auth.js';
 import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
+import { doc, mountDocs } from './docs/openapi.js';
+import { healthz, readyz } from './docs/schemas.js';
 import { onError } from './http.js';
 import { oidcRoutes } from './oidc/routes.js';
 import { deliveryRoutes } from './routes/delivery.js';
@@ -33,8 +35,14 @@ export function createApp(
   const app = new Hono();
   app.onError(onError);
 
-  app.get('/healthz', (c) => c.json({ status: 'ok' }));
-  app.get('/readyz', (c) => c.json({ status: 'ready', role: config.role }));
+  app.get('/healthz', doc('System', 'Liveness probe', { ok: healthz }), (c) =>
+    c.json({ status: 'ok' }),
+  );
+  app.get(
+    '/readyz',
+    doc('System', 'Readiness probe (reports the mounted role)', { ok: readyz }),
+    (c) => c.json({ status: 'ready', role: config.role }),
+  );
 
   const deps: AuthDeps = {
     ctx,
@@ -62,6 +70,10 @@ export function createApp(
   }
   if (mountDelivery) app.route('/', deliveryRoutes(deps));
   if (mountPreview) app.route('/', previewRoutes(deps));
+
+  // Last: the OpenAPI spec walks the routes mounted above, so /openapi.json
+  // (and the Scalar UI at /docs) reflects exactly this deployment's ROLE.
+  mountDocs(app, config);
 
   return app;
 }

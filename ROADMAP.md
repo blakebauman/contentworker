@@ -49,7 +49,10 @@ Remaining admin work:
 - [ ] **Management SDK** (`@cw/sdk-management`) — extract the admin's hand-written typed
   client (`apps/admin/src/lib/management.ts`) into a published package with codegen'd
   content-type types.
-- [ ] **OpenAPI spec** generated from the Zod route schemas; publish API docs.
+- [x] **OpenAPI spec + docs** — `GET /openapi.json` (OpenAPI 3.1 via hono-openapi + zod 4;
+  full route inventory with rich schemas on the delivery/preview/core-management surfaces,
+  honest to the deployment's `ROLE`) and a Scalar UI at `GET /docs`. _(Extending rich
+  schemas across the long tail of management routes is incremental follow-up.)_
 - [x] **Granular RBAC** — custom `Role`s (space-scoped, live-resolved on every request)
   carry a scope set plus per-content-type grants (`read`/`write`/`publish`) with per-field
   deny/read-only rules. API keys bind via `roleId`; enforcement is identical on HTTP and MCP

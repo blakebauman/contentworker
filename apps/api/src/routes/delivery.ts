@@ -27,6 +27,8 @@ import {
   principalMiddleware,
   requireScope,
 } from '../auth.js';
+import { doc } from '../docs/openapi.js';
+import { asset, publishedEntry, publishedEntryList, searchHits } from '../docs/schemas.js';
 import { entryQueryFrom, parseEntryQuery } from '../query.js';
 
 const scopeOf = (c: Context<AuthVars>): Scope => ({
@@ -45,115 +47,182 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
 
   // Hybrid (semantic + full-text, RRF-fused) by default; ?mode=semantic or
   // ?mode=lexical selects a single leg.
-  app.get(`${BASE}/search`, requireScope(SCOPES.searchRead), async (c) => {
-    const q = c.req.query('q') ?? '';
-    const topK = c.req.query('top_k');
-    const mode = c.req.query('mode') ?? 'hybrid';
-    const opts = { topK: topK ? Number(topK) : undefined };
-    const scope = scopeOf(c);
-    let hits =
-      mode === 'semantic'
-        ? await semanticSearch(rag, scope, q, opts)
-        : await hybridSearch(mode === 'lexical' ? undefined : rag, ctx, scope, q, opts);
-    const principal = c.get('principal');
-    if (principal.contentGrants) {
-      const visible = [];
-      for (const hit of hits) {
-        try {
-          const entry = await getPublishedEntry(ctx, scope, hit.entryId);
-          if (canAccessContentType(principal, 'read', entry.contentType)) visible.push(hit);
-        } catch {
-          /* skip inaccessible */
+  app.get(
+    `${BASE}/search`,
+    doc('Delivery', 'Search published content', {
+      ok: searchHits,
+      description:
+        'Hybrid search by default: pgvector ANN + Postgres full-text, fused with Reciprocal Rank Fusion.',
+      query: {
+        q: 'Search query',
+        mode: 'hybrid (default) | semantic | lexical',
+        top_k: 'Max hits (default 10)',
+      },
+    }),
+    requireScope(SCOPES.searchRead),
+    async (c) => {
+      const q = c.req.query('q') ?? '';
+      const topK = c.req.query('top_k');
+      const mode = c.req.query('mode') ?? 'hybrid';
+      const opts = { topK: topK ? Number(topK) : undefined };
+      const scope = scopeOf(c);
+      let hits =
+        mode === 'semantic'
+          ? await semanticSearch(rag, scope, q, opts)
+          : await hybridSearch(mode === 'lexical' ? undefined : rag, ctx, scope, q, opts);
+      const principal = c.get('principal');
+      if (principal.contentGrants) {
+        const visible = [];
+        for (const hit of hits) {
+          try {
+            const entry = await getPublishedEntry(ctx, scope, hit.entryId);
+            if (canAccessContentType(principal, 'read', entry.contentType)) visible.push(hit);
+          } catch {
+            /* skip inaccessible */
+          }
         }
+        hits = visible;
       }
-      hits = visible;
-    }
-    return c.json({ hits });
-  });
+      return c.json({ hits });
+    },
+  );
 
-  app.get(`${BASE}/entries`, requireScope(SCOPES.deliveryRead), async (c) => {
-    const include = c.req.query('include');
-    const query = parseEntryQuery(new URL(c.req.url).searchParams);
-    const items = await listPublishedEntries(ctx, scopeOf(c), query, {
-      locale: c.req.query('locale'),
-      include: include ? Number(include) : undefined,
-    });
-    // Granular RBAC: drop entries of ungranted types, mask denied fields.
-    const principal = c.get('principal');
-    const visible = items
-      .filter((e) => canAccessContentType(principal, 'read', e.contentType))
-      .map((e) => ({ ...e, fields: maskDeniedFields(principal, e.contentType, e.fields) }));
-    return c.json({ items: visible, total: visible.length });
-  });
+  app.get(
+    `${BASE}/entries`,
+    doc('Delivery', 'List published entries', {
+      ok: publishedEntryList,
+      query: {
+        content_type: 'Filter by content type apiId',
+        locale: 'Resolve fields for one locale',
+        include: 'Reference resolution depth',
+      },
+    }),
+    requireScope(SCOPES.deliveryRead),
+    async (c) => {
+      const include = c.req.query('include');
+      const query = parseEntryQuery(new URL(c.req.url).searchParams);
+      const items = await listPublishedEntries(ctx, scopeOf(c), query, {
+        locale: c.req.query('locale'),
+        include: include ? Number(include) : undefined,
+      });
+      // Granular RBAC: drop entries of ungranted types, mask denied fields.
+      const principal = c.get('principal');
+      const visible = items
+        .filter((e) => canAccessContentType(principal, 'read', e.contentType))
+        .map((e) => ({ ...e, fields: maskDeniedFields(principal, e.contentType, e.fields) }));
+      return c.json({ items: visible, total: visible.length });
+    },
+  );
 
-  app.get(`${BASE}/entries/:id`, requireScope(SCOPES.deliveryRead), async (c) => {
-    const include = c.req.query('include');
-    const entry = await getPublishedEntry(ctx, scopeOf(c), c.req.param('id'), {
-      locale: c.req.query('locale'),
-      include: include ? Number(include) : undefined,
-    });
-    const principal = c.get('principal');
-    authorizeContent(principal, 'read', entry.contentType);
-    return c.json({
-      ...entry,
-      fields: maskDeniedFields(principal, entry.contentType, entry.fields),
-    });
-  });
+  app.get(
+    `${BASE}/entries/:id`,
+    doc('Delivery', 'Get a published entry', {
+      ok: publishedEntry,
+      query: { locale: 'Resolve fields for one locale', include: 'Reference resolution depth' },
+    }),
+    requireScope(SCOPES.deliveryRead),
+    async (c) => {
+      const include = c.req.query('include');
+      const entry = await getPublishedEntry(ctx, scopeOf(c), c.req.param('id'), {
+        locale: c.req.query('locale'),
+        include: include ? Number(include) : undefined,
+      });
+      const principal = c.get('principal');
+      authorizeContent(principal, 'read', entry.contentType);
+      return c.json({
+        ...entry,
+        fields: maskDeniedFields(principal, entry.contentType, entry.fields),
+      });
+    },
+  );
 
-  app.get(`${BASE}/assets`, requireScope(SCOPES.deliveryRead), async (c) => {
-    if (c.get('principal').contentGrants) {
-      return c.json({ items: [], total: 0 });
-    }
-    const limit = c.req.query('limit');
-    const items = await listPublishedAssets(ctx, scopeOf(c), {
-      limit: limit ? Number(limit) : undefined,
-    });
-    return c.json({ items, total: items.length });
-  });
+  app.get(
+    `${BASE}/assets`,
+    doc('Delivery', 'List published assets', { query: { limit: 'Max items' } }),
+    requireScope(SCOPES.deliveryRead),
+    async (c) => {
+      if (c.get('principal').contentGrants) {
+        return c.json({ items: [], total: 0 });
+      }
+      const limit = c.req.query('limit');
+      const items = await listPublishedAssets(ctx, scopeOf(c), {
+        limit: limit ? Number(limit) : undefined,
+      });
+      return c.json({ items, total: items.length });
+    },
+  );
 
-  app.get(`${BASE}/assets/:id`, requireScope(SCOPES.deliveryRead), async (c) => {
-    if (c.get('principal').contentGrants) {
-      return c.body(null, 403);
-    }
-    return c.json(await getPublishedAsset(ctx, scopeOf(c), c.req.param('id')));
-  });
+  app.get(
+    `${BASE}/assets/:id`,
+    doc('Delivery', 'Get a published asset', { ok: asset }),
+    requireScope(SCOPES.deliveryRead),
+    async (c) => {
+      if (c.get('principal').contentGrants) {
+        return c.body(null, 403);
+      }
+      return c.json(await getPublishedAsset(ctx, scopeOf(c), c.req.param('id')));
+    },
+  );
 
   // Live Content API: an SSE stream of published-content changes for this scope.
   // Optional ?types=entry.published,entry.unpublished filters the event types.
-  app.get(`${BASE}/live`, requireScope(SCOPES.deliveryRead), (c) => {
-    const scope = scopeOf(c);
-    const types = (c.req.query('types') ?? '')
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
-    return streamSSE(c, async (stream) => {
-      const sub = bus.subscribe('*', async (event) => {
-        if (event.scope.spaceId !== scope.spaceId) return;
-        if (event.scope.environmentId !== scope.environmentId) return;
-        if (types.length > 0 && !types.includes(event.type)) return;
-        await stream.writeSSE({ event: event.type, id: event.id, data: JSON.stringify(event) });
+  app.get(
+    `${BASE}/live`,
+    doc('Delivery', 'Live Content API (SSE)', {
+      okDescription: 'text/event-stream of published-content domain events for this scope',
+      query: { types: 'Comma-separated event-type filter, e.g. entry.published' },
+    }),
+    requireScope(SCOPES.deliveryRead),
+    (c) => {
+      const scope = scopeOf(c);
+      const types = (c.req.query('types') ?? '')
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      return streamSSE(c, async (stream) => {
+        const sub = bus.subscribe('*', async (event) => {
+          if (event.scope.spaceId !== scope.spaceId) return;
+          if (event.scope.environmentId !== scope.environmentId) return;
+          if (types.length > 0 && !types.includes(event.type)) return;
+          await stream.writeSSE({ event: event.type, id: event.id, data: JSON.stringify(event) });
+        });
+        stream.onAbort(() => void sub.close());
+        // Heartbeat so proxies keep the connection open until the client leaves.
+        while (!stream.aborted) {
+          await stream.writeSSE({ event: 'ping', data: '' });
+          await stream.sleep(15000);
+        }
+        await sub.close();
       });
-      stream.onAbort(() => void sub.close());
-      // Heartbeat so proxies keep the connection open until the client leaves.
-      while (!stream.aborted) {
-        await stream.writeSSE({ event: 'ping', data: '' });
-        await stream.sleep(15000);
-      }
-      await sub.close();
-    });
-  });
+    },
+  );
 
   // Resolves a transformed-image URL for a published asset (resize/crop/format/
   // quality, focal-point-aware) and redirects to it, so it can back an <img src>.
-  app.get(`${BASE}/assets/:id/transform`, requireScope(SCOPES.deliveryRead), async (c) => {
-    const { url } = await transformPublishedAssetUrl(
-      ctx,
-      scopeOf(c),
-      c.req.param('id'),
-      parseImageTransform(c.req.query()),
-    );
-    return c.redirect(url, 302);
-  });
+  app.get(
+    `${BASE}/assets/:id/transform`,
+    doc('Delivery', 'Resolve a transformed image URL', {
+      status: 302,
+      okDescription: 'Redirects to the CDN-transformable image URL',
+      query: {
+        w: 'Width',
+        h: 'Height',
+        fit: 'Fit mode',
+        fm: 'Output format',
+        q: 'Quality',
+      },
+    }),
+    requireScope(SCOPES.deliveryRead),
+    async (c) => {
+      const { url } = await transformPublishedAssetUrl(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        parseImageTransform(c.req.query()),
+      );
+      return c.redirect(url, 302);
+    },
+  );
 
   // --- GraphQL Delivery ---------------------------------------------------
   // Schema is generated from published content types and cached per scope; it

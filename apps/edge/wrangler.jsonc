@@ -28,7 +28,9 @@
       "/auth/*",
       "/mcp",
       "/healthz",
-      "/readyz"
+      "/readyz",
+      "/openapi.json",
+      "/docs"
     ]
   },
 
