@@ -37,6 +37,15 @@ export const MAX_CHUNKS_PER_ENTRY = 200;
 /** Vectorize caps topK at 50 when returning full metadata (which we need). */
 const MAX_TOP_K = 50;
 
+/** Vectorize rejects deleteByIds payloads above 100 ids (VECTOR_DELETE_ERROR 40007). */
+const MAX_DELETE_IDS = 100;
+
+async function deleteInBatches(index: VectorizeBinding, ids: string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += MAX_DELETE_IDS) {
+    await index.deleteByIds(ids.slice(i, i + MAX_DELETE_IDS));
+  }
+}
+
 const encoder = new TextEncoder();
 
 /** Hex SHA-256, truncated — used for ids (64-byte cap) and namespaces. */
@@ -101,7 +110,7 @@ export function createVectorizeStore(
         // Clear any stale tail from a previous, larger version of this entry.
         const stale: string[] = [];
         for (let i = kept.length; i < MAX_CHUNKS_PER_ENTRY; i++) stale.push(`${prefix}:${i}`);
-        if (stale.length > 0) await index.deleteByIds(stale);
+        await deleteInBatches(index, stale);
       }
     },
 
@@ -109,7 +118,7 @@ export function createVectorizeStore(
       const prefix = await entryPrefix(scope, entryId);
       const ids: string[] = [];
       for (let i = 0; i < MAX_CHUNKS_PER_ENTRY; i++) ids.push(`${prefix}:${i}`);
-      await index.deleteByIds(ids);
+      await deleteInBatches(index, ids);
     },
 
     async query(scope: Scope, embedding: number[], opts2: { topK: number; minScore?: number }) {
