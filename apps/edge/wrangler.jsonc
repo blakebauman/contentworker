@@ -21,6 +21,7 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": [
+      "/spaces",
       "/spaces/*",
       "/delivery/*",
       "/preview/*",
@@ -37,15 +38,16 @@
   // Create with: wrangler hyperdrive create cw-neon --connection-string=$NEON_UNPOOLED_URL
   "hyperdrive": [
     {
+      // cw-neon → Neon project "contentworker" (wild-thunder-79321214), direct endpoint
       "binding": "HYPERDRIVE",
-      "id": "REPLACE_WITH_HYPERDRIVE_ID",
+      "id": "a25711edf12046b28b6465c410da760b",
       "localConnectionString": "postgres://cw:cw@localhost:5432/contentworker"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "KV_CACHE",
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+      "id": "43d0683e48b94bfe98ce95dc808cbf0e"
     }
   ],
   // Create with: wrangler vectorize create cw-vectors --dimensions=1536 --metric=cosine
