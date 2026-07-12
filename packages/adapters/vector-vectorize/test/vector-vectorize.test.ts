@@ -11,6 +11,7 @@ function fakeIndex() {
     string,
     { values: number[]; namespace?: string; metadata?: Record<string, string | number | boolean> }
   >();
+  const deleteBatchSizes: number[] = [];
   const index: VectorizeBinding = {
     async upsert(rows) {
       for (const r of rows) {
@@ -18,6 +19,9 @@ function fakeIndex() {
       }
     },
     async deleteByIds(ids) {
+      // Real Vectorize rejects >100 ids per call (VECTOR_DELETE_ERROR 40007).
+      if (ids.length > 100) throw new Error(`too many ids in payload; got ${ids.length}`);
+      deleteBatchSizes.push(ids.length);
       for (const id of ids) vectors.delete(id);
     },
     async query(vector, options) {
@@ -40,7 +44,7 @@ function fakeIndex() {
       return { matches };
     },
   };
-  return { index, vectors };
+  return { index, vectors, deleteBatchSizes };
 }
 
 function row(scope: typeof scopeA, entryId: string, chunkIndex: number, e: number[]): VectorRow {
@@ -106,6 +110,16 @@ describe('createVectorizeStore', () => {
 
     const matches = await store.query(scopeA, [1, 0, 0], { topK: 10 });
     expect(matches).toHaveLength(1);
+  });
+
+  it('splits delete sweeps into ≤100-id batches (Vectorize payload cap)', async () => {
+    const { index, deleteBatchSizes } = fakeIndex();
+    const store = createVectorizeStore(index, opts);
+    await store.upsert([row(scopeA, 'e1', 0, [1, 0, 0])]);
+    await store.deleteByEntry(scopeA, 'e1');
+    expect(deleteBatchSizes.every((n) => n <= 100)).toBe(true);
+    // upsert tail sweep (199 stale ids) + deleteByEntry (200 ids) = 4 batches.
+    expect(deleteBatchSizes.length).toBe(4);
   });
 
   it('applies minScore filtering and clamps topK to 50', async () => {
