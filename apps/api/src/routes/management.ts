@@ -131,6 +131,8 @@ import {
   principalMiddleware,
   requireScope,
 } from '../auth.js';
+import { doc } from '../docs/openapi.js';
+import * as docs from '../docs/schemas.js';
 
 // Reads the route's scope, preferring the alias-resolved environment id stamped
 // by environmentMiddleware over the raw `:env` param.
@@ -171,16 +173,21 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.use('/spaces/:space/*', auditMiddleware(deps));
 
   /** Lightweight principal probe for admin connection UI and SSO sessions. */
-  app.get('/auth/me', principalMiddleware(deps), (c) => {
-    const principal = c.get('principal');
-    return c.json({
-      spaceId: principal.spaceId,
-      kind: principal.kind,
-      scopes: principal.scopes,
-      subject: principal.subject,
-      restricted: principal.contentGrants !== undefined,
-    });
-  });
+  app.get(
+    '/auth/me',
+    doc('Auth', 'Resolve the calling principal', { ok: docs.principal }),
+    principalMiddleware(deps),
+    (c) => {
+      const principal = c.get('principal');
+      return c.json({
+        spaceId: principal.spaceId,
+        kind: principal.kind,
+        scopes: principal.scopes,
+        subject: principal.subject,
+        restricted: principal.contentGrants !== undefined,
+      });
+    },
+  );
 
   // --- provisioning (admin) ----------------------------------------------
   // Authenticated principals see the spaces they can reach: admin → all,
@@ -197,11 +204,16 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     });
     return c.json({ items: cfg ? [{ id: cfg.spaceId, name: cfg.name }] : [] });
   });
-  app.post('/spaces', requireScope(SCOPES.spaceAdmin), async (c) => {
-    const body = await c.req.json();
-    const created = await createSpace(ctx, body);
-    return c.json({ id: created.spaceId, name: created.name }, 201);
-  });
+  app.post(
+    '/spaces',
+    doc('Spaces', 'Create a space (admin token)', { ok: docs.spaceRef, status: 201 }),
+    requireScope(SCOPES.spaceAdmin),
+    async (c) => {
+      const body = await c.req.json();
+      const created = await createSpace(ctx, body);
+      return c.json({ id: created.spaceId, name: created.name }, 201);
+    },
+  );
 
   app.get('/spaces/:space/environments', requireScope(SCOPES.previewRead), async (c) =>
     c.json({ items: await listEnvironments(ctx, c.req.param('space')) }),
@@ -274,16 +286,33 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
 
   // --- API key management (admin) ----------------------------------------
-  app.get('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) => {
-    const keys = await listApiKeys(ctx, c.req.param('space'));
-    return c.json({ items: keys.map(apiKeySummary) });
-  });
-  app.post('/spaces/:space/api-keys', requireScope(SCOPES.spaceAdmin), async (c) => {
-    const body = await c.req.json();
-    const created = await createApiKey(ctx, hasher, { spaceId: c.req.param('space'), ...body });
-    // Return the raw token once; only its hash is stored.
-    return c.json({ id: created.apiKey.id, kind: created.apiKey.kind, token: created.token }, 201);
-  });
+  app.get(
+    '/spaces/:space/api-keys',
+    doc('Auth', 'List API keys for a space'),
+    requireScope(SCOPES.spaceAdmin),
+    async (c) => {
+      const keys = await listApiKeys(ctx, c.req.param('space'));
+      return c.json({ items: keys.map(apiKeySummary) });
+    },
+  );
+  app.post(
+    '/spaces/:space/api-keys',
+    doc('Auth', 'Mint an API key', {
+      ok: docs.apiKeyCreated,
+      status: 201,
+      description: 'The raw token is returned once; only its SHA-256 hash is stored.',
+    }),
+    requireScope(SCOPES.spaceAdmin),
+    async (c) => {
+      const body = await c.req.json();
+      const created = await createApiKey(ctx, hasher, { spaceId: c.req.param('space'), ...body });
+      // Return the raw token once; only its hash is stored.
+      return c.json(
+        { id: created.apiKey.id, kind: created.apiKey.kind, token: created.token },
+        201,
+      );
+    },
+  );
   app.delete('/spaces/:space/api-keys/:id', requireScope(SCOPES.spaceAdmin), async (c) => {
     await revokeApiKey(ctx, c.req.param('space'), c.req.param('id'));
     return c.body(null, 204);
@@ -313,15 +342,26 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // --- content types ------------------------------------------------------
-  app.get(`${BASE}/content-types`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json({ items: await listContentTypes(ctx, scopeOf(c)) }),
+  app.get(
+    `${BASE}/content-types`,
+    doc('Content types', 'List content types'),
+    requireScope(SCOPES.previewRead),
+    async (c) => c.json({ items: await listContentTypes(ctx, scopeOf(c)) }),
   );
-  app.post(`${BASE}/content-types`, requireScope(SCOPES.contentManage), async (c) => {
-    const ct = await createContentType(ctx, scopeOf(c), await c.req.json());
-    return c.json(ct, 201);
-  });
-  app.get(`${BASE}/content-types/:apiId`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json(await getContentType(ctx, scopeOf(c), c.req.param('apiId'))),
+  app.post(
+    `${BASE}/content-types`,
+    doc('Content types', 'Create a content type', { ok: docs.contentType, status: 201 }),
+    requireScope(SCOPES.contentManage),
+    async (c) => {
+      const ct = await createContentType(ctx, scopeOf(c), await c.req.json());
+      return c.json(ct, 201);
+    },
+  );
+  app.get(
+    `${BASE}/content-types/:apiId`,
+    doc('Content types', 'Get a content type', { ok: docs.contentType }),
+    requireScope(SCOPES.previewRead),
+    async (c) => c.json(await getContentType(ctx, scopeOf(c), c.req.param('apiId'))),
   );
   app.post(
     `${BASE}/content-types/:apiId/published`,
@@ -340,14 +380,19 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     authorizeContent(principal, action, entry.contentTypeApiId);
   };
 
-  app.post(`${BASE}/entries`, requireScope(SCOPES.contentWrite), async (c) => {
-    const body = await c.req.json();
-    const principal = c.get('principal');
-    authorizeContent(principal, 'write', body.contentTypeApiId);
-    assertWritableFields(principal, body.contentTypeApiId, body.fields ?? {});
-    const view = await createEntry(ctx, scopeOf(c), body);
-    return c.json(view, 201);
-  });
+  app.post(
+    `${BASE}/entries`,
+    doc('Entries', 'Create a draft entry', { ok: docs.createdEntry, status: 201 }),
+    requireScope(SCOPES.contentWrite),
+    async (c) => {
+      const body = await c.req.json();
+      const principal = c.get('principal');
+      authorizeContent(principal, 'write', body.contentTypeApiId);
+      assertWritableFields(principal, body.contentTypeApiId, body.fields ?? {});
+      const view = await createEntry(ctx, scopeOf(c), body);
+      return c.json(view, 201);
+    },
+  );
   // AI-draft an entry's fields. Generated values pass the same validators a
   // human write does, so an agent can't produce an entry a person couldn't.
   app.post(`${BASE}/entries/generate`, requireScope(SCOPES.contentWrite), async (c) => {
@@ -361,15 +406,20 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     authorizeContent(c.get('principal'), 'write', body.contentTypeApiId);
     return c.json(await canvasToEntry(ctx, ai, scopeOf(c), body));
   });
-  app.get(`${BASE}/entries/:id`, requireScope(SCOPES.previewRead), async (c) => {
-    const view = await getEntry(ctx, scopeOf(c), c.req.param('id'));
-    const principal = c.get('principal');
-    authorizeContent(principal, 'read', view.entry.contentTypeApiId);
-    return c.json({
-      ...view,
-      fields: maskDeniedFields(principal, view.entry.contentTypeApiId, view.fields),
-    });
-  });
+  app.get(
+    `${BASE}/entries/:id`,
+    doc('Entries', 'Get an entry (draft state)', { ok: docs.entry }),
+    requireScope(SCOPES.previewRead),
+    async (c) => {
+      const view = await getEntry(ctx, scopeOf(c), c.req.param('id'));
+      const principal = c.get('principal');
+      authorizeContent(principal, 'read', view.entry.contentTypeApiId);
+      return c.json({
+        ...view,
+        fields: maskDeniedFields(principal, view.entry.contentTypeApiId, view.fields),
+      });
+    },
+  );
   app.post(`${BASE}/entries/:id/preview-link`, requireScope(SCOPES.contentWrite), async (c) => {
     await guardEntry(c, c.req.param('id'), 'read');
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -387,16 +437,21 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.get(`${BASE}/entries/:id/reverse-references`, requireScope(SCOPES.previewRead), async (c) =>
     c.json({ items: await getReverseReferences(ctx, scopeOf(c), c.req.param('id')) }),
   );
-  app.put(`${BASE}/entries/:id`, requireScope(SCOPES.contentWrite), async (c) => {
-    const body = await c.req.json();
-    const principal = c.get('principal');
-    if (principal.contentGrants) {
-      const { entry } = await getEntry(ctx, scopeOf(c), c.req.param('id'));
-      authorizeContent(principal, 'write', entry.contentTypeApiId);
-      assertWritableFields(principal, entry.contentTypeApiId, body.fields ?? {});
-    }
-    return c.json(await updateEntry(ctx, scopeOf(c), c.req.param('id'), body.fields));
-  });
+  app.put(
+    `${BASE}/entries/:id`,
+    doc('Entries', 'Save a new draft version', { ok: docs.entry }),
+    requireScope(SCOPES.contentWrite),
+    async (c) => {
+      const body = await c.req.json();
+      const principal = c.get('principal');
+      if (principal.contentGrants) {
+        const { entry } = await getEntry(ctx, scopeOf(c), c.req.param('id'));
+        authorizeContent(principal, 'write', entry.contentTypeApiId);
+        assertWritableFields(principal, entry.contentTypeApiId, body.fields ?? {});
+      }
+      return c.json(await updateEntry(ctx, scopeOf(c), c.req.param('id'), body.fields));
+    },
+  );
   // --- AI content operations over an entry -------------------------------
   app.post(`${BASE}/entries/:id/translate`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(await translateEntry(ctx, ai, scopeOf(c), c.req.param('id'), await c.req.json())),
@@ -517,14 +572,28 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       }),
     ),
   );
-  app.post(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) => {
-    await guardEntry(c, c.req.param('id'), 'publish');
-    return c.json(await publishEntry(ctx, scopeOf(c), c.req.param('id')));
-  });
-  app.delete(`${BASE}/entries/:id/published`, requireScope(SCOPES.contentPublish), async (c) => {
-    await guardEntry(c, c.req.param('id'), 'publish');
-    return c.json(await unpublishEntry(ctx, scopeOf(c), c.req.param('id')));
-  });
+  app.post(
+    `${BASE}/entries/:id/published`,
+    doc('Entries', 'Publish an entry', {
+      ok: docs.entry,
+      description:
+        'Writes the delivery read model and appends entry.published to the transactional outbox atomically.',
+    }),
+    requireScope(SCOPES.contentPublish),
+    async (c) => {
+      await guardEntry(c, c.req.param('id'), 'publish');
+      return c.json(await publishEntry(ctx, scopeOf(c), c.req.param('id')));
+    },
+  );
+  app.delete(
+    `${BASE}/entries/:id/published`,
+    doc('Entries', 'Unpublish an entry', { ok: docs.entry }),
+    requireScope(SCOPES.contentPublish),
+    async (c) => {
+      await guardEntry(c, c.req.param('id'), 'publish');
+      return c.json(await unpublishEntry(ctx, scopeOf(c), c.req.param('id')));
+    },
+  );
 
   // --- entry version history ---------------------------------------------
   app.get(`${BASE}/entries/:id/versions`, requireScope(SCOPES.previewRead), async (c) =>
@@ -561,10 +630,19 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     const items = await listAssets(ctx, scopeOf(c), { limit: limit ? Number(limit) : undefined });
     return c.json({ items });
   });
-  app.post(`${BASE}/assets`, requireScope(SCOPES.contentWrite), async (c) => {
-    const created = await createAsset(ctx, blob, scopeOf(c), await c.req.json());
-    return c.json(created, 201);
-  });
+  app.post(
+    `${BASE}/assets`,
+    doc('Assets', 'Create an asset (presigned direct upload)', {
+      ok: docs.uploadTicket,
+      status: 201,
+      description: 'PUT the file bytes to upload.url with upload.headers, then publish the asset.',
+    }),
+    requireScope(SCOPES.contentWrite),
+    async (c) => {
+      const created = await createAsset(ctx, blob, scopeOf(c), await c.req.json());
+      return c.json(created, 201);
+    },
+  );
   app.get(`${BASE}/assets/:id`, requireScope(SCOPES.previewRead), async (c) =>
     c.json(await getAsset(ctx, scopeOf(c), c.req.param('id'))),
   );
@@ -655,10 +733,15 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // --- webhooks (admin) ---------------------------------------------------
-  app.get(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) => {
-    const hooks = await listWebhooks(ctx, scopeOf(c));
-    return c.json({ items: hooks.map(webhookSummary) });
-  });
+  app.get(
+    `${BASE}/webhooks`,
+    doc('Webhooks', 'List webhooks'),
+    requireScope(SCOPES.spaceAdmin),
+    async (c) => {
+      const hooks = await listWebhooks(ctx, scopeOf(c));
+      return c.json({ items: hooks.map(webhookSummary) });
+    },
+  );
   app.post(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) =>
     c.json(webhookSummary(await createWebhook(ctx, scopeOf(c), await c.req.json())), 201),
   );

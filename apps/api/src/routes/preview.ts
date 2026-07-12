@@ -24,6 +24,8 @@ import {
   principalMiddleware,
   requireScope,
 } from '../auth.js';
+import { doc } from '../docs/openapi.js';
+import { publishedEntryList } from '../docs/schemas.js';
 import { parseEntryQuery } from '../query.js';
 
 const scopeOf = (c: Context<AuthVars>): Scope => ({
@@ -71,6 +73,10 @@ export function previewRoutes(deps: AuthDeps): Hono<AuthVars> {
 
   app.get(
     `${BASE}/entries`,
+    doc('Preview', 'List draft/current entries', {
+      ok: publishedEntryList,
+      query: { content_type: 'Filter by content type apiId', locale: 'Resolve one locale' },
+    }),
     principalMiddleware(deps),
     environmentMiddleware(deps),
     requireScope(SCOPES.previewRead),
@@ -88,20 +94,28 @@ export function previewRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // Shareable preview links use ?preview_token= instead of a bearer header.
-  app.get(`${BASE}/entries/:id`, environmentMiddleware(deps), async (c) => {
-    const entryId = c.req.param('id');
-    const principal = await resolvePreviewPrincipal(deps, c, entryId);
-    authorize(principal, SCOPES.previewRead, scopeOf(c).spaceId);
+  app.get(
+    `${BASE}/entries/:id`,
+    doc('Preview', 'Get a draft/current entry', {
+      description: 'Accepts a bearer token or a shareable ?preview_token= minted from the entry.',
+      query: { locale: 'Resolve one locale', preview_token: 'Shareable preview token' },
+    }),
+    environmentMiddleware(deps),
+    async (c) => {
+      const entryId = c.req.param('id');
+      const principal = await resolvePreviewPrincipal(deps, c, entryId);
+      authorize(principal, SCOPES.previewRead, scopeOf(c).spaceId);
 
-    const entry = await getPreviewEntry(ctx, scopeOf(c), entryId, {
-      locale: c.req.query('locale'),
-    });
-    authorizeContent(principal, 'read', entry.contentType);
-    return c.json({
-      ...entry,
-      fields: maskDeniedFields(principal, entry.contentType, entry.fields),
-    });
-  });
+      const entry = await getPreviewEntry(ctx, scopeOf(c), entryId, {
+        locale: c.req.query('locale'),
+      });
+      authorizeContent(principal, 'read', entry.contentType);
+      return c.json({
+        ...entry,
+        fields: maskDeniedFields(principal, entry.contentType, entry.fields),
+      });
+    },
+  );
 
   return app;
 }

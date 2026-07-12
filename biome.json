@@ -6,6 +6,7 @@
       "**/dist/**",
       "**/node_modules/**",
       "**/.turbo/**",
+      "**/.wrangler/**",
       "**/drizzle/**",
       "**/components/ui/**",
       "**/test-results/**",
