@@ -206,7 +206,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
   app.post(
     '/spaces',
-    doc('Spaces', 'Create a space (admin token)', { ok: docs.spaceRef, status: 201 }),
+    doc('Spaces & environments', 'Create a space (admin token)', {
+      ok: docs.spaceRef,
+      status: 201,
+    }),
     requireScope(SCOPES.spaceAdmin),
     async (c) => {
       const body = await c.req.json();
