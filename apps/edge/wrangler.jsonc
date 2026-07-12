@@ -41,7 +41,7 @@
       // cw-neon → Neon project "contentworker" (wild-thunder-79321214), direct endpoint
       "binding": "HYPERDRIVE",
       "id": "a25711edf12046b28b6465c410da760b",
-      "localConnectionString": "postgres://cw:cw@localhost:5432/contentworker"
+      "localConnectionString": "postgres://postgres:postgres@localhost:5432/contentworker"
     }
   ],
   "kv_namespaces": [

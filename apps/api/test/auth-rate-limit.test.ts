@@ -52,6 +52,16 @@ describe('injected auth rate limiter (distributed seam)', () => {
     ]);
   });
 
+  it('never touches the limiter for requests with no credentials at all', async () => {
+    const { limiter, calls } = fakeLimiter(true); // even a blocked IP gets a plain 401
+    const app = makeApp(limiter);
+    const res = await app.request('/auth/me', {
+      headers: { 'cf-connecting-ip': '203.0.113.9' },
+    });
+    expect(res.status).toBe(401);
+    expect(calls).toEqual([]);
+  });
+
   it('returns 429 before touching auth when the limiter reports blocked', async () => {
     const { limiter, calls } = fakeLimiter(true);
     const app = makeApp(limiter);
