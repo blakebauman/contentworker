@@ -35,3 +35,4 @@ export * from './semantics.js';
 export * from './agent-audit.js';
 export * from './events/relay.js';
 export * from './events/dispatch.js';
+export * from './events/consume.js';

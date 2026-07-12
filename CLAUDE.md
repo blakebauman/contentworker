@@ -66,7 +66,9 @@ and only `apps/*` may bind concrete adapters to ports:
   One file per capability (entries, publishing, delivery, preview, assets, webhooks, rag,
   generation, auth, events/relay, events/dispatch).
 - **`packages/adapters/*`** — concrete port implementations: `store-postgres` (Drizzle),
-  `redis` (cache + BullMQ queue), `blob-s3`, `ai-anthropic`, `ai-azure-openai`, `vector-pgvector`.
+  `redis` (cache + BullMQ queue), `blob-s3`, `ai-anthropic`, `ai-azure-openai`, `vector-pgvector`,
+  `http-effects` (webhook sender + function invoker), and the Cloudflare set:
+  `queue-cf` (Queues producer), `cache-kv` (tag-versioned KV), `vector-vectorize`.
 - **`packages/test-kit`** (`@cw/test-kit`) — in-memory `ContentStore`, fake blob/vector/embeddings,
   deterministic clock/id fakes. This is what makes the app layer testable without infra.
 - **`apps/*`** — the only place adapters are bound to ports (the **composition root**):
@@ -74,7 +76,11 @@ and only `apps/*` may bind concrete adapters to ports:
   - `worker` — outbox relay loop + event dispatch (webhooks, cache invalidation, RAG embedding,
     enrich agent). `main.ts` is its composition root.
   - `mcp-server` — stateless streamable-HTTP MCP server; `wire.ts` is its composition root.
-  - `migrator` — runs Drizzle migrations as a K8s Job.
+  - `migrator` — runs Drizzle migrations as a K8s Job (plus the pgvector schema;
+    `SKIP_PGVECTOR=true` opts out).
+  - `edge` — the whole platform as **one Cloudflare Worker** (API + admin assets + MCP +
+    queue consumer + cron + `LiveHubDO` SSE hub + `AgentWorkflow` on Cloudflare Workflows),
+    on Neon via Hyperdrive. `wire.ts`/`main.ts` are its composition roots; see `docs/cloudflare.md`.
 
 **Key invariant:** the MCP tools, generation, and agents all call the *same* application
 use-cases as the HTTP API — so an AI agent can never do something a human API client can't.

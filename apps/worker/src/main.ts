@@ -3,6 +3,7 @@ import {
   createAzureOpenAIEmbeddings,
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
+import { createHttpFunctionInvoker, createWebhookSender } from '@cw/adapter-http-effects';
 import { createRedisCache, createRedisEventBus, createRedisQueue } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
@@ -12,10 +13,9 @@ import {
   type AppContext,
   EVENTS_TOPIC,
   type RagDeps,
-  dispatchEvent,
+  consumeEvent,
   relayOutbox,
   runDueScheduledActions,
-  runPublishAgents,
 } from '@cw/application';
 import type { DomainEvent } from '@cw/domain';
 import type { AIProvider, Clock, EmbeddingsProvider, IdGenerator } from '@cw/ports';
@@ -24,8 +24,6 @@ import { LocalEmbeddingsProvider } from '@cw/test-kit';
 import { Client, Connection } from '@temporalio/client';
 import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
-import { createHttpFunctionInvoker } from './function-invoker.js';
-import { createWebhookSender } from './webhook-sender.js';
 
 startTelemetry('cw-worker');
 
@@ -114,21 +112,25 @@ async function main() {
       'event.dispatch',
       async () => {
         try {
-          await dispatchEvent(ctx, { sender, cache, rag, invoker }, ev);
-          // Fan out to Live Content API subscribers (best-effort, never blocks).
-          await bus.publish(ev).catch((err) => logger.error({ err }, 'live publish error'));
-          if (agents && ev.type === 'entry.published') {
-            const runs = await withSpan(
-              'agents.on-publish',
-              () => runPublishAgents(ctx, agents, ev.scope, ev.entryId, agentConfig),
-              { 'entry.id': ev.entryId },
+          const runs = await consumeEvent(
+            ctx,
+            {
+              sender,
+              cache,
+              rag,
+              invoker,
+              bus,
+              onLiveError: (err) => logger.error({ err }, 'live publish error'),
+              agents,
+              agentConfig,
+            },
+            ev,
+          );
+          for (const r of runs) {
+            logger.info(
+              { entryId, status: r.status, decisions: r.decisions, usage: r.usage },
+              `${r.workflow} complete`,
             );
-            for (const r of runs) {
-              logger.info(
-                { entryId: ev.entryId, status: r.status, decisions: r.decisions, usage: r.usage },
-                `${r.workflow} complete`,
-              );
-            }
           }
           logger.info({ type: ev.type, entryId }, 'event dispatched');
         } catch (err) {

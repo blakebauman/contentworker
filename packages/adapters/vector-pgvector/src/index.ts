@@ -11,9 +11,53 @@ export interface PgVectorOptions {
 
 const toVectorLiteral = (v: number[]) => `[${v.join(',')}]`;
 
+type Sql = ReturnType<typeof postgres>;
+
+async function runSchemaDdl(sql: Sql, dimensions: number): Promise<void> {
+  await sql`CREATE EXTENSION IF NOT EXISTS vector`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS content_embeddings (
+      space_id text NOT NULL,
+      environment_id text NOT NULL,
+      entry_id text NOT NULL,
+      locale text NOT NULL,
+      chunk_index int NOT NULL,
+      chunk_text text NOT NULL,
+      embedding vector(${sql.unsafe(String(dimensions))}) NOT NULL,
+      model_id text NOT NULL,
+      dimensions int NOT NULL,
+      entry_version int NOT NULL,
+      PRIMARY KEY (space_id, environment_id, entry_id, locale, chunk_index)
+    )`;
+  await sql`
+    CREATE INDEX IF NOT EXISTS content_embeddings_ann
+      ON content_embeddings USING hnsw (embedding vector_cosine_ops)`;
+  await sql`
+    CREATE INDEX IF NOT EXISTS content_embeddings_scope
+      ON content_embeddings (space_id, environment_id, locale)`;
+}
+
 /**
- * pgvector-backed VectorStore. Self-initializes its schema (extension, table,
- * HNSW cosine index) on first use, so no separate migration step is required.
+ * Applies the pgvector schema (extension, table, HNSW cosine index) as an
+ * explicit migration step — run by `@cw/migrator` alongside the Drizzle
+ * migrations. Idempotent. Kept out of the request path so the adapter never
+ * executes DDL at runtime.
+ */
+export async function ensurePgVectorSchema(
+  connectionString: string,
+  opts: PgVectorOptions = {},
+): Promise<void> {
+  const sql = postgres(connectionString, { max: 1 });
+  try {
+    await runSchemaDdl(sql, opts.dimensions ?? 1536);
+  } finally {
+    await sql.end();
+  }
+}
+
+/**
+ * pgvector-backed VectorStore. Schema is applied by the migrator
+ * (`ensurePgVectorSchema`); `ensureSchema()` remains for tests/dev bootstraps.
  * Cosine distance via the `<=>` operator; score = 1 - distance.
  */
 export function createPgVectorStore(
@@ -26,29 +70,7 @@ export function createPgVectorStore(
   let ready: Promise<void> | null = null;
 
   const ensureSchema = (): Promise<void> => {
-    ready ??= (async () => {
-      await sql`CREATE EXTENSION IF NOT EXISTS vector`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS content_embeddings (
-          space_id text NOT NULL,
-          environment_id text NOT NULL,
-          entry_id text NOT NULL,
-          locale text NOT NULL,
-          chunk_index int NOT NULL,
-          chunk_text text NOT NULL,
-          embedding vector(${sql.unsafe(String(dimensions))}) NOT NULL,
-          model_id text NOT NULL,
-          dimensions int NOT NULL,
-          entry_version int NOT NULL,
-          PRIMARY KEY (space_id, environment_id, entry_id, locale, chunk_index)
-        )`;
-      await sql`
-        CREATE INDEX IF NOT EXISTS content_embeddings_ann
-          ON content_embeddings USING hnsw (embedding vector_cosine_ops)`;
-      await sql`
-        CREATE INDEX IF NOT EXISTS content_embeddings_scope
-          ON content_embeddings (space_id, environment_id, locale)`;
-    })();
+    ready ??= runSchemaDdl(sql, dimensions);
     return ready;
   };
 
@@ -56,7 +78,6 @@ export function createPgVectorStore(
     ensureSchema,
     async upsert(rows: VectorRow[]) {
       if (rows.length === 0) return;
-      await ensureSchema();
       await sql.begin(async (tx) => {
         for (const r of rows) {
           await tx`
@@ -76,13 +97,11 @@ export function createPgVectorStore(
       });
     },
     async deleteByEntry(scope: Scope, entryId: string) {
-      await ensureSchema();
       await sql`
         DELETE FROM content_embeddings
         WHERE space_id = ${scope.spaceId} AND environment_id = ${scope.environmentId} AND entry_id = ${entryId}`;
     },
     async query(scope: Scope, embedding: number[], opts2: { topK: number; minScore?: number }) {
-      await ensureSchema();
       const q = toVectorLiteral(embedding);
       const minScore = opts2.minScore ?? -1;
       const rows = await sql<{ entry_id: string; chunk_text: string; score: number }[]>`

@@ -516,12 +516,15 @@ function makeOutboxRepo(db: Db): OutboxRepo {
       });
     },
     async readPending(limit) {
+      // SKIP LOCKED: concurrent relayers (edge nudge vs cron sweeper, multiple
+      // workers) claim disjoint rows for the duration of their transaction.
       const rows = await db
         .select()
         .from(schema.outbox)
         .where(isNull(schema.outbox.relayedAt))
         .orderBy(asc(schema.outbox.occurredAt))
-        .limit(limit);
+        .limit(limit)
+        .for('update', { skipLocked: true });
       return rows.map((r) => r.payload as DomainEvent);
     },
     async markRelayed(eventIds) {
@@ -1609,10 +1612,26 @@ function makeTaxonomyRepo(db: Db): TaxonomyRepo {
   };
 }
 
+export interface PostgresStoreOptions {
+  /** Max connections in the driver pool (postgres.js default: 10). */
+  readonly max?: number;
+  /**
+   * Disable runtime pg_type fetching / prepared statements — required when
+   * connecting through an edge pooler such as Cloudflare Hyperdrive.
+   */
+  readonly fetchTypes?: boolean;
+  readonly prepare?: boolean;
+}
+
 export function createPostgresStore(
   connectionString: string,
+  options: PostgresStoreOptions = {},
 ): ContentStore & { close(): Promise<void> } {
-  const sql = postgres(connectionString);
+  const sql = postgres(connectionString, {
+    ...(options.max !== undefined ? { max: options.max } : {}),
+    ...(options.fetchTypes !== undefined ? { fetch_types: options.fetchTypes } : {}),
+    ...(options.prepare !== undefined ? { prepare: options.prepare } : {}),
+  });
   const db = drizzle(sql, { schema });
   return {
     spaces: makeSpaceRepo(db),

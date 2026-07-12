@@ -19,7 +19,9 @@ jobs:
     # (they skip otherwise).
     services:
       postgres:
-        image: postgres:16
+        # pgvector image: the migrator applies the content_embeddings schema
+        # (CREATE EXTENSION vector) alongside the Drizzle migrations.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -83,3 +85,12 @@ jobs:
 
       - name: Build admin
         run: pnpm --filter @cw/admin build
+
+      # Validates the Cloudflare Worker bundles for workerd (all bindings,
+      # nodejs_compat) and enforces a size ceiling. No deploy.
+      - name: Edge worker bundle (dry-run)
+        run: |
+          pnpm --filter @cw/edge build
+          size=$(gzip -c apps/edge/dist/main.js | wc -c)
+          echo "edge bundle gzip size: ${size} bytes"
+          test "$size" -lt 5000000

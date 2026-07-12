@@ -22,7 +22,9 @@ These docs describe how contentworker is built and how to run, extend, and integ
    email connector (`@cw/sdk-email`), the Management client (`@cw/sdk-management`), and
    `cw-codegen` for typed field shapes.
 8. **[Deployment](./deployment.md)** — Docker, docker-compose (including admin + override),
-   and the cloud-agnostic Helm chart with per-cloud (AWS/GCP/Azure/local) values.
+   and the cloud-agnostic Helm chart with per-cloud (AWS/GCP/Azure/local) values. For the
+   serverless target — one Worker on Cloudflare with Neon via Hyperdrive — see
+   **[Cloudflare](./cloudflare.md)**.
 9. **[Configuration](./configuration.md)** — the complete environment-variable reference.
 10. **[Development](./development.md)** — workspace commands, testing, conventions, schema
     reference, and how to add a new use-case.

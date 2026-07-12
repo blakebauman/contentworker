@@ -22,7 +22,11 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["pnpm", "--filter", "@cw/migrator", "start"]
+          # Configmap carries EMBEDDINGS_DIM (pgvector column width) and any
+          # SKIP_PGVECTOR override alongside the secret's DATABASE_URL.
           envFrom:
+            - configMapRef:
+                name: {{ include "cw.fullname" . }}-config
             - secretRef:
                 name: {{ include "cw.secretName" . }}
 {{- end }}

@@ -139,7 +139,7 @@ publish-time indexing. The API can still serve search with local embeddings when
 | `AGENTS_ENRICH` | `false` | Run the enrich agent on `entry.published` (needs an AI provider) |
 | `AGENTS_MODERATE` | `false` | Run the moderation agent on `entry.published` (classify + hold) |
 | `AGENTS_AUTO_APPLY` | `false` | Auto-apply enrichment vs. route to human review |
-| `AGENT_RUNTIME` | — | `temporal` → durable workflows via Temporal; unset → in-process |
+| `AGENT_RUNTIME` | — | `temporal` → durable workflows via Temporal; `cloudflare-workflows` → Cloudflare Workflows (edge target only); unset → in-process |
 | `SCHEDULE_INTERVAL_MS` | `5000` | Poll interval for due scheduled publish/unpublish actions |
 
 The worker **requires** both `DATABASE_URL` and `REDIS_URL`.
@@ -181,3 +181,18 @@ See [Admin UI](./admin-ui.md).
 
 The MCP server also honours `DATABASE_URL`, `AI_PROVIDER`, `EMBEDDINGS_PROVIDER`, `EMBEDDINGS_DIM`,
 and the `SEED_*` vars.
+
+## Migrator
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | required | Target database for Drizzle migrations |
+| `EMBEDDINGS_DIM` | `1536` | Vector column width for the pgvector schema it applies |
+| `SKIP_PGVECTOR` | `false` | `true` skips the pgvector schema (databases without the extension) |
+
+## Cloudflare (`apps/edge`)
+
+The Cloudflare Worker target reuses these var names verbatim; Cloudflare-native
+resources (`HYPERDRIVE`, `KV_CACHE`, `EVENTS_QUEUE`, `VECTORIZE`, `LIVE_HUB`,
+`AGENT_WF`) replace `DATABASE_URL`/`REDIS_URL` where a binding exists. See
+[cloudflare.md](./cloudflare.md) for the mapping and provisioning steps.

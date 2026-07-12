@@ -8,3 +8,5 @@ dist/
 coverage/
 .DS_Store
 infra/helm/contentworker/charts/
+.wrangler/
+.dev.vars*
