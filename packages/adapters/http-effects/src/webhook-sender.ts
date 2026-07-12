@@ -7,6 +7,9 @@ import type { WebhookSendResult, WebhookSender } from '@cw/ports';
  * `X-CW-Signature: sha256=<hex>` header so receivers can verify authenticity,
  * plus a timestamp to bound replay. Network/HTTP errors surface as
  * `delivered: false` so the queue can retry.
+ *
+ * Uses `node:crypto` — available on Node and on Cloudflare Workers via the
+ * `nodejs_compat` compatibility flag.
  */
 export function createWebhookSender(fetchImpl: typeof fetch = fetch): WebhookSender {
   return {

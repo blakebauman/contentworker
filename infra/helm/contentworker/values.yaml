@@ -156,6 +156,9 @@ mcpServer:
 
 migrator:
   enabled: true
+  # Set true when the database lacks the pgvector extension (disables the
+  # content_embeddings schema step; semantic search needs it).
+  skipPgvector: false
 
 ingress:
   enabled: false

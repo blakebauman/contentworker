@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensurePgVectorSchema } from '@cw/adapter-vector-pgvector';
 import { logger } from '@cw/telemetry';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
@@ -22,6 +23,15 @@ async function main() {
   logger.info({ migrationsFolder }, 'running migrations');
   await migrate(db, { migrationsFolder });
   await sql.end();
+
+  // pgvector schema (extension + content_embeddings + HNSW index) is applied
+  // here — not at adapter runtime — parameterized by embedding dimension.
+  // Set SKIP_PGVECTOR=true for databases without the pgvector extension.
+  if (process.env.SKIP_PGVECTOR !== 'true') {
+    const dimensions = Number(process.env.EMBEDDINGS_DIM ?? 1536);
+    logger.info({ dimensions }, 'applying pgvector schema');
+    await ensurePgVectorSchema(url, { dimensions });
+  }
   logger.info('migrations complete');
 }
 

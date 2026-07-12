@@ -90,7 +90,13 @@ function resolveRequestToken(deps: AuthDeps, c: Context): string {
  */
 export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars> {
   return async (c, next) => {
-    const ip = clientIp(c.req.header('x-forwarded-for'), c.req.header('x-real-ip'));
+    // CF-Connecting-IP first: on Cloudflare neither x-forwarded-for nor
+    // x-real-ip reaches the Worker, and a missing header would collapse every
+    // client into one shared 'unknown' rate-limit bucket (global 429s).
+    const ip = clientIp(
+      c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for'),
+      c.req.header('x-real-ip'),
+    );
     if (authRateLimiter.isBlocked(ip)) {
       logger.warn({ ip, path: c.req.path }, 'auth: rate limit exceeded');
       throw new HTTPException(429, { message: 'Too many authentication attempts' });

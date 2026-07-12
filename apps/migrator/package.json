@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@cw/adapter-store-postgres": "workspace:*",
+    "@cw/adapter-vector-pgvector": "workspace:*",
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5",
     "@cw/telemetry": "workspace:*"

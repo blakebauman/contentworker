@@ -9,6 +9,9 @@ data:
   EMBEDDINGS_PROVIDER: {{ .Values.config.embeddingsProvider | quote }}
   {{- end }}
   EMBEDDINGS_DIM: {{ .Values.config.embeddingsDim | quote }}
+  {{- if .Values.migrator.skipPgvector }}
+  SKIP_PGVECTOR: "true"
+  {{- end }}
   SEED_SPACE_ID: {{ .Values.config.seedSpaceId | quote }}
   SEED_ENV_ID: {{ .Values.config.seedEnvId | quote }}
   SEED_DEFAULT_LOCALE: {{ .Values.config.seedDefaultLocale | quote }}

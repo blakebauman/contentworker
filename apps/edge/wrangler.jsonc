@@ -1,0 +1,125 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cw-edge",
+  "main": "src/main.ts",
+  "compatibility_date": "2026-06-01",
+  // nodejs_compat provides node:crypto/Buffer for token hashing, webhook HMAC,
+  // and the postgres.js driver. It also populates process.env from vars.
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // @cw/telemetry boots the OTel NodeSDK + pino (Node-only); on Workers the
+  // shim logs structured JSON to console and passes spans through.
+  "alias": {
+    "@cw/telemetry": "./src/telemetry-shim.ts"
+  },
+
+  // Admin SPA served from the same Worker (same-origin — no CORS/proxy).
+  // API paths run the Worker first; everything else falls through to assets.
+  "assets": {
+    "directory": "../admin/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/spaces",
+      "/spaces/*",
+      "/delivery/*",
+      "/preview/*",
+      "/auth/*",
+      "/mcp",
+      "/healthz",
+      "/readyz"
+    ]
+  },
+
+  // ---- Data plane -----------------------------------------------------------
+  // Hyperdrive fronts Neon's UNPOOLED endpoint (Hyperdrive is the pooler;
+  // stacking pgbouncer under it breaks transaction pinning).
+  // Create with: wrangler hyperdrive create cw-neon --connection-string=$NEON_UNPOOLED_URL
+  "hyperdrive": [
+    {
+      // cw-neon → Neon project "contentworker" (wild-thunder-79321214), direct endpoint
+      "binding": "HYPERDRIVE",
+      "id": "a25711edf12046b28b6465c410da760b",
+      "localConnectionString": "postgres://cw:cw@localhost:5432/contentworker"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV_CACHE",
+      "id": "43d0683e48b94bfe98ce95dc808cbf0e"
+    }
+  ],
+  // Create with: wrangler vectorize create cw-vectors --dimensions=1536 --metric=cosine
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "cw-vectors"
+    }
+  ],
+
+  // ---- Event pipeline ---------------------------------------------------------
+  "queues": {
+    "producers": [{ "binding": "EVENTS_QUEUE", "queue": "cw-events" }],
+    "consumers": [
+      {
+        "queue": "cw-events",
+        // With AGENTS_* enabled, each entry.published can await up to two
+        // Workflow runs sequentially — drop max_batch_size to 1-5 there so a
+        // batch stays inside the consumer's wall-clock limit.
+        "max_batch_size": 25,
+        "max_batch_timeout": 2,
+        "max_retries": 5,
+        "dead_letter_queue": "cw-events-dlq"
+      }
+    ]
+  },
+  // Outbox sweeper + scheduled publish/unpublish (the post-commit waitUntil
+  // nudge in main.ts provides sub-second relay; this catches crashes).
+  "triggers": { "crons": ["* * * * *"] },
+
+  // ---- Live Content API + agents ---------------------------------------------
+  "durable_objects": {
+    "bindings": [{ "name": "LIVE_HUB", "class_name": "LiveHubDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveHubDO"] }],
+  "workflows": [
+    {
+      "binding": "AGENT_WF",
+      "name": "cw-agent",
+      "class_name": "AgentWorkflow"
+    }
+  ],
+
+  // ---- Vars (same names as the Node path; secrets via `wrangler secret put`:
+  // ADMIN_TOKEN, MCP_TOKEN, TOKEN_PEPPER, SESSION_SECRET, ANTHROPIC_API_KEY,
+  // AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY = R2 S3-API token) ---------------
+  "vars": {
+    "ROLE": "all",
+    // Workers never sets NODE_ENV=production, so the secrets guard must be
+    // explicit: refuses to serve with dev-default ADMIN_TOKEN/keys.
+    "REQUIRE_SECURE_SECRETS": "true",
+    "SEED_DEV": "false",
+    "AGENT_RUNTIME": "cloudflare-workflows",
+    "AGENTS_ENRICH": "false",
+    "AGENTS_MODERATE": "false",
+    "AGENTS_AUTO_APPLY": "false",
+    "EMBEDDINGS_PROVIDER": "",
+    "EMBEDDINGS_DIM": "1536",
+    "BLOB_BUCKET": "",
+    "BLOB_ENDPOINT": "",
+    "BLOB_FORCE_PATH_STYLE": "true",
+    "AWS_REGION": "auto"
+  },
+
+  // Enterprise scale-out: deploy the same script per role with wrangler
+  // environments (env.delivery / env.management / env.pipeline), overriding
+  // ROLE and routes; attach the queue consumer only to the pipeline deployment.
+  "env": {
+    // Zero-infrastructure demo: no bindings → seeded in-memory store, fake
+    // blob, stub AI (same fallbacks as the Node dev server). Dev keys work.
+    "demo": {
+      "vars": { "ROLE": "all", "REQUIRE_SECURE_SECRETS": "false" }
+    }
+  }
+}

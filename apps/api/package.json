@@ -3,6 +3,28 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./app": {
+      "types": "./src/app.ts",
+      "default": "./src/app.ts"
+    },
+    "./auth": {
+      "types": "./src/auth.ts",
+      "default": "./src/auth.ts"
+    },
+    "./config": {
+      "types": "./src/config.ts",
+      "default": "./src/config.ts"
+    },
+    "./secure-secrets": {
+      "types": "./src/secure-secrets.ts",
+      "default": "./src/secure-secrets.ts"
+    },
+    "./seed": {
+      "types": "./src/seed.ts",
+      "default": "./src/seed.ts"
+    }
+  },
   "scripts": {
     "dev": "node --import tsx --watch src/server.ts",
     "start": "node --import tsx src/server.ts",

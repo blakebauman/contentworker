@@ -18,6 +18,11 @@ export interface S3BlobOptions {
   readonly expiresIn?: number;
   /** Public base URL for downloads; when set, download URLs are unsigned. */
   readonly publicBaseUrl?: string;
+  /**
+   * Explicit credentials. Optional on Node (the SDK's default provider chain
+   * applies); required on runtimes without one, e.g. Cloudflare Workers.
+   */
+  readonly credentials?: { accessKeyId: string; secretAccessKey: string };
 }
 
 /**
@@ -30,6 +35,7 @@ export function createS3BlobStore(opts: S3BlobOptions): BlobStore {
     region: opts.region ?? process.env.AWS_REGION ?? 'us-east-1',
     ...(opts.endpoint ? { endpoint: opts.endpoint } : {}),
     ...(opts.forcePathStyle ? { forcePathStyle: true } : {}),
+    ...(opts.credentials ? { credentials: opts.credentials } : {}),
   });
   const expiresIn = opts.expiresIn ?? 900;
 

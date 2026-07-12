@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./server": {
+      "types": "./src/server.ts",
+      "default": "./src/server.ts"
+    },
+    "./wire": {
+      "types": "./src/wire.ts",
+      "default": "./src/wire.ts"
+    }
+  },
   "scripts": {
     "start": "node --import tsx src/main.ts",
     "typecheck": "tsc --noEmit",
