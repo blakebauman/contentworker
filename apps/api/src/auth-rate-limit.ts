@@ -1,7 +1,22 @@
 /**
+ * Rate-limit seam for failed auth attempts. The in-process implementation
+ * below serves single-node deployments; distributed runtimes (Cloudflare
+ * Workers) inject a shared-state implementation (a Durable Object per client
+ * key) through `AuthDeps.rateLimiter`.
+ */
+export interface AuthRateLimit {
+  /** True when recent failures exceed the limit. */
+  isBlocked(key: string): boolean | Promise<boolean>;
+  /** Record a failed attempt; returns true if the limit is now exceeded. */
+  recordFailure(key: string): boolean | Promise<boolean>;
+  /** Reset the window (called on successful auth). */
+  clear(key: string): void | Promise<void>;
+}
+
+/**
  * In-process sliding-window rate limiter for failed auth attempts.
  */
-export class AuthRateLimiter {
+export class AuthRateLimiter implements AuthRateLimit {
   private readonly attempts = new Map<string, number[]>();
 
   constructor(

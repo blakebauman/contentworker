@@ -16,13 +16,14 @@ import type { McpDeps } from '@cw/mcp-server/wire';
 import { Hono } from 'hono';
 import { AgentWorkflow } from './agents/workflow.js';
 import { LiveHubDO, createDoEventBus } from './do/live-hub.js';
+import { RateLimiterDO, createDoRateLimiter } from './do/rate-limiter.js';
 import type { EdgeEnv } from './env.js';
 import { mcpRoutes } from './mcp.js';
 import { liveRoutes } from './routes/live.js';
 import { type EdgeWired, agentConfigFromEnv, makeAgents, wireEdge } from './wire.js';
 
 // Worker-entrypoint classes must be exported from the deployed script.
-export { AgentWorkflow, LiveHubDO };
+export { AgentWorkflow, LiveHubDO, RateLimiterDO };
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -32,6 +33,9 @@ let devSeeded = false;
 function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
   const app = new Hono();
   const mountManagement = wired.config.role === 'all' || wired.config.role === 'management';
+  // Distributed failed-auth limiter: one DO per client IP, global across
+  // isolates (the in-process default only sees its own isolate's failures).
+  const rateLimiter = env.AUTH_LIMITER ? createDoRateLimiter(env.AUTH_LIMITER) : undefined;
 
   if (env.LIVE_HUB) {
     // Pre-mounted (first match wins): the DO-served Live Content API replaces
@@ -46,6 +50,7 @@ function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
       ai: wired.ai,
       bus: wired.bus,
       agents: new InProcessAgentRuntime(makeActivities({ ctx: wired.ctx, ai: wired.ai })),
+      rateLimiter,
     };
     app.route('/', liveRoutes(authDeps, env.LIVE_HUB));
   }
@@ -69,7 +74,10 @@ function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
     app.route('/', mcpRoutes(mcpDeps));
   }
 
-  app.route('/', createApp(wired.ctx, wired.config, wired.rag, wired.blob, wired.ai, wired.bus));
+  app.route(
+    '/',
+    createApp(wired.ctx, wired.config, wired.rag, wired.blob, wired.ai, wired.bus, rateLimiter),
+  );
   return app;
 }
 

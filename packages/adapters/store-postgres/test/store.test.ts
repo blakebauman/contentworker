@@ -32,12 +32,19 @@ import { createPostgresStore } from '../src/store.js';
 // JSONB query path, the published read model, the outbox, and transactions
 // behave like the in-memory contract. Opt-in: set TEST_DATABASE_URL to a
 // migrated database (the suite isolates itself with a unique space id per run).
+// TEST_PG_FETCH_TYPES=false runs with the Cloudflare edge target's driver
+// options (postgres.js fetch_types off, as used behind Hyperdrive) to prove
+// jsonb/array decoding doesn't depend on runtime pg_type discovery.
 const URL = process.env.TEST_DATABASE_URL;
+const storeOptions =
+  process.env.TEST_PG_FETCH_TYPES === 'false' ? { max: 5, fetchTypes: false } : {};
 
 const clock: Clock = { now: () => new Date('2026-01-01T00:00:00.000Z') };
 const ids: IdGenerator = { newId: () => uuidv7() };
 
-describe.skipIf(!URL)('Postgres store (contract)', () => {
+// 30s: the suite is opt-in and may target a remote database (e.g. a Neon
+// branch), where per-query RTT makes the 5s default too tight.
+describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
   let store: ReturnType<typeof createPostgresStore>;
   let ctx: AppContext;
   // Unique per run so repeated runs against the same database never collide.
@@ -45,7 +52,7 @@ describe.skipIf(!URL)('Postgres store (contract)', () => {
   const scope = { spaceId, environmentId: 'main' };
 
   beforeAll(async () => {
-    store = createPostgresStore(URL as string);
+    store = createPostgresStore(URL as string, storeOptions);
     ctx = { store, clock, ids };
     await createSpace(ctx, { spaceId, name: 'Test', defaultLocale: 'en-US', locales: ['en-US'] });
     await createContentType(ctx, scope, {

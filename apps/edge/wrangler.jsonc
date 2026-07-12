@@ -80,9 +80,15 @@
 
   // ---- Live Content API + agents ---------------------------------------------
   "durable_objects": {
-    "bindings": [{ "name": "LIVE_HUB", "class_name": "LiveHubDO" }]
+    "bindings": [
+      { "name": "LIVE_HUB", "class_name": "LiveHubDO" },
+      { "name": "AUTH_LIMITER", "class_name": "RateLimiterDO" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveHubDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["LiveHubDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["RateLimiterDO"] }
+  ],
   "workflows": [
     {
       "binding": "AGENT_WF",
