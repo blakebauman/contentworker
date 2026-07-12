@@ -12,7 +12,9 @@ import { logger } from '@cw/telemetry';
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { HTTPException } from 'hono/http-exception';
-import { AuthRateLimiter, clientIp } from './auth-rate-limit.js';
+import { type AuthRateLimit, AuthRateLimiter, clientIp } from './auth-rate-limit.js';
+
+export type { AuthRateLimit } from './auth-rate-limit.js';
 import { decodeSession, sessionCookieName } from './oidc/session.js';
 
 /** Default SHA-256 hasher (no pepper). Prefer {@link createApiHasher} in production. */
@@ -47,6 +49,11 @@ export interface AuthDeps {
   readonly bus: EventBus;
   /** Validates admin SSO session cookies when no bearer token is sent. */
   readonly sessionSecret?: string;
+  /**
+   * Failed-auth rate limiter. Defaults to the in-process sliding window;
+   * multi-isolate runtimes (Cloudflare Workers) inject a shared-state one.
+   */
+  readonly rateLimiter?: AuthRateLimit;
 }
 
 const ADMIN: Principal = {
@@ -97,7 +104,8 @@ export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars>
       c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for'),
       c.req.header('x-real-ip'),
     );
-    if (authRateLimiter.isBlocked(ip)) {
+    const limiter = deps.rateLimiter ?? authRateLimiter;
+    if (await limiter.isBlocked(ip)) {
       logger.warn({ ip, path: c.req.path }, 'auth: rate limit exceeded');
       throw new HTTPException(429, { message: 'Too many authentication attempts' });
     }
@@ -105,10 +113,10 @@ export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars>
     const token = resolveRequestToken(deps, c);
     try {
       const principal = await resolvePrincipal(deps, token);
-      authRateLimiter.clear(ip);
+      await limiter.clear(ip);
       c.set('principal', principal);
     } catch {
-      const limited = authRateLimiter.recordFailure(ip);
+      const limited = await limiter.recordFailure(ip);
       logger.warn({ ip, path: c.req.path, method: c.req.method }, 'auth: invalid credentials');
       if (limited) {
         throw new HTTPException(429, { message: 'Too many authentication attempts' });

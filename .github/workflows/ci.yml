@@ -83,6 +83,13 @@ jobs:
       - name: Test (incl. Postgres + Redis adapter contract suites)
         run: pnpm -r test
 
+      # Second pass with the Cloudflare edge target's driver options
+      # (postgres.js fetch_types off, as used behind Hyperdrive).
+      - name: Store contract suite with edge driver options
+        run: pnpm --filter @cw/adapter-store-postgres test
+        env:
+          TEST_PG_FETCH_TYPES: "false"
+
       - name: Build admin
         run: pnpm --filter @cw/admin build
 

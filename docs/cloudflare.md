@@ -23,6 +23,7 @@ composition roots.
 | pgvector | `VECTORIZE` index (hybrid search's FTS leg stays in Neon; RRF fusion is app code) |
 | S3/MinIO blob | R2 via its S3 API (same `@cw/adapter-blob-s3`, presigned URLs) |
 | Temporal agent runtime | `AGENT_WF` Cloudflare Workflow (`AGENT_RUNTIME=cloudflare-workflows`) |
+| In-process auth rate limiter | `AUTH_LIMITER` Durable Object per client IP — the failure budget is global across isolates/colos (same `AUTH_RATE_LIMIT_*` vars) |
 | Admin SPA (static hosting) | Same Worker, `assets` binding (same-origin, no CORS) |
 
 Every env var keeps its Node-path name ([configuration.md](configuration.md));

@@ -2,7 +2,7 @@ import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
 import type { AppContext, RagDeps } from '@cw/application';
 import type { AIProvider, BlobStore, EventBus } from '@cw/ports';
 import { Hono } from 'hono';
-import type { AuthDeps } from './auth.js';
+import type { AuthDeps, AuthRateLimit } from './auth.js';
 import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
 import { onError } from './http.js';
@@ -28,6 +28,7 @@ export function createApp(
   blob: BlobStore,
   ai: AIProvider,
   bus: EventBus = noopBus,
+  rateLimiter?: AuthRateLimit,
 ): Hono {
   const app = new Hono();
   app.onError(onError);
@@ -48,6 +49,7 @@ export function createApp(
     // run in-process; the durable Temporal path serves the worker's
     // on-publish runs (AGENT_RUNTIME=temporal).
     agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),
+    rateLimiter,
   };
 
   const mountManagement = config.role === 'all' || config.role === 'management';

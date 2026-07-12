@@ -1,4 +1,5 @@
 import type { LiveHubDO } from './do/live-hub.js';
+import type { RateLimiterDO } from './do/rate-limiter.js';
 
 /**
  * Bindings + vars for the Cloudflare deployment. Var names are identical to
@@ -19,6 +20,8 @@ export interface EdgeEnv {
   readonly VECTORIZE?: VectorizeIndex;
   /** Live Content API fan-out hub (one object per space:environment). */
   readonly LIVE_HUB?: DurableObjectNamespace<LiveHubDO>;
+  /** Distributed failed-auth rate limiter (one object per client IP). */
+  readonly AUTH_LIMITER?: DurableObjectNamespace<RateLimiterDO>;
   /** Agent workflows (enrich/moderate/curate/repurpose) on Cloudflare Workflows. */
   readonly AGENT_WF?: Workflow;
   /** Static admin SPA assets (configured via wrangler `assets`). */
@@ -52,4 +55,6 @@ export interface EdgeEnv {
   readonly AGENTS_AUTO_APPLY?: string;
   readonly AGENT_RUNTIME?: string;
   readonly REQUIRE_SECURE_SECRETS?: string;
+  readonly AUTH_RATE_LIMIT_MAX?: string;
+  readonly AUTH_RATE_LIMIT_WINDOW_MS?: string;
 }

@@ -1,0 +1,82 @@
+import { describe, expect, it } from 'vitest';
+import { createApp } from '../src/app.js';
+import { type AuthRateLimit, clientIp } from '../src/auth-rate-limit.js';
+import type { ApiConfig } from '../src/config.js';
+import { wire } from '../src/wire.js';
+
+const config: ApiConfig = {
+  role: 'all',
+  port: 0,
+  cmaKey: 'cma',
+  cdaKey: 'cda',
+  cpaKey: 'cpa',
+  adminToken: 'admin',
+  seed: { spaceId: 's1', environmentId: 'main', defaultLocale: 'en-US', locales: ['en-US'] },
+} as ApiConfig;
+
+/** Recording fake for the injected (distributed) limiter seam. */
+function fakeLimiter(blocked = false) {
+  const calls: { method: string; key: string }[] = [];
+  const limiter: AuthRateLimit = {
+    async isBlocked(key) {
+      calls.push({ method: 'isBlocked', key });
+      return blocked;
+    },
+    async recordFailure(key) {
+      calls.push({ method: 'recordFailure', key });
+      return false;
+    },
+    async clear(key) {
+      calls.push({ method: 'clear', key });
+    },
+  };
+  return { limiter, calls };
+}
+
+function makeApp(limiter: AuthRateLimit) {
+  const { ctx, rag, blob, ai, bus } = wire(config);
+  return createApp(ctx, config, rag, blob, ai, bus, limiter);
+}
+
+describe('injected auth rate limiter (distributed seam)', () => {
+  it('keys failures by CF-Connecting-IP and records them on bad tokens', async () => {
+    const { limiter, calls } = fakeLimiter();
+    const app = makeApp(limiter);
+    const res = await app.request('/auth/me', {
+      headers: { authorization: 'Bearer wrong', 'cf-connecting-ip': '203.0.113.9' },
+    });
+    expect(res.status).toBe(401);
+    expect(calls).toEqual([
+      { method: 'isBlocked', key: '203.0.113.9' },
+      { method: 'recordFailure', key: '203.0.113.9' },
+    ]);
+  });
+
+  it('returns 429 before touching auth when the limiter reports blocked', async () => {
+    const { limiter, calls } = fakeLimiter(true);
+    const app = makeApp(limiter);
+    const res = await app.request('/auth/me', {
+      headers: { authorization: 'Bearer admin', 'cf-connecting-ip': '203.0.113.9' },
+    });
+    expect(res.status).toBe(429);
+    expect(calls).toEqual([{ method: 'isBlocked', key: '203.0.113.9' }]);
+  });
+
+  it('clears the window on successful auth', async () => {
+    const { limiter, calls } = fakeLimiter();
+    const app = makeApp(limiter);
+    const res = await app.request('/auth/me', {
+      headers: { authorization: 'Bearer admin', 'cf-connecting-ip': '203.0.113.9' },
+    });
+    expect(res.status).toBe(200);
+    expect(calls.map((c) => c.method)).toEqual(['isBlocked', 'clear']);
+  });
+});
+
+describe('clientIp', () => {
+  it('prefers the first X-Forwarded-For hop, then remote addr, then unknown', () => {
+    expect(clientIp('1.1.1.1, 2.2.2.2', '3.3.3.3')).toBe('1.1.1.1');
+    expect(clientIp(undefined, '3.3.3.3')).toBe('3.3.3.3');
+    expect(clientIp(undefined, undefined)).toBe('unknown');
+  });
+});
