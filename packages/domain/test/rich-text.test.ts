@@ -5,6 +5,7 @@ import {
   extractReferences,
   extractRichTextTargets,
   isRichTextDocument,
+  richTextToPlainText,
   validateEntryFields,
   validateRichText,
 } from '../src/index.js';
@@ -63,6 +64,95 @@ describe('rich text document', () => {
       { id: 'e2', linkType: 'Entry' },
       { id: 'a1', linkType: 'Asset' },
     ]);
+  });
+});
+
+describe('rich text plain-text extraction', () => {
+  it('joins blocks with blank lines and ignores marks', () => {
+    const value = doc([
+      { nodeType: 'heading-1', content: [{ nodeType: 'text', value: 'Title' }] },
+      paragraph('Body text'),
+    ]);
+    expect(richTextToPlainText(value)).toBe('Title\n\nBody text');
+  });
+
+  it('reads a block with inline nodes as one block', () => {
+    const value = doc([
+      {
+        nodeType: 'paragraph',
+        content: [
+          { nodeType: 'text', value: 'See ' },
+          {
+            nodeType: 'hyperlink',
+            data: { uri: 'https://example.com' },
+            content: [{ nodeType: 'text', value: 'the docs' }],
+          },
+          { nodeType: 'text', value: ' for more.' },
+        ],
+      },
+    ]);
+    expect(richTextToPlainText(value)).toBe('See the docs for more.');
+  });
+
+  it('descends into nested block containers', () => {
+    const value = doc([
+      {
+        nodeType: 'unordered-list',
+        content: [
+          {
+            nodeType: 'list-item',
+            content: [{ nodeType: 'paragraph', content: [{ nodeType: 'text', value: 'One' }] }],
+          },
+          {
+            nodeType: 'list-item',
+            content: [{ nodeType: 'paragraph', content: [{ nodeType: 'text', value: 'Two' }] }],
+          },
+        ],
+      },
+    ]);
+    expect(richTextToPlainText(value)).toBe('One\n\nTwo');
+  });
+
+  it('renders hard breaks as newlines within a block', () => {
+    const value = doc([
+      {
+        nodeType: 'paragraph',
+        content: [
+          { nodeType: 'text', value: 'line one' },
+          { nodeType: 'hard-break' },
+          { nodeType: 'text', value: 'line two' },
+        ],
+      },
+    ]);
+    expect(richTextToPlainText(value)).toBe('line one\nline two');
+  });
+
+  it('keeps a paragraph made only of hyperlinks as one block', () => {
+    const value = doc([
+      {
+        nodeType: 'paragraph',
+        content: [
+          {
+            nodeType: 'hyperlink',
+            data: { uri: 'https://a' },
+            content: [{ nodeType: 'text', value: 'Read' }],
+          },
+          {
+            nodeType: 'hyperlink',
+            data: { uri: 'https://b' },
+            content: [{ nodeType: 'text', value: ' more' }],
+          },
+        ],
+      },
+    ]);
+    expect(richTextToPlainText(value)).toBe('Read more');
+  });
+
+  it('embeds contribute nothing; non-documents yield empty', () => {
+    expect(richTextToPlainText(doc([embeddedEntry('e1'), paragraph('after')]))).toBe('after');
+    expect(richTextToPlainText('plain string')).toBe('');
+    expect(richTextToPlainText(undefined)).toBe('');
+    expect(richTextToPlainText(doc([]))).toBe('');
   });
 });
 

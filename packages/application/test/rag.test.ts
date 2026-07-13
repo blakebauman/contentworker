@@ -24,6 +24,45 @@ describe('P7: RAG indexing + semantic search', () => {
     expect(chunk('a b c d e', 2)).toEqual(['a b', 'c d', 'e']);
   });
 
+  it('extracts plain text from rich-text values per locale', () => {
+    const body = {
+      nodeType: 'document',
+      content: [
+        { nodeType: 'heading-1', content: [{ nodeType: 'text', value: 'Guide' }] },
+        { nodeType: 'paragraph', content: [{ nodeType: 'text', value: 'Rich body text' }] },
+      ],
+    };
+    const text = extractTextByLocale({
+      title: { 'en-US': 'Hello' },
+      body: { 'en-US': body, 'de-DE': body },
+    });
+    expect(text['en-US']).toContain('Guide');
+    expect(text['en-US']).toContain('Rich body text');
+    expect(text['de-DE']).toContain('Guide');
+  });
+
+  it('indexes an entry whose only text lives in a rich-text body', async () => {
+    await indexEntryEmbeddings(deps, scope, {
+      entryId: 'e-rich',
+      entryVersion: 1,
+      fields: {
+        body: {
+          'en-US': {
+            nodeType: 'document',
+            content: [
+              {
+                nodeType: 'paragraph',
+                content: [{ nodeType: 'text', value: 'Kubernetes orchestrates containers' }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const hits = await semanticSearch(deps, scope, 'kubernetes containers', { topK: 2 });
+    expect(hits[0]?.entryId).toBe('e-rich');
+  });
+
   it('indexes entries and ranks the relevant one first', async () => {
     await indexEntryEmbeddings(deps, scope, {
       entryId: 'e-postgres',

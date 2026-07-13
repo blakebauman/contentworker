@@ -36,6 +36,29 @@ A content type is an ordered list of typed, validated fields. The 11 field types
 | `Link` | Reference to an Entry or Asset | `{ id, linkType }` |
 | `Array` | Homogeneous list of `Symbol` or `Link` | array |
 
+### Rich text
+
+A `RichText` value is a document tree (`packages/domain/src/rich-text/rich-text.ts`): a
+`document` root whose `content` is block and inline nodes. Text lives in `text` nodes carrying
+`marks`; reference nodes carry a `data.target` link so the reference graph can be extracted from
+rich text exactly as from `Link` fields (`extractRichTextTargets`). `richTextToPlainText`
+flattens a document for search/embedding.
+
+The node vocabulary the admin editor produces:
+
+- **Blocks** — `paragraph`, `heading-1`…`heading-6`, `blockquote`, `unordered-list`,
+  `ordered-list`, `list-item`, `code-block` (optional `data.language`), `hr`.
+- **Inline** — `text` (with `marks`), `hard-break`, `hyperlink` (`data.uri`, text children).
+- **References** (`REFERENCE_NODE_TYPES`, each with `data.target: { id, linkType }`) —
+  `embedded-entry-block`, `embedded-asset-block`, `embedded-entry-inline`, `entry-hyperlink`,
+  `asset-hyperlink`.
+- **Marks** — `bold`, `italic`, `underline`, `code`, `strikethrough`.
+
+`nodeType` is an open string: validation (`validateRichText`) only constrains `text` nodes
+(string `value`) and reference nodes (well-formed `data.target`), so documents authored through
+the API may carry additional node types and still validate; delivery consumers should render
+unrecognized nodes defensively.
+
 ### Field definition
 
 ```ts

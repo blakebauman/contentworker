@@ -207,6 +207,9 @@ For each content type it emits two interfaces plus shared helpers and lookup map
   `RichTextDocument`, `Link` → `EntryLink`/`AssetLink`, `Array` → element type `[]`.
   An `in` validation becomes a literal union (`status: 'draft' | 'live'`) exactly where the
   domain enforces it (`Symbol`/`Text`/`Integer`/`Number`); `required` controls optionality.
+  When rendering `RichTextDocument` values, handle the full node vocabulary (headings, lists,
+  code blocks, hyperlinks, embeds — see the domain model doc) and skip unrecognized `nodeType`s
+  defensively; the vocabulary can grow without an SDK change.
 - `<Name>DraftFields` — Management shape (locale-keyed: `Localized<T>`), usable with
   `@cw/sdk-management`.
 - `ContentTypeApiId` (union of apiIds), `FieldsByContentType`, and `DraftFieldsByContentType`.

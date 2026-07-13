@@ -88,6 +88,44 @@ export function validateRichText(value: unknown): string[] {
   return issues;
 }
 
+/**
+ * Flattens a rich-text value to plain text. Text within a block is concatenated;
+ * blocks are joined with blank lines. Reference nodes contribute nothing (the
+ * domain has no access to their display names). Non-documents yield `''`.
+ */
+const INLINE_NODE_TYPES = new Set([
+  'text',
+  'hard-break',
+  'hyperlink',
+  'entry-hyperlink',
+  'asset-hyperlink',
+  'embedded-entry-inline',
+]);
+
+export function richTextToPlainText(value: unknown): string {
+  if (!isRichTextDocument(value)) return '';
+  const inlineText = (node: RichTextNode): string => {
+    if (node.nodeType === 'text') return node.value ?? '';
+    if (node.nodeType === 'hard-break') return '\n';
+    return (node.content ?? []).map(inlineText).join('');
+  };
+  // A node is a leaf block when any direct child is inline — its whole
+  // subtree (including inline nodes such as hyperlinks) reads as one block.
+  const isLeafBlock = (node: RichTextNode): boolean =>
+    (node.content ?? []).some((c) => INLINE_NODE_TYPES.has(c.nodeType));
+  const blocks: string[] = [];
+  const walk = (node: RichTextNode): void => {
+    if (node.nodeType === 'text' || isLeafBlock(node)) {
+      const text = inlineText(node).trim();
+      if (text) blocks.push(text);
+      return;
+    }
+    node.content?.forEach(walk);
+  };
+  value.content.forEach(walk);
+  return blocks.join('\n\n');
+}
+
 /** Extracts every embedded entry/asset target in a rich-text value. */
 export function extractRichTextTargets(value: unknown): RichTextTarget[] {
   if (!isRichTextDocument(value)) return [];

@@ -319,9 +319,12 @@ function FieldInput(props: {
     );
   }
 
-  // Rich text: a structured block editor (paragraphs/headings/quotes + embeds).
+  // Rich text: a Tiptap-backed document editor. Keyed per locale so each
+  // locale gets its own editor instance (isolated content and undo history).
   if (field.type === 'RichText') {
-    return <RichTextEditor id={id} value={value} pickers={pickers} onChange={onChange} />;
+    return (
+      <RichTextEditor key={locale} id={id} value={value} pickers={pickers} onChange={onChange} />
+    );
   }
 
   if (field.type === 'Boolean') {
