@@ -222,3 +222,11 @@
     @apply bg-primary/20;
   }
 }
+
+/* Entry/asset reference links render distinctly from URL links. */
+@layer components {
+  .rich-text-editor span[data-mark="entryLink"],
+  .rich-text-editor span[data-mark="assetLink"] {
+    @apply rounded-sm bg-primary/10 text-primary underline decoration-dotted underline-offset-2;
+  }
+}

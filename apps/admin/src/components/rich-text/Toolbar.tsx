@@ -1,11 +1,21 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { Editor } from '@tiptap/react';
 import { useEditorState } from '@tiptap/react';
 import {
+  AtSign,
   Bold,
   Code,
+  FileImage,
+  FileSymlink,
   FileText,
   Heading1,
   Heading2,
@@ -23,7 +33,15 @@ import {
   Underline,
   Undo2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useContext, useState } from 'react';
+import type { PickOption } from '../EntryForm.js';
+import { RichTextPickersContext } from './EmbedNodeView.js';
+
+// Radix Select forbids an empty-string item value; sentinel for "unset".
+const NONE = '__none__';
+
+/** Which secondary row is open under the toolbar. */
+type PickerRow = 'link' | 'entryLink' | 'assetLink' | 'inlineEntry' | null;
 
 function ToolbarButton(props: {
   label: string;
@@ -50,10 +68,44 @@ function ToolbarButton(props: {
   );
 }
 
+function TargetPickerRow(props: {
+  label: string;
+  options: PickOption[];
+  onApply: (id: string) => void;
+  onCancel: () => void;
+}) {
+  const [id, setId] = useState('');
+  return (
+    <div className="flex items-center gap-2 border-t p-2">
+      <span className="text-muted-foreground text-xs">{props.label}</span>
+      <Select value={id || NONE} onValueChange={(v) => setId(v === NONE ? '' : v)}>
+        <SelectTrigger className="h-8 flex-1" aria-label="Pick a target">
+          <SelectValue placeholder="Pick a target…" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>— none —</SelectItem>
+          {props.options.map((o) => (
+            <SelectItem key={o.id} value={o.id}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button type="button" size="sm" disabled={!id} onClick={() => props.onApply(id)}>
+        Apply
+      </Button>
+      <Button type="button" size="sm" variant="ghost" onClick={props.onCancel}>
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
 /** Formatting toolbar for the rich-text editor. */
 export function Toolbar(props: { editor: Editor }) {
   const { editor } = props;
-  const [linkOpen, setLinkOpen] = useState(false);
+  const pickers = useContext(RichTextPickersContext);
+  const [row, setRow] = useState<PickerRow>(null);
   const [href, setHref] = useState('');
 
   // Re-render on selection/content changes so active states stay fresh.
@@ -66,6 +118,8 @@ export function Toolbar(props: { editor: Editor }) {
       strike: e.isActive('strike'),
       code: e.isActive('code'),
       link: e.isActive('link'),
+      entryLink: e.isActive('entryLink'),
+      assetLink: e.isActive('assetLink'),
       h1: e.isActive('heading', { level: 1 }),
       h2: e.isActive('heading', { level: 2 }),
       h3: e.isActive('heading', { level: 3 }),
@@ -79,18 +133,46 @@ export function Toolbar(props: { editor: Editor }) {
   });
 
   const chain = () => editor.chain().focus();
+  const toggleRow = (next: Exclude<PickerRow, null>) => setRow(row === next ? null : next);
+
   const toggleLink = () => {
     if (state.link) {
       chain().unsetLink().run();
       return;
     }
     setHref(editor.getAttributes('link').href ?? '');
-    setLinkOpen((open) => !open);
+    toggleRow('link');
   };
   const applyLink = () => {
-    if (href.trim()) chain().setLink({ href: href.trim() }).run();
-    setLinkOpen(false);
+    // Exclusion is one-way (our ref marks exclude link, not vice versa), so
+    // clear them explicitly or setLink would silently no-op on ref-linked text.
+    if (href.trim()) {
+      chain()
+        .extendMarkRange('link')
+        .unsetMark('entryLink')
+        .unsetMark('assetLink')
+        .setLink({ href: href.trim() })
+        .run();
+    }
+    setRow(null);
     setHref('');
+  };
+  // Mark exclusivity (excludes in extensions.ts) clears any other link kind.
+  const toggleRefLink = (mark: 'entryLink' | 'assetLink') => {
+    if (state[mark]) {
+      chain().extendMarkRange(mark).unsetMark(mark).run();
+      return;
+    }
+    toggleRow(mark);
+  };
+  const applyRefLink = (mark: 'entryLink' | 'assetLink', targetId: string) => {
+    // extendMarkRange lets a collapsed cursor inside an existing link retarget it.
+    chain().extendMarkRange(mark).setMark(mark, { targetId }).run();
+    setRow(null);
+  };
+  const insertInlineEntry = (targetId: string) => {
+    chain().insertContent({ type: 'embeddedEntryInline', attrs: { targetId } }).run();
+    setRow(null);
   };
 
   return (
@@ -125,6 +207,20 @@ export function Toolbar(props: { editor: Editor }) {
         </ToolbarButton>
         <ToolbarButton label="Link" active={state.link} onClick={toggleLink}>
           <Link2 className="size-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Link to entry"
+          active={state.entryLink}
+          onClick={() => toggleRefLink('entryLink')}
+        >
+          <FileSymlink className="size-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Link to asset"
+          active={state.assetLink}
+          onClick={() => toggleRefLink('assetLink')}
+        >
+          <FileImage className="size-4" />
         </ToolbarButton>
 
         <span className="mx-1 h-5 w-px bg-border" />
@@ -199,6 +295,9 @@ export function Toolbar(props: { editor: Editor }) {
         >
           <Image className="size-4" />
         </ToolbarButton>
+        <ToolbarButton label="Inline entry" onClick={() => toggleRow('inlineEntry')}>
+          <AtSign className="size-4" />
+        </ToolbarButton>
 
         <span className="mx-1 h-5 w-px bg-border" />
 
@@ -210,7 +309,7 @@ export function Toolbar(props: { editor: Editor }) {
         </ToolbarButton>
       </div>
 
-      {linkOpen && (
+      {row === 'link' && (
         <div className="flex items-center gap-2 border-t p-2">
           <Input
             className="h-8"
@@ -227,10 +326,34 @@ export function Toolbar(props: { editor: Editor }) {
           <Button type="button" size="sm" onClick={applyLink}>
             Set link
           </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={() => setLinkOpen(false)}>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setRow(null)}>
             Cancel
           </Button>
         </div>
+      )}
+      {row === 'entryLink' && (
+        <TargetPickerRow
+          label="Link selection to entry"
+          options={pickers.entries}
+          onApply={(id) => applyRefLink('entryLink', id)}
+          onCancel={() => setRow(null)}
+        />
+      )}
+      {row === 'assetLink' && (
+        <TargetPickerRow
+          label="Link selection to asset"
+          options={pickers.assets}
+          onApply={(id) => applyRefLink('assetLink', id)}
+          onCancel={() => setRow(null)}
+        />
+      )}
+      {row === 'inlineEntry' && (
+        <TargetPickerRow
+          label="Insert inline entry"
+          options={pickers.entries}
+          onApply={insertInlineEntry}
+          onCancel={() => setRow(null)}
+        />
       )}
     </div>
   );

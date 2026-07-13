@@ -122,13 +122,145 @@ describe('rich-text mapper round-trips', () => {
       content: [{ nodeType: 'table-row', content: [text('cell')] }],
       data: { rows: 1 },
     };
-    const entryHyperlink: RichTextNode = {
-      nodeType: 'entry-hyperlink',
-      data: { target: { id: 'e9', linkType: 'Entry' } },
-      content: [text('linked entry')],
+    const footnote: RichTextNode = {
+      nodeType: 'footnote-ref',
+      data: { note: 'n1' },
+      content: [],
     };
-    const value = doc([table, paragraph(text('before '), entryHyperlink, text(' after'))]);
+    const value = doc([table, paragraph(text('before '), footnote, text(' after'))]);
     expect(toDocument(toTiptap(value))).toEqual(value);
+  });
+
+  it('round-trips entry and asset hyperlinks as first-class marks', () => {
+    const value = doc([
+      paragraph(
+        text('see '),
+        {
+          nodeType: 'entry-hyperlink',
+          data: { target: { id: 'e9', linkType: 'Entry' } },
+          content: [text('the entry', [{ type: 'bold' }])],
+        },
+        text(' and '),
+        {
+          nodeType: 'asset-hyperlink',
+          data: { target: { id: 'a3', linkType: 'Asset' } },
+          content: [text('the asset')],
+        },
+      ),
+    ]);
+    const pm = toTiptap(value);
+    const inline = pm.content?.[0]?.content ?? [];
+    expect(inline[1]?.marks).toEqual([
+      { type: 'bold' },
+      { type: 'entryLink', attrs: { targetId: 'e9' } },
+    ]);
+    expect(toDocument(pm)).toEqual(value);
+  });
+
+  it('round-trips an inline entry embed mid-sentence', () => {
+    const value = doc([
+      paragraph(
+        text('as shown in '),
+        {
+          nodeType: 'embedded-entry-inline',
+          data: { target: { id: 'e7', linkType: 'Entry' } },
+          content: [],
+        },
+        text(' above'),
+      ),
+    ]);
+    expect(toDocument(toTiptap(value))).toEqual(value);
+  });
+
+  it('keeps the innermost link when reference links nest inside a hyperlink', () => {
+    const value = doc([
+      paragraph({
+        nodeType: 'hyperlink',
+        data: { uri: 'https://outer' },
+        content: [
+          text('plain'),
+          {
+            nodeType: 'entry-hyperlink',
+            data: { target: { id: 'e1', linkType: 'Entry' } },
+            content: [text('inner')],
+          },
+        ],
+      }),
+    ]);
+    // The outer hyperlink survives around 'plain'; 'inner' keeps its entry link.
+    expect(toDocument(toTiptap(value))).toEqual(
+      doc([
+        paragraph(
+          { nodeType: 'hyperlink', data: { uri: 'https://outer' }, content: [text('plain')] },
+          {
+            nodeType: 'entry-hyperlink',
+            data: { target: { id: 'e1', linkType: 'Entry' } },
+            content: [text('inner')],
+          },
+        ),
+      ]),
+    );
+  });
+
+  it('resolves stacked link marks by priority (entryLink over link) and strips both', () => {
+    const pm: PmNode = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'both',
+              marks: [
+                { type: 'link', attrs: { href: 'https://x' } },
+                { type: 'entryLink', attrs: { targetId: 'e1' } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(toDocument(pm)?.content[0]?.content).toEqual([
+      {
+        nodeType: 'entry-hyperlink',
+        data: { target: { id: 'e1', linkType: 'Entry' } },
+        content: [text('both')],
+      },
+    ]);
+  });
+
+  it('carries malformed reference links (no target) through raw', () => {
+    const value = doc([
+      paragraph({ nodeType: 'entry-hyperlink', data: {}, content: [text('broken')] }),
+    ]);
+    expect(toDocument(toTiptap(value))).toEqual(value);
+  });
+
+  it('carries hyperlinks without a uri through raw (domain does not require one)', () => {
+    const value = doc([
+      paragraph(
+        text('before '),
+        { nodeType: 'hyperlink', data: {}, content: [text('bare')] },
+        { nodeType: 'hyperlink', data: { uri: '' }, content: [text('empty')] },
+      ),
+    ]);
+    expect(toDocument(toTiptap(value))).toEqual(value);
+  });
+
+  it('does not let a valueless inner link strip a valid outer reference link', () => {
+    const value = doc([
+      paragraph({
+        nodeType: 'entry-hyperlink',
+        data: { target: { id: 'e1', linkType: 'Entry' } },
+        content: [text('a'), { nodeType: 'hyperlink', data: {}, content: [text('b')] }, text('c')],
+      }),
+    ]);
+    const out = toDocument(toTiptap(value));
+    // The outer entry link must survive around the raw inner node.
+    expect(JSON.stringify(out)).toContain('entry-hyperlink');
+    expect(JSON.stringify(out)).toContain('"value":"a"');
+    expect(JSON.stringify(out)).toContain('"value":"b"');
   });
 
   it('wraps stray inline children of block containers in a paragraph', () => {
@@ -179,10 +311,38 @@ describe('mapper output is schema-legal', () => {
     ]),
     'unknown nodes': doc([
       { nodeType: 'table', content: [], data: { x: 1 } },
-      paragraph(text('a'), {
-        nodeType: 'embedded-entry-inline',
-        data: { target: { id: 'e1', linkType: 'Entry' } },
-        content: [],
+      paragraph(text('a'), { nodeType: 'footnote-ref', data: { note: 'n1' }, content: [] }),
+    ]),
+    'reference links and inline embeds': doc([
+      paragraph(
+        {
+          nodeType: 'entry-hyperlink',
+          data: { target: { id: 'e1', linkType: 'Entry' } },
+          content: [text('entry')],
+        },
+        {
+          nodeType: 'asset-hyperlink',
+          data: { target: { id: 'a1', linkType: 'Asset' } },
+          content: [text('asset')],
+        },
+        {
+          nodeType: 'embedded-entry-inline',
+          data: { target: { id: 'e2', linkType: 'Entry' } },
+          content: [],
+        },
+      ),
+    ]),
+    'nested links': doc([
+      paragraph({
+        nodeType: 'hyperlink',
+        data: { uri: 'https://outer' },
+        content: [
+          {
+            nodeType: 'entry-hyperlink',
+            data: { target: { id: 'e1', linkType: 'Entry' } },
+            content: [text('inner')],
+          },
+        ],
       }),
     ]),
     // API-authored shapes that need normalizing to satisfy content expressions.

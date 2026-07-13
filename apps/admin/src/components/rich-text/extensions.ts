@@ -4,10 +4,10 @@
  * carriers used by the mapper (see `@/lib/rich-text-mapper.ts`).
  */
 
-import { Node } from '@tiptap/core';
+import { Mark, Node } from '@tiptap/core';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { EmbedNodeView, UnknownNodeView } from './EmbedNodeView.js';
+import { EmbedNodeView, InlineEmbedNodeView, UnknownNodeView } from './EmbedNodeView.js';
 
 const embedNode = (name: string) =>
   Node.create({
@@ -52,6 +52,48 @@ const unknownNode = (name: string, opts: { inline: boolean }) =>
     },
   });
 
+/** Inline atom for `embedded-entry-inline` (an entry referenced mid-sentence). */
+export const EmbeddedEntryInline = Node.create({
+  name: 'embeddedEntryInline',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  addAttributes() {
+    return { targetId: { default: '' } };
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-node="embeddedEntryInline"]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['span', { ...HTMLAttributes, 'data-node': 'embeddedEntryInline' }];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(InlineEmbedNodeView);
+  },
+});
+
+/**
+ * Marks for `entry-hyperlink`/`asset-hyperlink`. Link kinds are mutually
+ * exclusive on a text node (the mapper also resolves any stacked survivors).
+ */
+const refLinkMark = (name: string) =>
+  Mark.create({
+    name,
+    excludes: 'link entryLink assetLink',
+    addAttributes() {
+      return { targetId: { default: '' } };
+    },
+    parseHTML() {
+      return [{ tag: `span[data-mark="${name}"]` }];
+    },
+    renderHTML({ HTMLAttributes }) {
+      return ['span', { ...HTMLAttributes, 'data-mark': name }, 0];
+    },
+  });
+
+export const EntryLink = refLinkMark('entryLink');
+export const AssetLink = refLinkMark('assetLink');
+
 /** Lossless carrier for stored block nodes the editor doesn't model. */
 export const UnknownBlock = unknownNode('unknownBlock', { inline: false });
 /** Lossless carrier for stored inline nodes (entry/asset hyperlinks, inline embeds). */
@@ -66,6 +108,9 @@ export function buildExtensions() {
     }),
     EmbeddedEntryBlock,
     EmbeddedAssetBlock,
+    EmbeddedEntryInline,
+    EntryLink,
+    AssetLink,
     UnknownBlock,
     UnknownInline,
   ];
