@@ -50,6 +50,19 @@ test('authors rich text with marks and persists it across a reload', async ({ pa
   await page.getByRole('button', { name: 'Bold', exact: true }).click();
   await expect(editor.locator('strong')).toHaveText('bolded');
 
+  // Append a word and link it to another entry (created by the previous test).
+  // Typing at the end of bold text inherits the mark, so toggle it off first.
+  await page.keyboard.press('ArrowRight');
+  await page.getByRole('button', { name: 'Bold', exact: true }).click();
+  await page.keyboard.type(' linkme');
+  await expect(editor.locator('strong')).toHaveText('bolded');
+  for (let i = 0; i < 'linkme'.length; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await page.getByRole('button', { name: 'Link to entry' }).click();
+  await page.getByRole('combobox', { name: 'Pick a target' }).click();
+  await page.getByRole('option').filter({ hasNotText: '— none —' }).first().click();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(editor.locator('span[data-mark="entryLink"]')).toHaveText('linkme');
+
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.getByText('Entry created')).toBeVisible();
 
@@ -59,6 +72,7 @@ test('authors rich text with marks and persists it across a reload', async ({ pa
   const reopened = page.locator('.rich-text-editor');
   await expect(reopened).toContainText('Plain then bolded');
   await expect(reopened.locator('strong')).toHaveText('bolded');
+  await expect(reopened.locator('span[data-mark="entryLink"]')).toHaveText('linkme');
 });
 
 test('navigates to settings and lists the seeded dev API keys', async ({ page }) => {

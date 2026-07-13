@@ -5,15 +5,20 @@
  *
  * Round-trip safety rules:
  * - Unmapped block nodes ride through an `unknownBlock` atom whose `raw` attr
- *   holds the stored node verbatim; unmapped inline nodes (e.g. entry-hyperlink,
- *   embedded-entry-inline) use `unknownInline` the same way. Serializing emits
- *   `raw` back unchanged, so foreign/API-authored documents are never corrupted.
- * - Stored `hyperlink` nodes flatten to text runs carrying a `link` mark
- *   (ProseMirror models links as marks); serializing groups maximal runs of
- *   consecutive text nodes with an identical href back into one hyperlink node.
+ *   holds the stored node verbatim; unmapped inline nodes use `unknownInline`
+ *   the same way (as do reference nodes missing their required target).
+ *   Serializing emits `raw` back unchanged, so foreign/API-authored documents
+ *   are never corrupted.
+ * - Stored link nodes flatten to text runs carrying a link-kind mark
+ *   (ProseMirror models links as marks): `hyperlink` → `link` (href),
+ *   `entry-hyperlink` → `entryLink` and `asset-hyperlink` → `assetLink`
+ *   (targetId). Serializing groups maximal runs of consecutive inline nodes
+ *   with an identical link mark back into one stored node. Nested link nodes
+ *   keep the innermost mark; stacked link marks resolve entryLink > assetLink
+ *   > link.
  * - Unknown mark types are dropped on edit (text nodes can't carry raw data).
  *   The `code` mark is exclusive in ProseMirror: combined with other marks it
- *   wins, except inside a hyperlink where the link mark wins.
+ *   wins, except inside a link where the link mark wins.
  * - Inline (text) children directly under block containers such as blockquote
  *   are wrapped in a paragraph, as ProseMirror requires block content there.
  */
@@ -54,6 +59,21 @@ const PM_TO_EMBED: Record<string, { nodeType: string; linkType: 'Entry' | 'Asset
   embeddedEntryBlock: { nodeType: 'embedded-entry-block', linkType: 'Entry' },
   embeddedAssetBlock: { nodeType: 'embedded-asset-block', linkType: 'Asset' },
 };
+
+/** The three link-kind marks; a run of inline nodes sharing one folds into a stored node. */
+interface LinkKind {
+  readonly mark: string;
+  readonly attr: 'href' | 'targetId';
+  readonly nodeType: string;
+  readonly linkType?: 'Entry' | 'Asset';
+}
+// Order is the stacked-mark priority (first match wins on serialize).
+const LINK_KINDS: readonly LinkKind[] = [
+  { mark: 'entryLink', attr: 'targetId', nodeType: 'entry-hyperlink', linkType: 'Entry' },
+  { mark: 'assetLink', attr: 'targetId', nodeType: 'asset-hyperlink', linkType: 'Asset' },
+  { mark: 'link', attr: 'href', nodeType: 'hyperlink' },
+];
+const LINK_MARK_NAMES = new Set(LINK_KINDS.map((k) => k.mark));
 
 const MARK_TO_PM: Record<string, string> = {
   bold: 'bold',
@@ -185,27 +205,57 @@ function inlineToPm(node: RichTextNode): PmNode[] {
     case 'hard-break':
       return [{ type: 'hardBreak' }];
     case 'hyperlink': {
-      const href = typeof node.data?.uri === 'string' ? node.data.uri : '';
-      // hardBreak carries the link mark too so the node stays one run on the
-      // way back (only atoms like unknownInline are left unmarked). The code
-      // mark excludes link, so it yields (losing the URI would be worse).
-      return (node.content ?? []).flatMap((child) =>
-        inlineToPm(child).map((pm) =>
-          pm.type === 'text' || pm.type === 'hardBreak'
-            ? {
-                ...pm,
-                marks: [
-                  ...(pm.marks ?? []).filter((m) => m.type !== 'code'),
-                  { type: 'link', attrs: { href } },
-                ],
-              }
-            : pm,
-        ),
-      );
+      const uri = node.data?.uri;
+      // A hyperlink without a uri is domain-valid but can't form a link-mark
+      // run (marks need a truthy value to group); carry it raw instead.
+      if (typeof uri !== 'string' || !uri) {
+        return [{ type: 'unknownInline', attrs: { raw: node } }];
+      }
+      return linkChildrenToPm(node, 'link', uri);
+    }
+    case 'entry-hyperlink':
+    case 'asset-hyperlink': {
+      const targetId = node.data?.target?.id;
+      // A reference link without its target is malformed; carry it raw.
+      if (typeof targetId !== 'string' || !targetId) {
+        return [{ type: 'unknownInline', attrs: { raw: node } }];
+      }
+      const mark = node.nodeType === 'entry-hyperlink' ? 'entryLink' : 'assetLink';
+      return linkChildrenToPm(node, mark, targetId);
+    }
+    case 'embedded-entry-inline': {
+      const targetId = node.data?.target?.id;
+      if (typeof targetId !== 'string' || !targetId) {
+        return [{ type: 'unknownInline', attrs: { raw: node } }];
+      }
+      return [{ type: 'embeddedEntryInline', attrs: { targetId } }];
     }
     default:
       return [{ type: 'unknownInline', attrs: { raw: node } }];
   }
+}
+
+/**
+ * Flattens a stored link node's children, marking text/hardBreak with the link
+ * mark so the node stays one run on the way back (atoms are left unmarked).
+ * Children already carrying a link mark keep it — the innermost link wins.
+ * The code mark excludes link, so it yields (losing the target would be worse).
+ */
+function linkChildrenToPm(node: RichTextNode, mark: string, value: string): PmNode[] {
+  const attr = mark === 'link' ? 'href' : 'targetId';
+  return (node.content ?? []).flatMap((child) =>
+    inlineToPm(child).map((pm) => {
+      if (pm.type !== 'text' && pm.type !== 'hardBreak') return pm;
+      if ((pm.marks ?? []).some((m) => LINK_MARK_NAMES.has(m.type))) return pm;
+      return {
+        ...pm,
+        marks: [
+          ...(pm.marks ?? []).filter((m) => m.type !== 'code'),
+          { type: mark, attrs: { [attr]: value } },
+        ],
+      };
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -271,25 +321,38 @@ function pmToBlock(node: PmNode): RichTextNode[] {
   }
 }
 
-/** Maps inline content, grouping same-href link runs back into hyperlink nodes. */
+/** The link mark on an inline node, resolved by LINK_KINDS priority. */
+function linkMarkOf(node: PmNode): { kind: LinkKind; value: string } | undefined {
+  for (const kind of LINK_KINDS) {
+    const mark = node.marks?.find((m) => m.type === kind.mark);
+    const value = mark?.attrs?.[kind.attr];
+    if (typeof value === 'string' && value) return { kind, value };
+  }
+  return undefined;
+}
+
+/** Maps inline content, grouping same-target link runs back into stored link nodes. */
 function pmInlineChildren(nodes: PmNode[]): RichTextNode[] {
   const out: RichTextNode[] = [];
   let run: RichTextNode[] = [];
-  let runHref: string | undefined;
+  let runLink: { kind: LinkKind; value: string } | undefined;
   const flushRun = () => {
-    if (runHref !== undefined && run.length > 0) {
-      out.push({ nodeType: 'hyperlink', data: { uri: runHref }, content: run });
+    if (runLink !== undefined && run.length > 0) {
+      const { kind, value } = runLink;
+      const data = kind.linkType
+        ? { target: { id: value, linkType: kind.linkType } }
+        : { uri: value };
+      out.push({ nodeType: kind.nodeType, data, content: run });
     }
     run = [];
-    runHref = undefined;
+    runLink = undefined;
   };
   for (const node of nodes) {
-    const link = node.marks?.find((m) => m.type === 'link');
-    const href = link && typeof link.attrs?.href === 'string' ? link.attrs.href : undefined;
-    const mapped = pmToInline(node, href !== undefined);
-    if (href !== undefined) {
-      if (href !== runHref) flushRun();
-      runHref = href;
+    const link = linkMarkOf(node);
+    const mapped = pmToInline(node, link !== undefined);
+    if (link !== undefined) {
+      if (link.kind !== runLink?.kind || link.value !== runLink.value) flushRun();
+      runLink = link;
       run.push(...mapped);
     } else {
       flushRun();
@@ -305,7 +368,7 @@ function pmToInline(node: PmNode, stripLink: boolean): RichTextNode[] {
     case 'text': {
       if (!node.text) return [];
       const marks = (node.marks ?? [])
-        .filter((m) => !(stripLink && m.type === 'link'))
+        .filter((m) => !(stripLink && LINK_MARK_NAMES.has(m.type)))
         .map((m) => PM_TO_MARK[m.type])
         .filter((t): t is string => t !== undefined)
         .map((type) => ({ type }));
@@ -313,6 +376,17 @@ function pmToInline(node: PmNode, stripLink: boolean): RichTextNode[] {
     }
     case 'hardBreak':
       return [{ nodeType: 'hard-break' }];
+    case 'embeddedEntryInline': {
+      const id = typeof node.attrs?.targetId === 'string' ? node.attrs.targetId : '';
+      if (!id) return [];
+      return [
+        {
+          nodeType: 'embedded-entry-inline',
+          data: { target: { id, linkType: 'Entry' } },
+          content: [],
+        },
+      ];
+    }
     case 'unknownInline':
       return node.attrs?.raw ? [node.attrs.raw as RichTextNode] : [];
     default:

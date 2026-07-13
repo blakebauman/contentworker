@@ -59,6 +59,24 @@ export function EmbedNodeView(props: NodeViewProps) {
   );
 }
 
+/** Inline chip for an entry embedded mid-sentence (targetId picked on insert). */
+export function InlineEmbedNodeView(props: NodeViewProps) {
+  const pickers = useContext(RichTextPickersContext);
+  const targetId = (props.node.attrs.targetId as string) ?? '';
+  const label = pickers.entries.find((o) => o.id === targetId)?.label ?? (targetId || '?');
+  return (
+    <NodeViewWrapper as="span" className="inline" contentEditable={false}>
+      <span
+        data-testid="embed-inline-entry"
+        className="mx-0.5 inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs"
+      >
+        <FileText className="size-3" />
+        {label}
+      </span>
+    </NodeViewWrapper>
+  );
+}
+
 /** Muted chip for a stored node the editor doesn't model (kept losslessly). */
 export function UnknownNodeView(props: NodeViewProps) {
   const raw = props.node.attrs.raw as { nodeType?: string } | null;
