@@ -81,6 +81,49 @@ export async function indexEntryEmbeddings(
   return rows.length;
 }
 
+export interface ReindexResult {
+  /** Published entries re-embedded. */
+  readonly entries: number;
+  /** Vector rows written (an entry with no extractable text yields none). */
+  readonly chunks: number;
+}
+
+/**
+ * Re-embeds every published entry in the scope (optionally one content type),
+ * paging through the read model. Use after a change to text extraction or the
+ * embedding model so already-published content becomes searchable without a
+ * republish. Each entry reindex is idempotent (stale vectors are replaced).
+ */
+export async function reindexEmbeddings(
+  deps: RagDeps,
+  ctx: AppContext,
+  scope: Scope,
+  opts: { contentTypeApiId?: string; batchSize?: number } = {},
+): Promise<ReindexResult> {
+  const batchSize = opts.batchSize ?? 100;
+  let skip = 0;
+  let entries = 0;
+  let chunks = 0;
+  for (;;) {
+    const page = await ctx.store.entries.listPublished(scope, {
+      contentTypeApiId: opts.contentTypeApiId,
+      limit: batchSize,
+      skip,
+    });
+    for (const published of page) {
+      chunks += await indexEntryEmbeddings(deps, scope, {
+        entryId: published.entryId,
+        fields: published.fields,
+        entryVersion: published.version,
+      });
+      entries += 1;
+    }
+    if (page.length < batchSize) break;
+    skip += batchSize;
+  }
+  return { entries, chunks };
+}
+
 export async function removeEntryEmbeddings(
   deps: RagDeps,
   scope: Scope,
