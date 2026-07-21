@@ -10,6 +10,8 @@ export interface OidcSettings {
   readonly clientSecret?: string;
   readonly redirectUri?: string;
   readonly groupRoleMap: Record<string, string>;
+  /** Fallback role for users whose groups match no `groupRoleMap` entry. */
+  readonly defaultRole?: string;
 }
 
 export function oidcSettingsFromConfig(config: ApiConfig): OidcSettings {
@@ -23,6 +25,7 @@ export function oidcSettingsFromConfig(config: ApiConfig): OidcSettings {
     clientSecret: config.oidcClientSecret,
     redirectUri: config.oidcRedirectUri,
     groupRoleMap: config.oidcGroupRoleMap,
+    defaultRole: config.oidcDefaultRole,
   };
 }
 

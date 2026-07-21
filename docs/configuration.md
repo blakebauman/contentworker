@@ -60,6 +60,7 @@ OIDC routes mount on the Management API when `ROLE=all` or `management`:
 | `OIDC_REDIRECT_URI` | — | Callback URL (`/auth/oidc/callback` on the API origin) |
 | `OIDC_DEFAULT_SPACE` | `space-1` | Space for delegated CMA keys |
 | `OIDC_GROUP_ROLE_MAP` | `{}` | JSON map of IdP group → role id |
+| `OIDC_DEFAULT_ROLE` | — | Role id assigned to authenticated users whose groups match no map entry. When unset, unmapped logins are **refused** (fail closed) instead of receiving a full CMA key. |
 | `SESSION_SECRET` | — | HMAC secret for the httpOnly session cookie |
 | `SESSION_TTL_HOURS` | `8` | Session lifetime |
 | `ADMIN_UI_URL` | `http://localhost:5173/dashboard` | Post-login redirect |

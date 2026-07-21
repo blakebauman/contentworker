@@ -45,6 +45,12 @@ export interface ApiConfig {
   readonly oidcClientSecret?: string;
   readonly oidcRedirectUri?: string;
   readonly oidcGroupRoleMap: Record<string, string>;
+  /**
+   * Role assigned to an OIDC-authenticated user whose IdP groups match no entry
+   * in {@link oidcGroupRoleMap}. When unset, unmapped logins are refused rather
+   * than falling through to a full-privilege CMA key (fail closed).
+   */
+  readonly oidcDefaultRole?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -82,5 +88,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     oidcClientSecret: env.OIDC_CLIENT_SECRET,
     oidcRedirectUri: env.OIDC_REDIRECT_URI,
     oidcGroupRoleMap,
+    oidcDefaultRole: env.OIDC_DEFAULT_ROLE,
   };
 }

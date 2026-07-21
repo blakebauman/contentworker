@@ -118,6 +118,7 @@ import {
   type ContentAction,
   SCOPES,
   type Scope,
+  ValidationError,
   type Webhook,
   assertWritableFields,
   authorizeContent,
@@ -308,8 +309,26 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.spaceAdmin),
     async (c) => {
-      const body = await c.req.json();
-      const created = await createApiKey(ctx, hasher, { spaceId: c.req.param('space'), ...body });
+      const body = (await c.req.json()) as {
+        kind?: unknown;
+        name?: unknown;
+        scopes?: unknown;
+        roleId?: unknown;
+      };
+      const kind = body.kind;
+      if (kind !== 'cma' && kind !== 'cda' && kind !== 'cpa') {
+        throw new ValidationError([{ field: 'kind', message: 'kind must be cma, cda, or cpa' }]);
+      }
+      // spaceId is taken ONLY from the authorized route param and set last, so a
+      // caller-supplied `spaceId` in the body can never rebind the key to another
+      // tenant. Fields are picked explicitly rather than spread for the same reason.
+      const created = await createApiKey(ctx, hasher, {
+        spaceId: c.req.param('space'),
+        kind,
+        name: typeof body.name === 'string' ? body.name : undefined,
+        scopes: Array.isArray(body.scopes) ? (body.scopes as string[]) : undefined,
+        roleId: typeof body.roleId === 'string' ? body.roleId : undefined,
+      });
       // Return the raw token once; only its hash is stored.
       return c.json(
         { id: created.apiKey.id, kind: created.apiKey.kind, token: created.token },

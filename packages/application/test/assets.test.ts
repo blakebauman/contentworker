@@ -49,6 +49,33 @@ describe('P3b: assets', () => {
     expect(delivered.title['en-US']).toBe('Logo');
   });
 
+  it('sanitizes a traversal file name so the object key stays inside the tenant prefix', async () => {
+    const created = await createAsset(ctx, blob, scope, {
+      fileName: '../../../other-space/other-env/victim/logo.png',
+      contentType: 'image/png',
+    });
+    const key = blob.uploads.at(-1)?.key ?? '';
+    // Key must stay under the scoped prefix; no traversal segment may survive.
+    expect(key.startsWith(`${scope.spaceId}/${scope.environmentId}/`)).toBe(true);
+    expect(key).not.toContain('..');
+    expect(key).not.toContain('other-space');
+    expect(key.endsWith('/logo.png')).toBe(true);
+    // The original name is still preserved as display metadata.
+    expect(created.asset.file.fileName).toBe('../../../other-space/other-env/victim/logo.png');
+  });
+
+  it('falls back to a safe key segment when the file name is only traversal/empty', async () => {
+    const created = await createAsset(ctx, blob, scope, {
+      fileName: '../..',
+      contentType: 'application/octet-stream',
+    });
+    const key = blob.uploads.at(-1)?.key ?? '';
+    expect(key.startsWith(`${scope.spaceId}/${scope.environmentId}/`)).toBe(true);
+    expect(key).not.toContain('..');
+    expect(key.endsWith('/file')).toBe(true);
+    expect(created.asset.id).toBeTruthy();
+  });
+
   it('refuses to publish an entry linking to a nonexistent asset', async () => {
     await createContentType(ctx, scope, {
       apiId: 'product',
