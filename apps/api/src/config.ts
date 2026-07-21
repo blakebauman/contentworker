@@ -45,6 +45,24 @@ export interface ApiConfig {
   readonly oidcClientSecret?: string;
   readonly oidcRedirectUri?: string;
   readonly oidcGroupRoleMap: Record<string, string>;
+  /**
+   * Role assigned to an OIDC-authenticated user whose IdP groups match no entry
+   * in {@link oidcGroupRoleMap}. When unset, unmapped logins are refused rather
+   * than falling through to a full-privilege CMA key (fail closed).
+   */
+  readonly oidcDefaultRole?: string;
+  /** Max accepted request body size in bytes (DoS guard). Default 5 MiB. */
+  readonly maxBodyBytes?: number;
+  /**
+   * Per-space AI usage ceilings over a rolling window. Guards against a single
+   * tenant driving unbounded LLM spend. Set `maxRequests` or `maxTokens` to 0 to
+   * disable metering entirely.
+   */
+  readonly aiBudget?: {
+    readonly maxRequests: number;
+    readonly maxTokens: number;
+    readonly windowSeconds: number;
+  };
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -82,5 +100,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     oidcClientSecret: env.OIDC_CLIENT_SECRET,
     oidcRedirectUri: env.OIDC_REDIRECT_URI,
     oidcGroupRoleMap,
+    oidcDefaultRole: env.OIDC_DEFAULT_ROLE,
+    maxBodyBytes: Number(env.MAX_BODY_BYTES ?? 5 * 1024 * 1024),
+    aiBudget: {
+      maxRequests: Number(env.AI_MAX_REQUESTS_PER_WINDOW ?? 60),
+      maxTokens: Number(env.AI_MAX_TOKENS_PER_WINDOW ?? 200_000),
+      windowSeconds: Number(env.AI_BUDGET_WINDOW_SECONDS ?? 60),
+    },
   };
 }

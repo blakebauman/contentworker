@@ -11,6 +11,7 @@
   "dependencies": {
     "@cw/adapter-ai-anthropic": "workspace:*",
     "@cw/adapter-ai-azure-openai": "workspace:*",
+    "@cw/adapter-redis": "workspace:*",
     "@cw/adapter-store-postgres": "workspace:*",
     "@cw/agent-runtime": "workspace:*",
     "@cw/application": "workspace:*",
@@ -20,6 +21,7 @@
     "@temporalio/client": "^1.11.6",
     "@temporalio/worker": "^1.11.6",
     "@temporalio/workflow": "^1.11.6",
+    "ioredis": "^5.4.2",
     "uuid": "^11.0.3",
     "@cw/telemetry": "workspace:*"
   },

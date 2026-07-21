@@ -21,6 +21,7 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `PORT` | `8787` (api), `8788` (mcp-server) | HTTP listen port |
 | `DATABASE_URL` | — | Postgres connection string; absent → in-memory store |
 | `REDIS_URL` | — | Redis connection string; absent → no cache (and the worker won't start) |
+| `MAX_BODY_BYTES` | `5242880` | Max accepted request body size (DoS guard); oversized → 413 |
 | `NODE_ENV` | `production` | Set in the Dockerfile |
 
 ## API keys (dev seeds)
@@ -60,6 +61,7 @@ OIDC routes mount on the Management API when `ROLE=all` or `management`:
 | `OIDC_REDIRECT_URI` | — | Callback URL (`/auth/oidc/callback` on the API origin) |
 | `OIDC_DEFAULT_SPACE` | `space-1` | Space for delegated CMA keys |
 | `OIDC_GROUP_ROLE_MAP` | `{}` | JSON map of IdP group → role id |
+| `OIDC_DEFAULT_ROLE` | — | Role id assigned to authenticated users whose groups match no map entry. When unset, unmapped logins are **refused** (fail closed) instead of receiving a full CMA key. |
 | `SESSION_SECRET` | — | HMAC secret for the httpOnly session cookie |
 | `SESSION_TTL_HOURS` | `8` | Session lifetime |
 | `ADMIN_UI_URL` | `http://localhost:5173/dashboard` | Post-login redirect |
@@ -120,6 +122,22 @@ Uploads use presigned PUT URLs (default 900 s) so file bytes never transit the A
 
 Anthropic tier→model: `flagship`→`claude-opus-4-8`, `balanced`→`claude-sonnet-4-6`,
 `fast`→`claude-haiku-4-5`. See [AI, agents & search](./ai-agents-and-search.md).
+
+### AI budget (per-space cost/rate guard)
+
+Bounds AI spend per space over a rolling window so one tenant can't drive
+unbounded LLM cost. Enforced on every generation across the API, MCP, worker, and
+agent-worker (shared via Redis when configured, in-process otherwise). Set either
+ceiling to `0` to disable metering.
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `AI_MAX_REQUESTS_PER_WINDOW` | `60` | Max AI requests per space per window (`0` disables) |
+| `AI_MAX_TOKENS_PER_WINDOW` | `200000` | Max input+output tokens per space per window (`0` disables) |
+| `AI_BUDGET_WINDOW_SECONDS` | `60` | Rolling window length |
+
+> On Cloudflare (`apps/edge`) AI calls are not yet metered — shared counters
+> there need a Durable Object (follow-up); the Node stack is covered.
 
 ### API vs worker embeddings
 

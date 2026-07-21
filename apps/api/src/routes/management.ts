@@ -118,6 +118,7 @@ import {
   type ContentAction,
   SCOPES,
   type Scope,
+  ValidationError,
   type Webhook,
   assertWritableFields,
   authorizeContent,
@@ -134,6 +135,7 @@ import {
 } from '../auth.js';
 import { doc } from '../docs/openapi.js';
 import * as docs from '../docs/schemas.js';
+import { MAX_PAGE_LIMIT, clampCount } from '../query.js';
 
 // Reads the route's scope, preferring the alias-resolved environment id stamped
 // by environmentMiddleware over the raw `:env` param.
@@ -262,7 +264,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     const limit = c.req.query('limit');
     const items = await listAuditLog(ctx, c.req.param('space'), {
       environmentId: c.req.query('environment'),
-      limit: limit ? Number(limit) : undefined,
+      limit: clampCount(limit, MAX_PAGE_LIMIT, { min: 1 }),
     });
     return c.json({ items });
   });
@@ -308,8 +310,26 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.spaceAdmin),
     async (c) => {
-      const body = await c.req.json();
-      const created = await createApiKey(ctx, hasher, { spaceId: c.req.param('space'), ...body });
+      const body = (await c.req.json()) as {
+        kind?: unknown;
+        name?: unknown;
+        scopes?: unknown;
+        roleId?: unknown;
+      };
+      const kind = body.kind;
+      if (kind !== 'cma' && kind !== 'cda' && kind !== 'cpa') {
+        throw new ValidationError([{ field: 'kind', message: 'kind must be cma, cda, or cpa' }]);
+      }
+      // spaceId is taken ONLY from the authorized route param and set last, so a
+      // caller-supplied `spaceId` in the body can never rebind the key to another
+      // tenant. Fields are picked explicitly rather than spread for the same reason.
+      const created = await createApiKey(ctx, hasher, {
+        spaceId: c.req.param('space'),
+        kind,
+        name: typeof body.name === 'string' ? body.name : undefined,
+        scopes: Array.isArray(body.scopes) ? (body.scopes as string[]) : undefined,
+        roleId: typeof body.roleId === 'string' ? body.roleId : undefined,
+      });
       // Return the raw token once; only its hash is stored.
       return c.json(
         { id: created.apiKey.id, kind: created.apiKey.kind, token: created.token },
@@ -654,7 +674,9 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   // --- assets -------------------------------------------------------------
   app.get(`${BASE}/assets`, requireScope(SCOPES.previewRead), async (c) => {
     const limit = c.req.query('limit');
-    const items = await listAssets(ctx, scopeOf(c), { limit: limit ? Number(limit) : undefined });
+    const items = await listAssets(ctx, scopeOf(c), {
+      limit: clampCount(limit, MAX_PAGE_LIMIT, { min: 1 }),
+    });
     return c.json({ items });
   });
   app.post(
@@ -746,7 +768,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     const limit = c.req.query('limit');
     const items = await listAgentRuns(ctx, scopeOf(c), {
       workflow: c.req.query('workflow'),
-      limit: limit ? Number(limit) : undefined,
+      limit: clampCount(limit, MAX_PAGE_LIMIT, { min: 1 }),
     });
     return c.json({ items });
   });
@@ -784,7 +806,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.get(`${BASE}/webhooks/:id/deliveries`, requireScope(SCOPES.spaceAdmin), async (c) => {
     const limit = c.req.query('limit');
     const items = await listWebhookDeliveries(ctx, scopeOf(c), c.req.param('id'), {
-      limit: limit ? Number(limit) : undefined,
+      limit: clampCount(limit, MAX_PAGE_LIMIT, { min: 1 }),
     });
     return c.json({ items });
   });

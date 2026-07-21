@@ -4,7 +4,12 @@ import {
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
 import { createHttpFunctionInvoker, createWebhookSender } from '@cw/adapter-http-effects';
-import { createRedisCache, createRedisEventBus, createRedisQueue } from '@cw/adapter-redis';
+import {
+  createRedisCache,
+  createRedisCostGuard,
+  createRedisEventBus,
+  createRedisQueue,
+} from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { type AgentRuntime, InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
@@ -13,6 +18,7 @@ import {
   type AppContext,
   EVENTS_TOPIC,
   type RagDeps,
+  aiBudgetLimits,
   consumeEvent,
   relayOutbox,
   runDueScheduledActions,
@@ -100,7 +106,11 @@ async function main() {
   const sender = createWebhookSender();
   const invoker = createHttpFunctionInvoker();
   const rag = makeRag(databaseUrl as string);
-  const ctx: AppContext = { store, clock, ids, cache };
+  // Meter agent AI spend per space (shared window via Redis) so on-publish
+  // enrich/moderate runs count against the same budget as the HTTP API.
+  const limits = aiBudgetLimits(process.env);
+  const costGuard = limits ? createRedisCostGuard(connection, limits) : undefined;
+  const ctx: AppContext = { store, clock, ids, cache, costGuard };
   const agents = await makeAgents(ctx);
 
   // Consume relayed events: webhook fan-out + cache invalidation + RAG embedding,

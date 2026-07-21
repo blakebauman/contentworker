@@ -1,5 +1,6 @@
 import { createApiKey, revokeApiKey } from '@cw/application';
 import type { AppContext } from '@cw/application';
+import { UnauthorizedError } from '@cw/domain';
 import type { Hasher } from '@cw/ports';
 import type { OidcSettings } from './settings.js';
 
@@ -23,6 +24,16 @@ export async function mintDelegatedKey(
       roleId = mapped;
       break;
     }
+  }
+  // Fail closed: a user whose groups map to no role falls back to the configured
+  // default role, and if none is configured the login is refused. Without this,
+  // createApiKey would mint an unrestricted CMA key (incl. space:admin) for any
+  // successfully authenticated user — authentication must not imply admin.
+  roleId ??= settings.defaultRole;
+  if (!roleId) {
+    throw new UnauthorizedError(
+      'No role is mapped to your identity. Contact an administrator to be granted access.',
+    );
   }
 
   const { apiKey, token } = await createApiKey(ctx, hasher, {

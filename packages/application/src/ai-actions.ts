@@ -7,6 +7,7 @@ import {
 } from '@cw/domain';
 import type { AIActionDefinition, AIProvider, ModelTier } from '@cw/ports';
 import { recordAgentRun } from './agent-audit.js';
+import { generateWithBudget } from './ai-budget.js';
 import type { AppContext } from './context.js';
 import { getEntry, updateEntry } from './entries.js';
 
@@ -126,7 +127,7 @@ export async function runAIAction(
   }
 
   const prompt = renderTemplate(action.promptTemplate, values);
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system: `You are running the AI Action "${action.name}". Follow the instructions and return only the requested output.`,
     prompt,
     tier: action.tier,

@@ -8,6 +8,15 @@ export interface RagDeps {
   readonly vectors: VectorStore;
 }
 
+/** Largest `topK` a search may request; bounds vector/FTS over-fetch work. */
+export const MAX_SEARCH_TOP_K = 100;
+
+/** Clamps a caller-supplied `topK` to `[1, MAX_SEARCH_TOP_K]` (default 10). */
+function clampTopK(topK: number | undefined): number {
+  if (topK === undefined || !Number.isFinite(topK)) return 10;
+  return Math.min(Math.max(Math.trunc(topK), 1), MAX_SEARCH_TOP_K);
+}
+
 /** Collects the human-readable string values of an entry, grouped by locale. */
 export function extractTextByLocale(fields: EntryFields): Record<string, string> {
   const byLocale: Record<string, string[]> = {};
@@ -148,7 +157,7 @@ export async function semanticSearch(
   query: string,
   opts: { topK?: number; minScore?: number } = {},
 ): Promise<SearchHit[]> {
-  const topK = opts.topK ?? 10;
+  const topK = clampTopK(opts.topK);
   // Exclude zero/negative-similarity (orthogonal) matches by default.
   const minScore = opts.minScore ?? 1e-6;
   const [embedding] = await deps.embeddings.embed([query], { taskType: 'query' });
@@ -182,7 +191,7 @@ export async function hybridSearch(
   query: string,
   opts: { topK?: number } = {},
 ): Promise<SearchHit[]> {
-  const topK = opts.topK ?? 10;
+  const topK = clampTopK(opts.topK);
   // Over-fetch per leg so a hit ranked just outside topK in both legs can
   // still fuse into the final topK.
   const fetchK = topK * 2;

@@ -97,6 +97,30 @@ export interface AIProvider {
   generate(req: GenerateRequest): Promise<GenerateResult>;
 }
 
+/** Verdict from a {@link CostGuard} on whether a scope may make an AI call now. */
+export interface AiBudgetDecision {
+  readonly allowed: boolean;
+  /** Which ceiling was hit, when `allowed` is false. */
+  readonly reason?: 'requests' | 'tokens';
+  /** Seconds until the rolling window frees up (best-effort hint for Retry-After). */
+  readonly retryAfterSeconds?: number;
+}
+
+/**
+ * Per-tenant AI usage governor. The application layer calls {@link consume}
+ * before every AI generation and {@link settle} with the observed token usage
+ * after — enforcing per-`Scope` request and token ceilings over a rolling
+ * window so a single tenant (or a leaked key) cannot drive unbounded provider
+ * spend. Backed by Redis when shared state across replicas is needed, or an
+ * in-process window for dev/single-node/tests.
+ */
+export interface CostGuard {
+  /** Registers one AI request for the scope and reports whether it is within budget. */
+  consume(scope: Scope): Promise<AiBudgetDecision>;
+  /** Records observed token usage after a call (counts toward the token ceiling). */
+  settle(scope: Scope, tokens: number): Promise<void>;
+}
+
 /** Embeddings provider (separate port; Anthropic ships no embeddings API). */
 export interface EmbeddingsProvider {
   readonly modelId: string;

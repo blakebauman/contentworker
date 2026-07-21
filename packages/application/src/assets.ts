@@ -27,6 +27,25 @@ export interface CreatedAsset {
 }
 
 /**
+ * Reduces a client-supplied file name to a safe object-key segment: the final
+ * path component only, with separators, traversal, and control characters
+ * stripped. This prevents a crafted `fileName` (e.g. `../../otherspace/...`)
+ * from escaping the tenant's `spaceId/environmentId/id/` key prefix and reading
+ * or overwriting another tenant's objects. Falls back to `file` when nothing
+ * printable remains; the unique `id` in the prefix keeps keys collision-free.
+ */
+function safeObjectName(fileName: string): string {
+  const last = fileName.split(/[/\\]/).pop() ?? '';
+  let base = '';
+  for (const ch of last) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code > 0x1f && code !== 0x7f) base += ch;
+  }
+  if (base === '' || base === '.' || base === '..') return 'file';
+  return base.slice(0, 200);
+}
+
+/**
  * Creates a draft asset and returns a presigned upload URL. The client uploads
  * the bytes straight to blob storage (they never transit the API), then
  * publishes the asset to make it deliverable.
@@ -38,7 +57,7 @@ export async function createAsset(
   input: CreateAssetInput,
 ): Promise<CreatedAsset> {
   const id = ctx.ids.newId();
-  const key = `${scope.spaceId}/${scope.environmentId}/${id}/${input.fileName}`;
+  const key = `${scope.spaceId}/${scope.environmentId}/${id}/${safeObjectName(input.fileName)}`;
   const upload = await blob.getUploadUrl(key, input.contentType);
   const url = await blob.getDownloadUrl(key);
   const asset: Asset = {

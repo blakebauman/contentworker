@@ -1,5 +1,6 @@
 import { type EventType, NotFoundError, type Scope, type Webhook } from '@cw/domain';
 import type { AppContext } from './context.js';
+import { assertSafeExternalUrl } from './url-safety.js';
 
 export interface CreateWebhookInput {
   readonly url: string;
@@ -18,6 +19,7 @@ export async function createWebhook(
   scope: Scope,
   input: CreateWebhookInput,
 ): Promise<Webhook> {
+  assertSafeExternalUrl(input.url);
   const webhook: Webhook = {
     id: ctx.ids.newId(),
     url: input.url,
@@ -43,6 +45,7 @@ export async function updateWebhook(
 ): Promise<Webhook> {
   const current = await ctx.store.webhooks.get(scope, id);
   if (!current) throw new NotFoundError('Webhook', id);
+  if (changes.url !== undefined) assertSafeExternalUrl(changes.url);
   const updated: Webhook = {
     ...current,
     url: changes.url ?? current.url,

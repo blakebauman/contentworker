@@ -2,6 +2,7 @@ import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
 import type { AppContext, RagDeps } from '@cw/application';
 import type { AIProvider, BlobStore, EventBus } from '@cw/ports';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import type { AuthDeps, AuthRateLimit } from './auth.js';
 import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
@@ -34,6 +35,15 @@ export function createApp(
 ): Hono {
   const app = new Hono();
   app.onError(onError);
+
+  // Reject oversized request bodies before any handler reads them (DoS guard).
+  app.use(
+    '*',
+    bodyLimit({
+      maxSize: config.maxBodyBytes ?? 5 * 1024 * 1024,
+      onError: (c) => c.json({ code: 'payload_too_large', message: 'Request body too large' }, 413),
+    }),
+  );
 
   app.get('/healthz', doc('System', 'Liveness probe', { ok: healthz }), (c) =>
     c.json({ status: 'ok' }),
