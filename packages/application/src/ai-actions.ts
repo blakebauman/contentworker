@@ -8,6 +8,7 @@ import {
 import type { AIActionDefinition, AIProvider, ModelTier } from '@cw/ports';
 import { recordAgentRun } from './agent-audit.js';
 import { generateWithBudget } from './ai-budget.js';
+import { UNTRUSTED_CONTENT_GUARD } from './ai-prompt.js';
 import type { AppContext } from './context.js';
 import { getEntry, updateEntry } from './entries.js';
 
@@ -128,7 +129,7 @@ export async function runAIAction(
 
   const prompt = renderTemplate(action.promptTemplate, values);
   const result = await generateWithBudget(ctx, ai, scope, {
-    system: `You are running the AI Action "${action.name}". Follow the instructions and return only the requested output.`,
+    system: `You are running the AI Action "${action.name}". Follow the instructions and return only the requested output. ${UNTRUSTED_CONTENT_GUARD}`,
     prompt,
     tier: action.tier,
     maxTokens: 2048,

@@ -8,8 +8,10 @@ import {
 import type { AIProvider, ModelTier } from '@cw/ports';
 import { recordAgentRun } from './agent-audit.js';
 import { generateWithBudget } from './ai-budget.js';
+import { UNTRUSTED_CONTENT_GUARD, wrapUntrusted } from './ai-prompt.js';
 import type { AppContext } from './context.js';
 import { getEntry } from './entries.js';
+import { unpublishEntry } from './publishing.js';
 import { createTask } from './tasks.js';
 
 /**
@@ -92,11 +94,8 @@ export async function auditEntry(
   const locale = config?.defaultLocale ?? 'en-US';
 
   const result = await generateWithBudget(ctx, ai, scope, {
-    system:
-      'You are a meticulous content editor. Audit the entry for gaps, inconsistencies, ' +
-      'missing required information, and quality issues. Return concrete, actionable findings. ' +
-      'Use severity "error" for blocking problems, "warning" for quality issues, "info" for nits.',
-    prompt: `Content type: ${ct.name}.\nFields:\n${describeEntry(ct, fields, locale)}\n\nList the findings.`,
+    system: `You are a meticulous content editor. Audit the entry for gaps, inconsistencies, missing required information, and quality issues. Return concrete, actionable findings. Use severity "error" for blocking problems, "warning" for quality issues, "info" for nits. ${UNTRUSTED_CONTENT_GUARD}`,
+    prompt: `Content type: ${ct.name}.\nFields:\n${wrapUntrusted(describeEntry(ct, fields, locale))}\n\nList the findings.`,
     tier: input.tier ?? 'balanced',
     maxTokens: 2048,
     outputSchema: {
@@ -231,6 +230,24 @@ export async function runPublishAgents(
       usage: r.usage,
     });
     runs.push({ workflow, status: r.status, decisions: r.decisions, usage: r.usage });
+  }
+
+  // Moderation runs post-publish (agents dispatch off entry.published), so a
+  // flagged entry is briefly live. Retract it from the delivery read model as
+  // soon as the classifier holds it, instead of only recording an advisory note,
+  // so unsafe content does not stay published. (A synchronous pre-publish gate
+  // remains a follow-up.)
+  if (runs.some((r) => r.workflow === 'moderate' && r.status === 'held')) {
+    await unpublishEntry(ctx, scope, entryId).catch(() => {
+      /* already unpublished or gone — nothing to retract */
+    });
+    await recordAgentRun(ctx, scope, {
+      workflow: 'moderate',
+      entryId,
+      status: 'held',
+      decisions: ['retracted from delivery pending review'],
+      usage: { inputTokens: 0, outputTokens: 0 },
+    });
   }
   return runs;
 }

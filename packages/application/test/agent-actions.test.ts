@@ -13,9 +13,11 @@ import {
   createContentType,
   createEntry,
   createSpace,
+  getEntry,
   listAgentRuns,
   listTasks,
   moderateEntry,
+  publishEntry,
   runPublishAgents,
 } from '../src/index.js';
 
@@ -235,5 +237,24 @@ describe('runPublishAgents', () => {
     });
     expect(calls.map((c) => c.workflow)).toEqual(['moderate']);
     expect(runs).toHaveLength(1);
+  });
+
+  it('retracts a published entry that moderation flags (held)', async () => {
+    await publishEntry(ctx, scope, entryId);
+    expect((await getEntry(ctx, scope, entryId)).entry.publishedVersion).not.toBeNull();
+
+    const { runner } = fakeRunner({
+      moderate: {
+        status: 'held',
+        decisions: ['flagged'],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    });
+    await runPublishAgents(ctx, runner, scope, entryId, { moderate: true });
+
+    // Flagged content is pulled from the delivery read model.
+    expect((await getEntry(ctx, scope, entryId)).entry.publishedVersion).toBeNull();
+    const recorded = await listAgentRuns(ctx, scope);
+    expect(recorded.some((r) => r.decisions.some((d) => /retracted/.test(d)))).toBe(true);
   });
 });

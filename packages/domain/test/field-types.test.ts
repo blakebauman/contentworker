@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { type FieldDefinition, defineContentType, validateEntryFields } from '../src/index.js';
+import {
+  type FieldDefinition,
+  ValidationError,
+  defineContentType,
+  unsafeRegexReason,
+  validateEntryFields,
+} from '../src/index.js';
 
 const vctx = { defaultLocale: 'en-US', locales: ['en-US'] };
 
@@ -125,5 +131,40 @@ describe('field type validation across all types', () => {
     });
     expect(ok(sym, 'hello-world')).toHaveLength(0);
     expect(ok(sym, 'Hello World').length).toBeGreaterThan(0);
+  });
+
+  it('rejects a content type whose regexp risks catastrophic backtracking (ReDoS)', () => {
+    let thrown: unknown;
+    try {
+      typeWith({
+        apiId: 'slug',
+        name: 'Slug',
+        type: 'Symbol',
+        localized: false,
+        required: true,
+        validations: { regexp: { pattern: '(a+)+$' } },
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(ValidationError);
+    expect((thrown as ValidationError).issues[0]?.message).toMatch(/backtracking/i);
+  });
+});
+
+describe('unsafeRegexReason', () => {
+  it('accepts a safe pattern', () => {
+    expect(unsafeRegexReason('^[a-z0-9-]+$')).toBeNull();
+  });
+  it('flags nested quantifiers', () => {
+    expect(unsafeRegexReason('(a+)+')).toMatch(/backtracking/);
+    expect(unsafeRegexReason('([a-z]*)+')).toMatch(/backtracking/);
+  });
+  it('rejects unsupported flags and invalid patterns', () => {
+    expect(unsafeRegexReason('abc', 'z')).toMatch(/flag/);
+    expect(unsafeRegexReason('(')).toMatch(/invalid/);
+  });
+  it('rejects an over-long pattern', () => {
+    expect(unsafeRegexReason('a'.repeat(1001))).toMatch(/at most/);
   });
 });
