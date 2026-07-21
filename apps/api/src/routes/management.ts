@@ -89,6 +89,7 @@ import {
   publishEntry,
   publishRelease,
   reassignTask,
+  reindexEmbeddings,
   relatedEntries,
   removeEntryFromRelease,
   reopenTask,
@@ -574,6 +575,29 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         locale: c.req.query('locale'),
       }),
     ),
+  );
+  // Bulk re-embed the scope's published entries (e.g. after an extraction or
+  // embedding-model change). Idempotent per entry; safe to re-run.
+  app.post(
+    `${BASE}/search/reindex`,
+    doc('AI & agents', 'Reindex embeddings for all published entries', {
+      description:
+        'Re-embeds every published entry in the environment (optionally one content ' +
+        'type) so content published before an embeddings change becomes semantically ' +
+        'searchable without a republish.',
+    }),
+    requireScope(SCOPES.contentManage),
+    async (c) => {
+      const body = ((await c.req.json().catch(() => null)) ?? {}) as {
+        contentTypeApiId?: unknown;
+      };
+      return c.json(
+        await reindexEmbeddings(rag, ctx, scopeOf(c), {
+          contentTypeApiId:
+            typeof body.contentTypeApiId === 'string' ? body.contentTypeApiId : undefined,
+        }),
+      );
+    },
   );
   app.post(
     `${BASE}/entries/:id/published`,

@@ -51,6 +51,7 @@ import {
   publishContentType,
   publishEntry,
   publishRelease,
+  reindexEmbeddings,
   relatedEntries,
   resolveTask,
   restoreVersion,
@@ -260,6 +261,22 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
       guard(SCOPES.searchRead, scopeOf(args));
       return ok(
         await findDuplicates(rag, ctx, scopeOf(args), args.id, { threshold: args.threshold }),
+      );
+    },
+  );
+
+  server.tool(
+    'content_reindex_embeddings',
+    'Re-embed every published entry in the environment (optionally one content type) so ' +
+      'content published before an embeddings change becomes semantically searchable ' +
+      'without a republish. Idempotent per entry.',
+    { contentTypeApiId: z.string().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentManage, scopeOf(args));
+      return ok(
+        await reindexEmbeddings(rag, ctx, scopeOf(args), {
+          contentTypeApiId: args.contentTypeApiId,
+        }),
       );
     },
   );

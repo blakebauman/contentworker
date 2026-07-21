@@ -86,6 +86,15 @@ if it fails validation.
 
 On `entry.unpublished`, `removeEntryEmbeddings` deletes the entry's vectors.
 
+**Bulk reindex** — `reindexEmbeddings` re-embeds every published entry in a scope
+(optionally one content type), paging through the read model. Use after a change to text
+extraction or the embedding model so already-published content becomes searchable without
+a republish. Exposed as `POST /spaces/:space/environments/:env/search/reindex`
+(body: `{ contentTypeApiId? }`, scope `content:manage`) and the `content_reindex_embeddings`
+MCP tool. Idempotent per entry — each reindex replaces that entry's stale vectors.
+The call runs synchronously; for very large environments prefer reindexing one content
+type at a time (a queue-backed variant is a natural follow-up if that becomes limiting).
+
 **Querying** (`semanticSearch(deps, scope, query, { topK = 10, minScore })`):
 
 1. The query is embedded (`taskType: 'query'`).

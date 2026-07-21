@@ -1,10 +1,22 @@
-import { InMemoryVectorStore, LocalEmbeddingsProvider } from '@cw/test-kit';
+import {
+  FixedClock,
+  InMemoryContentStore,
+  InMemoryVectorStore,
+  LocalEmbeddingsProvider,
+  SequenceIdGenerator,
+} from '@cw/test-kit';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  type AppContext,
   type RagDeps,
   chunk,
+  createContentType,
+  createEntry,
+  createSpace,
   extractTextByLocale,
   indexEntryEmbeddings,
+  publishEntry,
+  reindexEmbeddings,
   removeEntryEmbeddings,
   semanticSearch,
 } from '../src/index.js';
@@ -110,5 +122,81 @@ describe('P7: RAG indexing + semantic search', () => {
     });
     await removeEntryEmbeddings(deps, scope, 'e1');
     expect((await semanticSearch(deps, scope, 'searchable', { topK: 5 })).length).toBe(0);
+  });
+});
+
+describe('reindex embeddings', () => {
+  let ctx: AppContext;
+  let deps: RagDeps;
+
+  beforeEach(async () => {
+    ctx = {
+      store: new InMemoryContentStore(),
+      clock: new FixedClock(),
+      ids: new SequenceIdGenerator('e'),
+    };
+    deps = { embeddings: new LocalEmbeddingsProvider(512), vectors: new InMemoryVectorStore() };
+    for (const spaceId of ['kb', 'other']) {
+      await createSpace(ctx, { spaceId, name: spaceId, defaultLocale: 'en-US' });
+      await createContentType(
+        ctx,
+        { spaceId, environmentId: 'main' },
+        {
+          apiId: 'article',
+          name: 'Article',
+          displayField: 'title',
+          fields: [
+            {
+              apiId: 'title',
+              name: 'Title',
+              type: 'Symbol',
+              localized: false,
+              required: true,
+              position: 0,
+            },
+          ],
+        },
+      );
+    }
+  });
+
+  async function publishArticle(scope: { spaceId: string; environmentId: string }, title: string) {
+    const { entry } = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': title } },
+    });
+    await publishEntry(ctx, scope, entry.id);
+    return entry.id;
+  }
+
+  it('embeds all published entries so they become searchable', async () => {
+    const pg = await publishArticle(scope, 'PostgreSQL relational database indexes');
+    await publishArticle(scope, 'Espresso brewing methods for coffee');
+
+    // Nothing indexed yet — publish alone does not embed in this harness.
+    expect((await semanticSearch(deps, scope, 'database', { topK: 5 })).length).toBe(0);
+
+    const result = await reindexEmbeddings(deps, ctx, scope, { batchSize: 1 });
+    expect(result.entries).toBe(2);
+    expect(result.chunks).toBeGreaterThanOrEqual(2);
+
+    const hits = await semanticSearch(deps, scope, 'relational database', { topK: 5 });
+    expect(hits[0]?.entryId).toBe(pg);
+  });
+
+  it('returns zero counts for a scope with nothing published', async () => {
+    expect(await reindexEmbeddings(deps, ctx, scope, {})).toEqual({ entries: 0, chunks: 0 });
+  });
+
+  it('only touches the requested scope', async () => {
+    const otherScope = { spaceId: 'other', environmentId: 'main' };
+    await publishArticle(scope, 'kubernetes container orchestration');
+    await publishArticle(otherScope, 'terraform infrastructure as code');
+
+    const result = await reindexEmbeddings(deps, ctx, scope, {});
+    expect(result.entries).toBe(1);
+
+    expect((await semanticSearch(deps, scope, 'kubernetes', { topK: 5 })).length).toBe(1);
+    expect((await semanticSearch(deps, otherScope, 'terraform', { topK: 5 })).length).toBe(0);
   });
 });

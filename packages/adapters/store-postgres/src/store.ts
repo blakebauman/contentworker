@@ -284,7 +284,9 @@ function makeEntryRepo(db: Db): EntryRepo {
         .select()
         .from(schema.entryPublished)
         .where(and(...conditions))
-        .orderBy(asc(schema.entryPublished.publishedAt))
+        // entryId tie-break: same-transaction publishes share publishedAt, and
+        // stable ordering is what makes offset paging (e.g. reindex) reliable.
+        .orderBy(asc(schema.entryPublished.publishedAt), asc(schema.entryPublished.entryId))
         .$dynamic();
       if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
       const published = (await select).map(toPublished);
