@@ -13,6 +13,8 @@ export function createHttpFunctionInvoker(fetchImpl: typeof fetch = fetch): Func
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-cw-event': event.type },
           body: JSON.stringify(event),
+          // Never follow redirects — a 3xx to an internal host would be an SSRF.
+          redirect: 'manual',
         });
         return { ok: res.ok, statusCode: res.status };
       } catch (err) {

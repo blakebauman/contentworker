@@ -29,7 +29,10 @@ import {
 } from '../auth.js';
 import { doc } from '../docs/openapi.js';
 import { asset, publishedEntry, publishedEntryList, searchHits } from '../docs/schemas.js';
-import { entryQueryFrom, parseEntryQuery } from '../query.js';
+import { MAX_PAGE_LIMIT, clampCount, entryQueryFrom, parseEntryQuery } from '../query.js';
+
+/** Max reference-resolution depth a delivery client may request. */
+const MAX_INCLUDE_DEPTH = 10;
 
 const scopeOf = (c: Context<AuthVars>): Scope => ({
   spaceId: c.req.param('space') as string,
@@ -62,9 +65,8 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     requireScope(SCOPES.searchRead),
     async (c) => {
       const q = c.req.query('q') ?? '';
-      const topK = c.req.query('top_k');
       const mode = c.req.query('mode') ?? 'hybrid';
-      const opts = { topK: topK ? Number(topK) : undefined };
+      const opts = { topK: clampCount(c.req.query('top_k'), MAX_PAGE_LIMIT, { min: 1 }) };
       const scope = scopeOf(c);
       let hits =
         mode === 'semantic'
@@ -99,11 +101,10 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.deliveryRead),
     async (c) => {
-      const include = c.req.query('include');
       const query = parseEntryQuery(new URL(c.req.url).searchParams);
       const items = await listPublishedEntries(ctx, scopeOf(c), query, {
         locale: c.req.query('locale'),
-        include: include ? Number(include) : undefined,
+        include: clampCount(c.req.query('include'), MAX_INCLUDE_DEPTH, { min: 0 }),
       });
       // Granular RBAC: drop entries of ungranted types, mask denied fields.
       const principal = c.get('principal');
@@ -122,10 +123,9 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.deliveryRead),
     async (c) => {
-      const include = c.req.query('include');
       const entry = await getPublishedEntry(ctx, scopeOf(c), c.req.param('id'), {
         locale: c.req.query('locale'),
-        include: include ? Number(include) : undefined,
+        include: clampCount(c.req.query('include'), MAX_INCLUDE_DEPTH, { min: 0 }),
       });
       const principal = c.get('principal');
       authorizeContent(principal, 'read', entry.contentType);
@@ -144,9 +144,8 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
       if (c.get('principal').contentGrants) {
         return c.json({ items: [], total: 0 });
       }
-      const limit = c.req.query('limit');
       const items = await listPublishedAssets(ctx, scopeOf(c), {
-        limit: limit ? Number(limit) : undefined,
+        limit: clampCount(c.req.query('limit'), MAX_PAGE_LIMIT, { min: 1 }),
       });
       return c.json({ items, total: items.length });
     },

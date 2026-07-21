@@ -51,6 +51,8 @@ export interface ApiConfig {
    * than falling through to a full-privilege CMA key (fail closed).
    */
   readonly oidcDefaultRole?: string;
+  /** Max accepted request body size in bytes (DoS guard). Default 5 MiB. */
+  readonly maxBodyBytes?: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -89,5 +91,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     oidcRedirectUri: env.OIDC_REDIRECT_URI,
     oidcGroupRoleMap,
     oidcDefaultRole: env.OIDC_DEFAULT_ROLE,
+    maxBodyBytes: Number(env.MAX_BODY_BYTES ?? 5 * 1024 * 1024),
   };
 }
