@@ -404,6 +404,16 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     authorizeContent(principal, action, entry.contentTypeApiId);
   };
 
+  // Authorizes read on an entry (404 if missing, 403 if the role can't read its
+  // content type) and returns the content type id so callers can mask denied
+  // fields on version/history/related reads. Use this on every path that returns
+  // an entry's field values so granular RBAC can't be bypassed via a side door.
+  const authorizeEntryRead = async (c: Context<AuthVars>, id: string): Promise<string> => {
+    const { entry } = await getEntry(ctx, scopeOf(c), id);
+    authorizeContent(c.get('principal'), 'read', entry.contentTypeApiId);
+    return entry.contentTypeApiId;
+  };
+
   app.post(
     `${BASE}/entries`,
     doc('Entries', 'Create a draft entry', { ok: docs.createdEntry, status: 201 }),
@@ -458,9 +468,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.json(link, 201);
   });
   // "What links here": entries/assets that reference this entry.
-  app.get(`${BASE}/entries/:id/reverse-references`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json({ items: await getReverseReferences(ctx, scopeOf(c), c.req.param('id')) }),
-  );
+  app.get(`${BASE}/entries/:id/reverse-references`, requireScope(SCOPES.previewRead), async (c) => {
+    await authorizeEntryRead(c, c.req.param('id'));
+    return c.json({ items: await getReverseReferences(ctx, scopeOf(c), c.req.param('id')) });
+  });
   app.put(
     `${BASE}/entries/:id`,
     doc('Entries', 'Save a new draft version', { ok: docs.entry }),
@@ -643,32 +654,70 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // --- entry version history ---------------------------------------------
-  app.get(`${BASE}/entries/:id/versions`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json({ items: await listVersions(ctx, scopeOf(c), c.req.param('id')) }),
-  );
+  // Version snapshots carry raw field values, so every read authorizes the
+  // entry's content type and masks denied fields — matching GET /entries/:id.
+  app.get(`${BASE}/entries/:id/versions`, requireScope(SCOPES.previewRead), async (c) => {
+    const type = await authorizeEntryRead(c, c.req.param('id'));
+    const principal = c.get('principal');
+    const items = (await listVersions(ctx, scopeOf(c), c.req.param('id'))).map((v) => ({
+      ...v,
+      fields: maskDeniedFields(principal, type, v.fields),
+    }));
+    return c.json({ items });
+  });
   // A field-by-field diff between two versions (?from=&to=).
-  app.get(`${BASE}/entries/:id/versions/diff`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json(
-      await diffVersions(
-        ctx,
-        scopeOf(c),
-        c.req.param('id'),
-        Number(c.req.query('from')),
-        Number(c.req.query('to')),
-      ),
-    ),
-  );
-  app.get(`${BASE}/entries/:id/versions/:version`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json(await getVersion(ctx, scopeOf(c), c.req.param('id'), Number(c.req.param('version')))),
-  );
-  // Restore copies an old version's fields into a NEW draft version.
+  app.get(`${BASE}/entries/:id/versions/diff`, requireScope(SCOPES.previewRead), async (c) => {
+    const type = await authorizeEntryRead(c, c.req.param('id'));
+    const principal = c.get('principal');
+    const diff = await diffVersions(
+      ctx,
+      scopeOf(c),
+      c.req.param('id'),
+      Number(c.req.query('from')),
+      Number(c.req.query('to')),
+    );
+    // Drop denied fields from the diff so they can't leak via before/after.
+    const allowed = maskDeniedFields(
+      principal,
+      type,
+      Object.fromEntries(diff.changes.map((ch) => [ch.field, ch])),
+    );
+    return c.json({ ...diff, changes: Object.values(allowed) });
+  });
+  app.get(`${BASE}/entries/:id/versions/:version`, requireScope(SCOPES.previewRead), async (c) => {
+    const type = await authorizeEntryRead(c, c.req.param('id'));
+    const version = await getVersion(
+      ctx,
+      scopeOf(c),
+      c.req.param('id'),
+      Number(c.req.param('version')),
+    );
+    return c.json({
+      ...version,
+      fields: maskDeniedFields(c.get('principal'), type, version.fields),
+    });
+  });
+  // Restore copies an old version's fields into a NEW draft version. It must pass
+  // the same write authorization as a normal edit, so a role with denied/
+  // read-only fields can't resurrect them by restoring, or write an ungranted type.
   app.post(
     `${BASE}/entries/:id/versions/:version/restore`,
     requireScope(SCOPES.contentWrite),
-    async (c) =>
-      c.json(
+    async (c) => {
+      const principal = c.get('principal');
+      const { entry } = await getEntry(ctx, scopeOf(c), c.req.param('id'));
+      authorizeContent(principal, 'write', entry.contentTypeApiId);
+      const target = await getVersion(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        Number(c.req.param('version')),
+      );
+      assertWritableFields(principal, entry.contentTypeApiId, target.fields);
+      return c.json(
         await restoreVersion(ctx, scopeOf(c), c.req.param('id'), Number(c.req.param('version'))),
-      ),
+      );
+    },
   );
 
   // --- assets -------------------------------------------------------------
@@ -853,9 +902,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // --- comments (on entries) ---------------------------------------------
-  app.get(`${BASE}/entries/:id/comments`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json({ items: await listComments(ctx, scopeOf(c), c.req.param('id')) }),
-  );
+  app.get(`${BASE}/entries/:id/comments`, requireScope(SCOPES.previewRead), async (c) => {
+    await authorizeEntryRead(c, c.req.param('id'));
+    return c.json({ items: await listComments(ctx, scopeOf(c), c.req.param('id')) });
+  });
   app.post(`${BASE}/entries/:id/comments`, requireScope(SCOPES.contentWrite), async (c) => {
     const body = await c.req.json();
     const created = await addComment(ctx, scopeOf(c), {
@@ -872,9 +922,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
 
   // --- tasks (on entries) ------------------------------------------------
-  app.get(`${BASE}/entries/:id/tasks`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json({ items: await listTasks(ctx, scopeOf(c), c.req.param('id')) }),
-  );
+  app.get(`${BASE}/entries/:id/tasks`, requireScope(SCOPES.previewRead), async (c) => {
+    await authorizeEntryRead(c, c.req.param('id'));
+    return c.json({ items: await listTasks(ctx, scopeOf(c), c.req.param('id')) });
+  });
   app.post(`${BASE}/entries/:id/tasks`, requireScope(SCOPES.contentWrite), async (c) => {
     const body = await c.req.json();
     const created = await createTask(ctx, scopeOf(c), {
@@ -914,9 +965,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     await deleteWorkflow(ctx, scopeOf(c), c.req.param('id'));
     return c.body(null, 204);
   });
-  app.get(`${BASE}/entries/:id/workflow`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json(await getEntryWorkflowState(ctx, scopeOf(c), c.req.param('id'))),
-  );
+  app.get(`${BASE}/entries/:id/workflow`, requireScope(SCOPES.previewRead), async (c) => {
+    await authorizeEntryRead(c, c.req.param('id'));
+    return c.json(await getEntryWorkflowState(ctx, scopeOf(c), c.req.param('id')));
+  });
   // The transition's required scope is data-driven by the target step, so the
   // base guard is only previewRead; transitionEntry enforces the step's scope.
   app.post(
@@ -980,11 +1032,12 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
 
   // --- entry taxonomy associations ---------------------------------------
-  app.get(`${BASE}/entries/:id/metadata`, requireScope(SCOPES.previewRead), async (c) =>
-    c.json(
+  app.get(`${BASE}/entries/:id/metadata`, requireScope(SCOPES.previewRead), async (c) => {
+    await authorizeEntryRead(c, c.req.param('id'));
+    return c.json(
       (await getEntryMetadata(ctx, scopeOf(c), c.req.param('id'))) ?? { tags: [], concepts: [] },
-    ),
-  );
+    );
+  });
   app.put(`${BASE}/entries/:id/metadata`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(await setEntryMetadata(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
   );
