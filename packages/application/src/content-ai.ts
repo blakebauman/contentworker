@@ -8,6 +8,7 @@ import {
 } from '@cw/domain';
 import type { AIProvider, ModelTier } from '@cw/ports';
 import { recordAgentRun } from './agent-audit.js';
+import { generateWithBudget } from './ai-budget.js';
 import type { AppContext } from './context.js';
 import { getEntry, updateEntry } from './entries.js';
 import { createTag, getEntryMetadata, listTags, setEntryMetadata } from './taxonomy.js';
@@ -104,7 +105,7 @@ export async function translateEntry(
 
   const properties: Record<string, Record<string, unknown>> = {};
   for (const apiId of fieldIds) properties[apiId] = { type: 'string' };
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system: `You are a professional translator. Translate each field value into ${input.targetLocale}, preserving meaning, tone, and any markup. Return only the translations.`,
     prompt: `Translate these fields from ${source} to ${input.targetLocale}:\n${JSON.stringify(source_texts, null, 2)}`,
     tier: input.tier ?? 'balanced',
@@ -175,7 +176,7 @@ export async function summarizeEntry(
     throw new ValidationError([{ field: '', message: 'Entry has no text to summarize' }]);
   }
   const maxWords = input.maxWords ?? 60;
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system: `You summarize content. Write a single clear summary of at most ${maxWords} words.`,
     prompt: `Summarize this ${ct.name}:\n${text}`,
     tier: input.tier ?? 'fast',
@@ -257,7 +258,7 @@ export async function autofillField(
   }
 
   const context = collectText(ct, fields, locale, defaultLocale);
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system:
       'You fill in a single missing field of a content entry based on its other fields. ' +
       'Return only the value, matching the requested type.',
@@ -326,7 +327,7 @@ export async function suggestEntryTags(
   const { fields, ct, defaultLocale } = await loadEntryForAi(ctx, scope, id);
   const text = collectText(ct, fields, defaultLocale, defaultLocale);
   const existing = await listTags(ctx, scope);
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system:
       'You classify content with taxonomy tags. Prefer the existing vocabulary; ' +
       'suggest new tag names only when nothing fits. Return tag NAMES, lowercase.',

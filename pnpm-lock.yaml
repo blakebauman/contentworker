@@ -127,6 +127,9 @@ importers:
       '@cw/adapter-ai-azure-openai':
         specifier: workspace:*
         version: link:../../packages/adapters/ai-azure-openai
+      '@cw/adapter-redis':
+        specifier: workspace:*
+        version: link:../../packages/adapters/redis
       '@cw/adapter-store-postgres':
         specifier: workspace:*
         version: link:../../packages/adapters/store-postgres
@@ -157,6 +160,9 @@ importers:
       '@temporalio/workflow':
         specifier: ^1.11.6
         version: 1.18.1
+      ioredis:
+        specifier: ^5.4.2
+        version: 5.11.1
       uuid:
         specifier: ^11.0.3
         version: 11.1.1

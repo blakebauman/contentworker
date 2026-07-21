@@ -1,10 +1,12 @@
 import { createAnthropicProvider } from '@cw/adapter-ai-anthropic';
 import { createAzureOpenAIProvider } from '@cw/adapter-ai-azure-openai';
+import { createRedisCostGuard } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { type Activities, makeActivities } from '@cw/agent-runtime';
-import type { AppContext } from '@cw/application';
-import type { AIProvider, Clock, ContentStore, IdGenerator } from '@cw/ports';
-import { InMemoryContentStore } from '@cw/test-kit';
+import { type AppContext, aiBudgetLimits } from '@cw/application';
+import type { AIProvider, Clock, ContentStore, CostGuard, IdGenerator } from '@cw/ports';
+import { InMemoryContentStore, InMemoryCostGuard } from '@cw/test-kit';
+import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
 
 const clock: Clock = { now: () => new Date() };
@@ -20,6 +22,15 @@ export function wireActivities(env: NodeJS.ProcessEnv = process.env): {
     : (new InMemoryContentStore() as ContentStore);
   const ai: AIProvider =
     env.AI_PROVIDER === 'azure-openai' ? createAzureOpenAIProvider() : createAnthropicProvider();
-  const ctx: AppContext = { store, clock, ids };
+  // Share the AI budget window with the API/worker via Redis when configured;
+  // fall back to an in-process window for single-node/dev.
+  const limits = aiBudgetLimits(env);
+  let costGuard: CostGuard | undefined;
+  if (limits) {
+    costGuard = env.REDIS_URL
+      ? createRedisCostGuard(new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }), limits)
+      : new InMemoryCostGuard(limits);
+  }
+  const ctx: AppContext = { store, clock, ids, costGuard };
   return { activities: makeActivities({ ctx, ai }), ids };
 }

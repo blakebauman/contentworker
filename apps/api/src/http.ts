@@ -1,4 +1,10 @@
-import { ConflictError, DomainError, NotFoundError, ValidationError } from '@cw/domain';
+import {
+  ConflictError,
+  DomainError,
+  NotFoundError,
+  RateLimitedError,
+  ValidationError,
+} from '@cw/domain';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
@@ -16,6 +22,7 @@ export function toHttpError(err: unknown): { status: number; body: unknown } {
     return { status: 401, body: errBody(err) };
   if (err instanceof DomainError && err.code === 'forbidden')
     return { status: 403, body: errBody(err) };
+  if (err instanceof RateLimitedError) return { status: 429, body: errBody(err) };
   if (err instanceof DomainError) return { status: 400, body: errBody(err) };
   if (err instanceof HTTPException) {
     return { status: err.status, body: { error: { code: 'http_error', message: err.message } } };

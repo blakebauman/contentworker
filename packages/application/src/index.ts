@@ -29,6 +29,7 @@ export * from './app-extensions.js';
 export * from './generation.js';
 export * from './content-ai.js';
 export * from './ai-actions.js';
+export * from './ai-budget.js';
 export * from './agent-actions.js';
 export * from './rag.js';
 export * from './roles.js';
