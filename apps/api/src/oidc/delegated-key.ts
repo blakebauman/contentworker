@@ -36,11 +36,17 @@ export async function mintDelegatedKey(
     );
   }
 
+  // Expire the delegated key with the session so a token captured from a cookie
+  // (or an unrevoked logout) can't outlive the SSO session indefinitely.
+  const expiresAt = new Date(
+    ctx.clock.now().getTime() + settings.sessionTtlHours * 60 * 60 * 1000,
+  ).toISOString();
   const { apiKey, token } = await createApiKey(ctx, hasher, {
     spaceId: settings.defaultSpace,
     kind: 'cma',
     name: `oidc:${subject}`,
     roleId,
+    expiresAt,
   });
   return { token, keyId: apiKey.id };
 }

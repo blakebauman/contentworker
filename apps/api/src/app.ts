@@ -68,6 +68,7 @@ export function createApp(
     // on-publish runs (AGENT_RUNTIME=temporal).
     agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),
     rateLimiter,
+    trustedProxyCount: config.trustedProxyCount,
   };
 
   const mountManagement = config.role === 'all' || config.role === 'management';

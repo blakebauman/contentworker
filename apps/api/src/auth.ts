@@ -54,6 +54,8 @@ export interface AuthDeps {
    * multi-isolate runtimes (Cloudflare Workers) inject a shared-state one.
    */
   readonly rateLimiter?: AuthRateLimit;
+  /** Number of trusted reverse proxies in front (for X-Forwarded-For parsing). */
+  readonly trustedProxyCount?: number;
 }
 
 const ADMIN: Principal = {
@@ -95,15 +97,50 @@ function resolveRequestToken(deps: AuthDeps, c: Context): string {
  * stores it on the context. The admin token short-circuits to a wildcard
  * principal; everything else is looked up as a hashed API key.
  */
+function requestIp(deps: AuthDeps, c: Context): string {
+  // CF-Connecting-IP first (Cloudflare-set, not forgeable); otherwise parse
+  // X-Forwarded-For from the right by trusted-proxy depth so a client can't
+  // spoof a fresh rate-limit key per request.
+  return clientIp({
+    cfConnectingIp: c.req.header('cf-connecting-ip'),
+    forwardedFor: c.req.header('x-forwarded-for'),
+    realIp: c.req.header('x-real-ip'),
+    trustedProxyCount: deps.trustedProxyCount,
+  });
+}
+
+/**
+ * Runs a credential resolution under the failed-auth rate limiter: rejects with
+ * 429 when the client IP is already blocked, clears the window on success, and
+ * records a failure (429 once the limit trips) on error. Shared by the bearer
+ * middleware and the preview route so every credential-checking path is
+ * throttled uniformly.
+ */
+export async function throttleAuth<T>(
+  deps: AuthDeps,
+  c: Context,
+  resolve: () => Promise<T>,
+): Promise<T> {
+  const ip = requestIp(deps, c);
+  const limiter = deps.rateLimiter ?? authRateLimiter;
+  if (await limiter.isBlocked(ip)) {
+    logger.warn({ ip, path: c.req.path }, 'auth: rate limit exceeded');
+    throw new HTTPException(429, { message: 'Too many authentication attempts' });
+  }
+  try {
+    const result = await resolve();
+    await limiter.clear(ip);
+    return result;
+  } catch (err) {
+    const limited = await limiter.recordFailure(ip);
+    logger.warn({ ip, path: c.req.path, method: c.req.method }, 'auth: invalid credentials');
+    if (limited) throw new HTTPException(429, { message: 'Too many authentication attempts' });
+    throw err;
+  }
+}
+
 export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars> {
   return async (c, next) => {
-    // CF-Connecting-IP first: on Cloudflare neither x-forwarded-for nor
-    // x-real-ip reaches the Worker, and a missing header would collapse every
-    // client into one shared 'unknown' rate-limit bucket (global 429s).
-    const ip = clientIp(
-      c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for'),
-      c.req.header('x-real-ip'),
-    );
     // No credentials presented → plain 401 with no limiter interaction: an
     // empty bearer can't brute-force anything, and unauthenticated probes
     // (e.g. the admin SPA checking for a session) must never exhaust the IP's
@@ -112,25 +149,15 @@ export function principalMiddleware(deps: AuthDeps): MiddlewareHandler<AuthVars>
     if (!token) {
       throw new HTTPException(401, { message: 'Invalid or missing API key' });
     }
-
-    const limiter = deps.rateLimiter ?? authRateLimiter;
-    if (await limiter.isBlocked(ip)) {
-      logger.warn({ ip, path: c.req.path }, 'auth: rate limit exceeded');
-      throw new HTTPException(429, { message: 'Too many authentication attempts' });
-    }
-
+    let principal: Principal;
     try {
-      const principal = await resolvePrincipal(deps, token);
-      await limiter.clear(ip);
-      c.set('principal', principal);
-    } catch {
-      const limited = await limiter.recordFailure(ip);
-      logger.warn({ ip, path: c.req.path, method: c.req.method }, 'auth: invalid credentials');
-      if (limited) {
-        throw new HTTPException(429, { message: 'Too many authentication attempts' });
-      }
+      principal = await throttleAuth(deps, c, () => resolvePrincipal(deps, token));
+    } catch (err) {
+      // Preserve the limiter's 429; collapse any auth failure to a plain 401.
+      if (err instanceof HTTPException) throw err;
       throw new HTTPException(401, { message: 'Invalid or missing API key' });
     }
+    c.set('principal', principal);
     await next();
   };
 }

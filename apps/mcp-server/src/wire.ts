@@ -101,7 +101,10 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
     // the durable Temporal path serves the worker's on-publish runs.
     agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),
     hasher: createHasher(env.TOKEN_PEPPER),
-    adminToken: env.MCP_TOKEN ?? 'dev-mcp-token',
+    // Only fall back to the dev token on a non-persistent (in-memory) store, so a
+    // real deployment (DATABASE_URL set) without MCP_TOKEN fails closed instead of
+    // exposing a world-known wildcard-admin bearer against the live database.
+    adminToken: env.MCP_TOKEN ?? (env.DATABASE_URL ? '' : 'dev-mcp-token'),
   };
 }
 

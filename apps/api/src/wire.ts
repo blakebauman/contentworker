@@ -4,7 +4,12 @@ import {
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
 import { createS3BlobStore } from '@cw/adapter-blob-s3';
-import { createRedisCache, createRedisCostGuard, createRedisEventBus } from '@cw/adapter-redis';
+import {
+  createRedisAuthRateLimiter,
+  createRedisCache,
+  createRedisCostGuard,
+  createRedisEventBus,
+} from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import type { AppContext, RagDeps } from '@cw/application';
@@ -32,6 +37,7 @@ import {
 } from '@cw/test-kit';
 import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
+import type { AuthRateLimit } from './auth.js';
 import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
 
@@ -46,6 +52,8 @@ export interface Wired {
   readonly ai: AIProvider;
   /** Live Content API source: Redis pub/sub when configured, else in-memory. */
   readonly bus: EventBus;
+  /** Shared failed-auth limiter when Redis is configured; else the in-process one. */
+  readonly rateLimiter?: AuthRateLimit;
   close(): Promise<void>;
 }
 
@@ -141,6 +149,15 @@ export function wire(config: ApiConfig): Wired {
     closers.push(async () => void redis?.disconnect());
   }
   const costGuard = makeCostGuard(config, redis);
+  // Share the failed-auth window across replicas when Redis is present, so an
+  // attacker can't multiply the budget by spreading attempts across pods.
+  const rateLimiter: AuthRateLimit | undefined = redis
+    ? createRedisAuthRateLimiter(
+        redis,
+        Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10),
+        Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000),
+      )
+    : undefined;
 
   if (config.databaseUrl) {
     const store = createPostgresStore(config.databaseUrl);
@@ -151,6 +168,7 @@ export function wire(config: ApiConfig): Wired {
       blob: makeBlob(),
       ai: makeAI(),
       bus,
+      rateLimiter,
       close: async () => {
         for (const c of closers) await c();
       },
@@ -194,6 +212,7 @@ export function wire(config: ApiConfig): Wired {
     blob: makeBlob(),
     ai: makeAI(),
     bus,
+    rateLimiter,
     close: async () => {
       for (const c of closers) await c();
     },

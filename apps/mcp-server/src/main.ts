@@ -14,16 +14,35 @@ import { wire } from './wire.js';
 startTelemetry('cw-mcp');
 
 const deps = wire();
+// The MCP server's single bearer IS its admin token, so validate it once as
+// adminToken. Passing it as both adminToken and mcpToken previously tripped the
+// "ADMIN_TOKEN and MCP_TOKEN must differ" rule on every secure startup.
 assertSecureSecrets({
   requireSecureSecrets: requireSecureSecretsFromEnv(process.env),
   seedDev: false,
   adminToken: deps.adminToken,
-  mcpToken: deps.adminToken,
 });
 
 const port = Number(process.env.PORT ?? 8788);
 
 const ADMIN: Principal = { spaceId: '*', kind: 'admin', scopes: [...scopesForKind('cma')] };
+
+// In-process failed-auth limiter (per client key) so bearer-token guessing is
+// throttled. A stateless multi-replica MCP deployment gets per-instance windows,
+// matching the API's in-process default.
+const AUTH_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10);
+const AUTH_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000);
+const authFailures = new Map<string, number[]>();
+function recentFailures(key: string): number[] {
+  const since = Date.now() - AUTH_WINDOW_MS;
+  const recent = (authFailures.get(key) ?? []).filter((t) => t > since);
+  authFailures.set(key, recent);
+  return recent;
+}
+function clientKey(req: IncomingMessage): string {
+  const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',');
+  return xff?.at(-1)?.trim() || req.socket.remoteAddress || 'unknown';
+}
 
 /** Resolves the bearer token to a Principal (admin token or hashed API key). */
 async function resolvePrincipal(token: string): Promise<Principal | null> {
@@ -63,13 +82,22 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  const key = clientKey(req);
+  if (recentFailures(key).length >= AUTH_MAX) {
+    logger.warn({ path: req.url }, 'mcp: rate limit exceeded');
+    res.writeHead(429, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'too many authentication attempts' }));
+    return;
+  }
   const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
-  const principal = await resolvePrincipal(token);
+  const principal = token ? await resolvePrincipal(token) : null;
   if (!principal) {
+    if (token) recentFailures(key).push(Date.now());
     logger.warn({ path: req.url }, 'mcp: invalid credentials');
     unauthorized(res);
     return;
   }
+  authFailures.delete(key);
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   const server = buildServer(deps, principal);

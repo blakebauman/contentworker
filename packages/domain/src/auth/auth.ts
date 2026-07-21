@@ -79,6 +79,8 @@ export interface ApiKey {
   readonly roleId?: string;
   /** ISO timestamp of the last successful authentication (optional). */
   readonly lastUsedAt?: string;
+  /** ISO timestamp after which the key no longer authenticates (optional). */
+  readonly expiresAt?: string;
 }
 
 /** The resolved identity of a request. `spaceId === '*'` is the admin/root scope. */

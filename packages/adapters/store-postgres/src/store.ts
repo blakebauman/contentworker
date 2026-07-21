@@ -911,6 +911,7 @@ function makeAuthRepo(db: Db): AuthRepo {
         scopes: [...key.scopes],
         revoked: key.revoked,
         roleId: key.roleId,
+        expiresAt: key.expiresAt ? new Date(key.expiresAt) : null,
       });
     },
     async findByHash(hashedToken) {
@@ -1722,6 +1723,7 @@ const toApiKey = (r: ApiKeyRow): ApiKey => ({
   revoked: r.revoked,
   roleId: r.roleId ?? undefined,
   lastUsedAt: r.lastUsedAt?.toISOString(),
+  expiresAt: r.expiresAt?.toISOString(),
 });
 
 type RoleRow = typeof schema.roles.$inferSelect;

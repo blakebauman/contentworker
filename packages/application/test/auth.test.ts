@@ -57,6 +57,22 @@ describe('RBAC: API keys + authorization', () => {
     await expect(authenticate(c, hasher, 'nope')).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
+  it('stops authenticating an expired key', async () => {
+    const clock = new FixedClock();
+    const c: AppContext = {
+      store: new InMemoryContentStore(),
+      clock,
+      ids: new SequenceIdGenerator('k'),
+    };
+    const expiresAt = new Date(clock.now().getTime() + 60_000).toISOString();
+    const { token } = await createApiKey(c, hasher, { spaceId: 's1', kind: 'cma', expiresAt });
+    // Valid before expiry...
+    await expect(authenticate(c, hasher, token)).resolves.toBeTruthy();
+    // ...and rejected once the clock passes expiresAt.
+    clock.advance(61_000);
+    await expect(authenticate(c, hasher, token)).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
   it('authorize enforces scope and space boundaries', async () => {
     const cda = { spaceId: 's1', kind: 'cda' as const, scopes: [SCOPES.deliveryRead] };
     // Has the scope in its own space.

@@ -84,9 +84,35 @@ describe('injected auth rate limiter (distributed seam)', () => {
 });
 
 describe('clientIp', () => {
-  it('prefers the first X-Forwarded-For hop, then remote addr, then unknown', () => {
-    expect(clientIp('1.1.1.1, 2.2.2.2', '3.3.3.3')).toBe('1.1.1.1');
-    expect(clientIp(undefined, '3.3.3.3')).toBe('3.3.3.3');
-    expect(clientIp(undefined, undefined)).toBe('unknown');
+  it('prefers CF-Connecting-IP (not client-forgeable)', () => {
+    expect(clientIp({ cfConnectingIp: '9.9.9.9', forwardedFor: '1.1.1.1' })).toBe('9.9.9.9');
+  });
+
+  it('parses X-Forwarded-For from the right by trusted-proxy depth', () => {
+    // With 1 trusted proxy, the client is the last (proxy-written) hop.
+    expect(clientIp({ forwardedFor: '1.1.1.1, 2.2.2.2, 3.3.3.3', trustedProxyCount: 1 })).toBe(
+      '3.3.3.3',
+    );
+    // A client-prepended spoof entry is ignored — still the real proxy-written hop.
+    expect(clientIp({ forwardedFor: 'spoof, 3.3.3.3', trustedProxyCount: 1 })).toBe('3.3.3.3');
+    // Two trusted proxies → the client is 2nd from the end.
+    expect(clientIp({ forwardedFor: 'spoof, 2.2.2.2, 3.3.3.3', trustedProxyCount: 2 })).toBe(
+      '2.2.2.2',
+    );
+  });
+
+  it('defaults to one trusted proxy (rightmost hop)', () => {
+    expect(clientIp({ forwardedFor: '1.1.1.1, 2.2.2.2' })).toBe('2.2.2.2');
+  });
+
+  it('ignores X-Forwarded-For entirely when no proxies are trusted', () => {
+    expect(clientIp({ forwardedFor: '1.1.1.1', realIp: '3.3.3.3', trustedProxyCount: 0 })).toBe(
+      '3.3.3.3',
+    );
+  });
+
+  it('falls back to real IP then unknown', () => {
+    expect(clientIp({ realIp: '3.3.3.3' })).toBe('3.3.3.3');
+    expect(clientIp({})).toBe('unknown');
   });
 });
