@@ -99,4 +99,25 @@ describe('GraphQL Delivery (generated from content types)', () => {
     });
     expect(res.status).toBe(401);
   });
+
+  it('rejects an over-deep query', async () => {
+    const { ctx, rag, blob, ai } = wire(config);
+    const app = createApp(ctx, config, rag, blob, ai);
+    // Nest __typename well past MAX_GQL_DEPTH (12) using aliased introspection.
+    let q = '__typename';
+    for (let i = 0; i < 20; i++) q = `__type(name: "Query") { ${q} }`;
+    const res = await gql(app, `{ ${q} }`);
+    expect(res.status).toBe(400);
+    expect(
+      res.body.errors?.some((e) => /maximum depth/i.test((e as { message: string }).message)),
+    ).toBe(true);
+  });
+
+  it('sets baseline security headers', async () => {
+    const { ctx, rag, blob, ai } = wire(config);
+    const app = createApp(ctx, config, rag, blob, ai);
+    const res = await app.request('/healthz');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+  });
 });
