@@ -43,6 +43,15 @@ export class InvalidStateError extends DomainError {
   }
 }
 
+/** A per-tenant rate/budget ceiling was exceeded (maps to HTTP 429). */
+export class RateLimitedError extends DomainError {
+  readonly retryAfterSeconds?: number;
+  constructor(message: string, retryAfterSeconds?: number) {
+    super('rate_limited', message, { retryAfterSeconds });
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 export interface FieldIssue {
   /** Field apiId the issue applies to ("" for entry-level issues). */
   readonly field: string;

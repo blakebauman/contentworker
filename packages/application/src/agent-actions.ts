@@ -7,6 +7,7 @@ import {
 } from '@cw/domain';
 import type { AIProvider, ModelTier } from '@cw/ports';
 import { recordAgentRun } from './agent-audit.js';
+import { generateWithBudget } from './ai-budget.js';
 import type { AppContext } from './context.js';
 import { getEntry } from './entries.js';
 import { createTask } from './tasks.js';
@@ -90,7 +91,7 @@ export async function auditEntry(
   const config = await ctx.store.spaces.getConfig(scope);
   const locale = config?.defaultLocale ?? 'en-US';
 
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system:
       'You are a meticulous content editor. Audit the entry for gaps, inconsistencies, ' +
       'missing required information, and quality issues. Return concrete, actionable findings. ' +

@@ -4,7 +4,7 @@ import {
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
 import { createS3BlobStore } from '@cw/adapter-blob-s3';
-import { createRedisCache, createRedisEventBus } from '@cw/adapter-redis';
+import { createRedisCache, createRedisCostGuard, createRedisEventBus } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import type { AppContext, RagDeps } from '@cw/application';
@@ -15,6 +15,7 @@ import type {
   Cache,
   Clock,
   ContentStore,
+  CostGuard,
   EmbeddingsProvider,
   EventBus,
   GenerateRequest,
@@ -23,6 +24,7 @@ import type {
 import {
   FakeBlobStore,
   InMemoryContentStore,
+  InMemoryCostGuard,
   InMemoryEventBus,
   InMemoryVectorStore,
   LocalEmbeddingsProvider,
@@ -103,6 +105,18 @@ function makeRag(databaseUrl?: string): RagDeps {
 }
 
 /**
+ * Builds the per-tenant AI budget governor: Redis-backed (shared across
+ * replicas) when Redis is configured, else an in-process window for
+ * dev/single-node. Returns `undefined` — unmetered — when either ceiling is set
+ * to 0 to explicitly disable metering.
+ */
+function makeCostGuard(config: ApiConfig, redis?: Redis): CostGuard | undefined {
+  const limits = config.aiBudget;
+  if (!limits || limits.maxRequests <= 0 || limits.maxTokens <= 0) return undefined;
+  return redis ? createRedisCostGuard(redis, limits) : new InMemoryCostGuard(limits);
+}
+
+/**
  * The composition root: the one place adapters are bound to ports. Selects the
  * Postgres store + Redis cache when their URLs are set, otherwise in-memory
  * equivalents seeded with a default space (for dev, tests, and demos).
@@ -117,20 +131,22 @@ export function wire(config: ApiConfig): Wired {
   // The Live Content API subscribes to this bus; the worker publishes to it.
   // Redis pub/sub connects the two processes; in-memory is a single-process stub.
   let bus: EventBus = new InMemoryEventBus();
+  let redis: Redis | undefined;
   if (config.redisUrl) {
-    const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null });
+    redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null });
     cache = createRedisCache(redis);
     const redisBus = createRedisEventBus(redis);
     bus = redisBus;
     closers.push(() => redisBus.close());
-    closers.push(async () => void redis.disconnect());
+    closers.push(async () => void redis?.disconnect());
   }
+  const costGuard = makeCostGuard(config, redis);
 
   if (config.databaseUrl) {
     const store = createPostgresStore(config.databaseUrl);
     closers.push(() => store.close());
     return {
-      ctx: { store, clock: systemClock, ids: uuidIds, cache },
+      ctx: { store, clock: systemClock, ids: uuidIds, cache, costGuard },
       rag: makeRag(config.databaseUrl),
       blob: makeBlob(),
       ai: makeAI(),
@@ -147,7 +163,13 @@ export function wire(config: ApiConfig): Wired {
     defaultLocale: config.seed.defaultLocale,
     locales: config.seed.locales,
   });
-  const ctx: AppContext = { store: store as ContentStore, clock: systemClock, ids: uuidIds, cache };
+  const ctx: AppContext = {
+    store: store as ContentStore,
+    clock: systemClock,
+    ids: uuidIds,
+    cache,
+    costGuard,
+  };
   // Seed dev API keys (synchronously) so the dev tokens authenticate through the
   // real auth path with no startup race.
   const tokens: Record<ApiKeyKind, string> = {

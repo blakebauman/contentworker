@@ -135,6 +135,7 @@ import {
 } from '../auth.js';
 import { doc } from '../docs/openapi.js';
 import * as docs from '../docs/schemas.js';
+import { MAX_PAGE_LIMIT, clampCount } from '../query.js';
 
 // Reads the route's scope, preferring the alias-resolved environment id stamped
 // by environmentMiddleware over the raw `:env` param.
@@ -263,7 +264,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     const limit = c.req.query('limit');
     const items = await listAuditLog(ctx, c.req.param('space'), {
       environmentId: c.req.query('environment'),
-      limit: limit ? Number(limit) : undefined,
+      limit: clampCount(limit, MAX_PAGE_LIMIT, { min: 1 }),
     });
     return c.json({ items });
   });
@@ -673,7 +674,9 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   // --- assets -------------------------------------------------------------
   app.get(`${BASE}/assets`, requireScope(SCOPES.previewRead), async (c) => {
     const limit = c.req.query('limit');
-    const items = await listAssets(ctx, scopeOf(c), { limit: limit ? Number(limit) : undefined });
+    const items = await listAssets(ctx, scopeOf(c), {
+      limit: clampCount(limit, MAX_PAGE_LIMIT, { min: 1 }),
+    });
     return c.json({ items });
   });
   app.post(
@@ -765,7 +768,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     const limit = c.req.query('limit');
     const items = await listAgentRuns(ctx, scopeOf(c), {
       workflow: c.req.query('workflow'),
-      limit: limit ? Number(limit) : undefined,
+      limit: clampCount(limit, MAX_PAGE_LIMIT, { min: 1 }),
     });
     return c.json({ items });
   });
@@ -803,7 +806,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.get(`${BASE}/webhooks/:id/deliveries`, requireScope(SCOPES.spaceAdmin), async (c) => {
     const limit = c.req.query('limit');
     const items = await listWebhookDeliveries(ctx, scopeOf(c), c.req.param('id'), {
-      limit: limit ? Number(limit) : undefined,
+      limit: clampCount(limit, MAX_PAGE_LIMIT, { min: 1 }),
     });
     return c.json({ items });
   });

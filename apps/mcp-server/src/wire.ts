@@ -6,7 +6,7 @@ import {
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
-import { createHasher } from '@cw/application';
+import { aiBudgetLimits, createHasher } from '@cw/application';
 import type { AgentRunner, AppContext, RagDeps } from '@cw/application';
 import type {
   AIProvider,
@@ -19,6 +19,7 @@ import type {
 } from '@cw/ports';
 import {
   InMemoryContentStore,
+  InMemoryCostGuard,
   InMemoryVectorStore,
   LocalEmbeddingsProvider,
   StubAIProvider,
@@ -89,7 +90,9 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
       })
     : new InMemoryVectorStore();
 
-  const ctx: AppContext = { store, clock, ids };
+  const limits = aiBudgetLimits(process.env);
+  const costGuard = limits ? new InMemoryCostGuard(limits) : undefined;
+  const ctx: AppContext = { store, clock, ids, costGuard };
   return {
     ctx,
     ai,

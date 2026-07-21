@@ -1,6 +1,7 @@
 import { type DomainEvent, type Scope, ValidationError } from '@cw/domain';
 import type { FunctionDefinition, FunctionInvokeResult, FunctionInvoker } from '@cw/ports';
 import type { AppContext } from './context.js';
+import { assertSafeExternalUrl } from './url-safety.js';
 
 /** True if `type` matches `pattern` ('*' = all, trailing '*' = prefix, else exact). */
 export function eventMatches(pattern: string, type: string): boolean {
@@ -25,9 +26,7 @@ export async function createFunction(
   if (!input.name.trim()) {
     throw new ValidationError([{ field: 'name', message: 'Name is required' }]);
   }
-  if (!/^https?:\/\//.test(input.url)) {
-    throw new ValidationError([{ field: 'url', message: 'url must be an http(s) URL' }]);
-  }
+  assertSafeExternalUrl(input.url);
   const fn: FunctionDefinition = {
     id: ctx.ids.newId(),
     name: input.name.trim(),

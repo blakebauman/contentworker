@@ -31,6 +31,27 @@ const OPS: ReadonlySet<string> = new Set([
 
 const FILTER_KEY = /^((?:fields|sys)\.[A-Za-z0-9_]+)(?:\[(\w+)\])?$/;
 
+/** Largest page a client may request; caps memory/DB work per request. */
+export const MAX_PAGE_LIMIT = 100;
+
+/**
+ * Coerces a raw `limit`/`skip`/`top_k` string to a bounded non-negative integer,
+ * defending the store from `NaN`, negative, `Infinity`, or absurd values that
+ * would otherwise reach `LIMIT`/`OFFSET`. Returns `undefined` for an absent
+ * value so callers keep their own default.
+ */
+export function clampCount(
+  raw: string | number | undefined,
+  max: number,
+  { min = 0 }: { min?: number } = {},
+): number | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const n = Number(raw);
+  if (Number.isNaN(n)) return min;
+  // ±Infinity clamps naturally: Math.max(Infinity, min) → Infinity → Math.min → max.
+  return Math.min(Math.max(Math.trunc(n), min), max);
+}
+
 /** Strips the leading `fields.` namespace; leaves `sys.*` keys intact. */
 function fieldName(path: string): string {
   return path.startsWith('fields.') ? path.slice('fields.'.length) : path;
@@ -93,11 +114,11 @@ export function entryQueryFrom(entries: Iterable<[string, string]>): EntryQuery 
       continue;
     }
     if (key === 'limit') {
-      limit = Number(value);
+      limit = clampCount(value, MAX_PAGE_LIMIT, { min: 1 });
       continue;
     }
     if (key === 'skip') {
-      skip = Number(value);
+      skip = clampCount(value, Number.MAX_SAFE_INTEGER, { min: 0 });
       continue;
     }
     if (key === 'since') {

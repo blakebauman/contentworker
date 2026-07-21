@@ -9,6 +9,7 @@ import {
 } from '@cw/domain';
 import type { AIProvider, ModelTier } from '@cw/ports';
 import { recordAgentRun } from './agent-audit.js';
+import { generateWithBudget } from './ai-budget.js';
 import type { AppContext } from './context.js';
 
 /** Field types we ask the model to generate for a draft (scalars only). */
@@ -88,7 +89,7 @@ export async function draftEntry(
     "JSON schema. Respect each field's meaning and keep text concise and natural.";
   const prompt = `Content type: ${ct.name} (${ct.apiId}).\nInstructions: ${input.prompt}\nProduce values for every field in the schema.`;
 
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system,
     prompt,
     tier: input.tier ?? 'balanced',
@@ -165,7 +166,7 @@ export async function canvasToEntry(
     'that satisfy the schema.';
   const prompt = `Content type: ${ct.name} (${ct.apiId}).\nProse:\n${input.prose}\nProduce values for every field in the schema.`;
 
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system,
     prompt,
     tier: input.tier ?? 'balanced',

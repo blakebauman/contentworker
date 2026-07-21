@@ -1,6 +1,7 @@
 import { NotFoundError, type Scope, ValidationError } from '@cw/domain';
 import type { AIProvider, ModelTier } from '@cw/ports';
 import { recordAgentRun } from './agent-audit.js';
+import { generateWithBudget } from './ai-budget.js';
 import { getAsset, setAssetMetadata } from './assets.js';
 import type { AppContext } from './context.js';
 import { createTag, listTags } from './taxonomy.js';
@@ -61,7 +62,7 @@ export async function generateAltText(
     .filter(Boolean)
     .join('\n');
 
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system,
     prompt,
     tier: input.tier ?? 'fast',
@@ -147,7 +148,7 @@ export async function autoTagAsset(
     .filter(Boolean)
     .join('\n');
 
-  const result = await ai.generate({
+  const result = await generateWithBudget(ctx, ai, scope, {
     system,
     prompt,
     tier: input.tier ?? 'fast',

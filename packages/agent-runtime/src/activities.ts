@@ -1,4 +1,4 @@
-import { type AppContext, updateEntry } from '@cw/application';
+import { type AppContext, generateWithBudget, updateEntry } from '@cw/application';
 import type { EntryFields, Scope } from '@cw/domain';
 import type { AIProvider } from '@cw/ports';
 import type { Activities, GenerateFieldsInput, LoadedEntry } from './types.js';
@@ -60,7 +60,7 @@ export function makeActivities(deps: ActivitiesDeps): Activities {
         required.push(f.apiId);
       }
       const schema = { type: 'object', properties, required, additionalProperties: false };
-      const result = await ai.generate({
+      const result = await generateWithBudget(ctx, ai, input.scope, {
         system: `You work on CMS entries. Generate concise, natural values for the requested fields, consistent with the provided context.${input.instruction ? ` ${input.instruction}` : ''}`,
         prompt: `Context:\n${input.context}\n\nGenerate values for: ${input.fields.map((f) => f.name).join(', ')}.`,
         tier: 'fast',
@@ -88,7 +88,7 @@ export function makeActivities(deps: ActivitiesDeps): Activities {
       await updateEntry(ctx, scope, entryId, merged);
     },
 
-    async classify(_scope, text) {
+    async classify(scope, text) {
       const schema = {
         type: 'object',
         properties: {
@@ -102,7 +102,7 @@ export function makeActivities(deps: ActivitiesDeps): Activities {
         required: ['flagged', 'categories'],
         additionalProperties: false,
       };
-      const result = await ai.generate({
+      const result = await generateWithBudget(ctx, ai, scope, {
         system:
           'You are a content moderation classifier. Flag content that is hateful, violent, sexual, or otherwise unsafe.',
         prompt: `Classify this content:\n${text}`,

@@ -30,6 +30,9 @@ export function createWebhookSender(fetchImpl: typeof fetch = fetch): WebhookSen
             ...webhook.headers,
           },
           body,
+          // Do not chase 3xx redirects — a redirect to an internal address would
+          // turn a validated public target into an SSRF. Treat it as a failure.
+          redirect: 'manual',
         });
         return { delivered: res.ok, statusCode: res.status };
       } catch (err) {
