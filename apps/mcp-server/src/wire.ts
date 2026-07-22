@@ -3,6 +3,7 @@ import {
   createAzureOpenAIEmbeddings,
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
+import { createOpenAIEmbeddings } from '@cw/adapter-embeddings-openai';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
@@ -88,17 +89,21 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
 
   // Explicit EMBEDDINGS_PROVIDER=local is informed consent to hash embeddings;
   // only the silent default (unset/unknown) counts as a fake.
-  if (env.EMBEDDINGS_PROVIDER !== 'azure-openai' && env.EMBEDDINGS_PROVIDER !== 'local') {
+  const embedProvider = env.EMBEDDINGS_PROVIDER;
+  const embedDim = Number(env.EMBEDDINGS_DIM ?? 1536);
+  if (embedProvider !== 'azure-openai' && embedProvider !== 'openai' && embedProvider !== 'local') {
     fakes.push({
       key: 'embeddings',
       detail:
-        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai, or =local to accept explicitly',
+        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai or =openai (any OpenAI-compatible endpoint), or =local to accept explicitly',
     });
   }
   const embeddings: EmbeddingsProvider =
-    env.EMBEDDINGS_PROVIDER === 'azure-openai'
+    embedProvider === 'azure-openai'
       ? createAzureOpenAIEmbeddings()
-      : new LocalEmbeddingsProvider(Number(env.EMBEDDINGS_DIM ?? 1536));
+      : embedProvider === 'openai'
+        ? createOpenAIEmbeddings({ dimensions: embedDim })
+        : new LocalEmbeddingsProvider(embedDim);
   const vectors = env.DATABASE_URL
     ? createPgVectorStore(env.DATABASE_URL, {
         dimensions: embeddings.dimensions,

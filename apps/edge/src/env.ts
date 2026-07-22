@@ -43,8 +43,14 @@ export interface EdgeEnv {
   readonly SEED_LOCALES?: string;
   readonly AI_PROVIDER?: string;
   readonly ANTHROPIC_API_KEY?: string;
+  /** Alternate Anthropic endpoint (LLM gateway / egress proxy). */
+  readonly ANTHROPIC_BASE_URL?: string;
   readonly EMBEDDINGS_PROVIDER?: string;
   readonly EMBEDDINGS_DIM?: string;
+  /** OpenAI-compatible embeddings endpoint (EMBEDDINGS_PROVIDER=openai). */
+  readonly EMBEDDINGS_BASE_URL?: string;
+  readonly EMBEDDINGS_API_KEY?: string;
+  readonly EMBEDDINGS_MODEL?: string;
   readonly BLOB_BUCKET?: string;
   readonly BLOB_ENDPOINT?: string;
   readonly BLOB_FORCE_PATH_STYLE?: string;

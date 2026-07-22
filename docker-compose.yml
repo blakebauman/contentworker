@@ -15,6 +15,11 @@ x-app-env: &app-env
   # Dockerfile sets NODE_ENV=production; allow dev tokens + SEED_DEV for local compose.
   REQUIRE_SECURE_SECRETS: "false"
   # Local deterministic embeddings + pgvector (matches Helm values-local.yaml).
+  # For real local RAG, point at any OpenAI-compatible endpoint instead:
+  #   EMBEDDINGS_PROVIDER: openai
+  #   EMBEDDINGS_BASE_URL: http://host.docker.internal:11434/v1   # e.g. Ollama
+  #   EMBEDDINGS_MODEL: nomic-embed-text
+  #   EMBEDDINGS_DIM: "768"
   EMBEDDINGS_PROVIDER: local
   # No Anthropic key / object store locally: accept the stub AI + fake blob
   # (persistent installs refuse to boot on unallowed fakes otherwise).

@@ -21,6 +21,7 @@
   "dependencies": {
     "@cw/adapter-ai-anthropic": "workspace:*",
     "@cw/adapter-ai-azure-openai": "workspace:*",
+    "@cw/adapter-embeddings-openai": "workspace:*",
     "@cw/adapter-store-postgres": "workspace:*",
     "@cw/adapter-vector-pgvector": "workspace:*",
     "@cw/agent-runtime": "workspace:*",

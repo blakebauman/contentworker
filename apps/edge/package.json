@@ -15,6 +15,7 @@
     "@cw/adapter-ai-azure-openai": "workspace:*",
     "@cw/adapter-blob-s3": "workspace:*",
     "@cw/adapter-cache-kv": "workspace:*",
+    "@cw/adapter-embeddings-openai": "workspace:*",
     "@cw/adapter-http-effects": "workspace:*",
     "@cw/adapter-queue-cf": "workspace:*",
     "@cw/adapter-store-postgres": "workspace:*",

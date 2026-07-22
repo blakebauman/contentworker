@@ -12,6 +12,7 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `BLOB_BUCKET` | S3-compatible blob store | fake in-memory blob store |
 | `AI_PROVIDER=azure-openai` | Azure OpenAI generation | Anthropic (default) |
 | `EMBEDDINGS_PROVIDER=azure-openai` | Azure OpenAI embeddings | local deterministic embeddings |
+| `EMBEDDINGS_PROVIDER=openai` | Any OpenAI-compatible embeddings endpoint (OpenAI, Ollama, vLLM, TEI) | local deterministic embeddings |
 
 ## Core / infrastructure
 
@@ -110,9 +111,13 @@ Uploads use presigned PUT URLs (default 900 s) so file bytes never transit the A
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `AI_PROVIDER` | `anthropic` | `anthropic` or `azure-openai` |
-| `EMBEDDINGS_PROVIDER` | — | `azure-openai`, `local`, or unset — see matrix below |
+| `EMBEDDINGS_PROVIDER` | — | `azure-openai`, `openai`, `local`, or unset — see matrix below |
 | `EMBEDDINGS_DIM` | `1536` | Embedding dimensions (must match the pgvector column) |
+| `EMBEDDINGS_BASE_URL` | `https://api.openai.com/v1` | `openai` provider only: any OpenAI-compatible `/v1` endpoint — OpenAI, Ollama, vLLM, TEI, LocalAI (the self-hostable path) |
+| `EMBEDDINGS_MODEL` | `text-embedding-3-small` | `openai` provider only: embedding model id as the server knows it |
+| `EMBEDDINGS_API_KEY` | — | `openai` provider only: bearer token; omit for local servers without auth |
 | `ANTHROPIC_API_KEY` | — | Anthropic key (default provider) |
+| `ANTHROPIC_BASE_URL` | SDK default | Alternate Anthropic endpoint (LLM gateway / egress proxy / air-gapped mirror) |
 | `AZURE_OPENAI_ENDPOINT` | — | e.g. `https://x.openai.azure.com` |
 | `AZURE_OPENAI_API_KEY` | — | Azure OpenAI key |
 | `AZURE_OPENAI_API_VERSION` | `2024-10-21` | API version |
@@ -143,12 +148,12 @@ ceiling to `0` to disable metering.
 
 ### API vs worker embeddings
 
-| Surface | `EMBEDDINGS_PROVIDER` unset | `local` | `azure-openai` |
+| Surface | `EMBEDDINGS_PROVIDER` unset | `local` | `azure-openai` / `openai` |
 | --- | --- | --- | --- |
-| API (`wire.ts`) | Local deterministic embeddings | Local | Azure OpenAI |
+| API (`wire.ts`) | Local deterministic embeddings | Local | Real provider |
 | Worker RAG indexing | **Disabled** (no vectors on publish) | Enabled | Enabled |
 
-Set `EMBEDDINGS_PROVIDER=local` (or `azure-openai`) on the **worker** when you want
+Set `EMBEDDINGS_PROVIDER=local` (or a real provider) on the **worker** when you want
 publish-time indexing. The API can still serve search with local embeddings when unset.
 
 ## Worker

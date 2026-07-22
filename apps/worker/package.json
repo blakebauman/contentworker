@@ -11,6 +11,7 @@
   "dependencies": {
     "@cw/adapter-ai-anthropic": "workspace:*",
     "@cw/adapter-ai-azure-openai": "workspace:*",
+    "@cw/adapter-embeddings-openai": "workspace:*",
     "@cw/adapter-http-effects": "workspace:*",
     "@cw/adapter-redis": "workspace:*",
     "@cw/adapter-store-postgres": "workspace:*",
@@ -19,11 +20,11 @@
     "@cw/application": "workspace:*",
     "@cw/domain": "workspace:*",
     "@cw/ports": "workspace:*",
+    "@cw/telemetry": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "@temporalio/client": "^1.11.6",
     "ioredis": "^5.4.2",
-    "uuid": "^11.0.3",
-    "@cw/telemetry": "workspace:*"
+    "uuid": "^11.0.3"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
