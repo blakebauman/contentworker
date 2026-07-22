@@ -15,6 +15,7 @@ import type { DomainEvent } from '@cw/domain';
 import type { McpDeps } from '@cw/mcp-server/wire';
 import { Hono } from 'hono';
 import { AgentWorkflow } from './agents/workflow.js';
+import { CostGuardDO } from './do/cost-guard.js';
 import { LiveHubDO, createDoEventBus } from './do/live-hub.js';
 import { RateLimiterDO, createDoRateLimiter } from './do/rate-limiter.js';
 import type { EdgeEnv } from './env.js';
@@ -23,7 +24,7 @@ import { liveRoutes } from './routes/live.js';
 import { type EdgeWired, agentConfigFromEnv, makeAgents, wireEdge } from './wire.js';
 
 // Worker-entrypoint classes must be exported from the deployed script.
-export { AgentWorkflow, LiveHubDO, RateLimiterDO };
+export { AgentWorkflow, CostGuardDO, LiveHubDO, RateLimiterDO };
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 

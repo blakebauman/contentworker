@@ -41,6 +41,7 @@ import {
 } from '@cw/test-kit';
 import { v7 as uuidv7 } from 'uuid';
 import { CloudflareWorkflowsAgentRuntime } from './agents/runtime.js';
+import { createDoCostGuard } from './do/cost-guard.js';
 import type { EdgeEnv } from './env.js';
 
 const clock = { now: () => new Date() };
@@ -95,7 +96,10 @@ export function wireEdge(env: EdgeEnv): EdgeWired {
   }
 
   const rag = makeRag(env);
-  const ctx: AppContext = { store, clock, ids, cache };
+  // Meter AI spend per space via the CostGuard Durable Object (shared across
+  // isolates/colos). Absent binding → unmetered (demo/dev).
+  const costGuard = env.AI_BUDGET ? createDoCostGuard(env.AI_BUDGET) : undefined;
+  const ctx: AppContext = { store, clock, ids, cache, costGuard };
 
   return {
     ctx,
