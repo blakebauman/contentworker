@@ -51,11 +51,12 @@ See [Domain model](./domain-model.md).
 Interfaces only; **no implementations**. Three files:
 
 - `content-store.ts` — the **single database seam**. `ContentStore` exposes per-aggregate repos
-  (`spaces`, `contentTypes`, `entries`, `assets`, `references`, `webhooks`, `auth`, `outbox`)
-  and `withTransaction`. No SQL, ORM, or driver type ever crosses this boundary.
+  (`spaces`, `contentTypes`, `entries`, `assets`, `references`, `webhooks`, `auth`,
+  `agentSchedules`, `outbox`, among others) and `withTransaction`. No SQL, ORM, or driver type
+  ever crosses this boundary.
 - `infra.ts` — async & AI seams: `Queue`, `EventBus`, `BlobStore`, `Cache`, `WebhookSender`,
-  `AIProvider`, `EmbeddingsProvider`, `VectorStore`. Defined from day one even before adapters
-  existed, so the application could be written against them.
+  `AIProvider`, `EmbeddingsProvider`, `VectorStore`, `SearchIndex`. Defined from day one even
+  before adapters existed, so the application could be written against them.
 - `support.ts` — `Clock`, `IdGenerator`, `Hasher`, which keep use-cases deterministic and
   testable.
 
@@ -84,7 +85,9 @@ all call them.
 
 Each adapter implements one or more ports against a concrete technology. They are interchangeable:
 the Postgres store and the in-memory test store both implement `ContentStore`; Anthropic and
-Azure OpenAI both implement `AIProvider`. See [Deployment](./deployment.md) for the full list.
+Azure OpenAI both implement `AIProvider`; pgvector, Qdrant (`@cw/adapter-vector-qdrant`), and
+Vectorize all implement `VectorStore`; OpenSearch (`@cw/adapter-search-opensearch`) implements
+`SearchIndex`. See [Deployment](./deployment.md) for the full list.
 
 ### `packages/test-kit` — deterministic fakes
 

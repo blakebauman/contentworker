@@ -64,8 +64,9 @@ Remaining admin work:
   **repurpose** workflows join enrich/moderate (registered on the Temporal worker, tested
   against a real ephemeral server); the Helm chart bundles the official Temporal subchart
   (`temporal.enabled`, persistence on the platform Postgres) and deploys the agent-worker
-  automatically when the durable runtime is selected. _(Temporal Schedules for periodic
-  curate/repurpose runs + HITL via Signals TODO.)_
+  automatically when the durable runtime is selected. _(Periodic curate/repurpose runs now
+  ship as engine-agnostic agent schedules (#89) rather than Temporal Schedules; HITL via
+  Signals remains TODO.)_
 - [x] **Wire the `moderate` agent** — `AGENTS_MODERATE=true` runs it on `entry.published`
   (after enrich, so moderation sees enriched content; `runPublishAgents` in the worker),
   and it runs on demand via `POST …/entries/:id/moderate` + the `entry_moderate` MCP tool

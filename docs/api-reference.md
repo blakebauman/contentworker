@@ -190,6 +190,18 @@ Base paths: `/spaces` and `…` = `/spaces/:space/environments/:env`.
 | POST | `…/scheduled-actions` | `content:publish` | Schedule action |
 | DELETE | `…/scheduled-actions/:id` | `content:publish` | Cancel scheduled action |
 
+### Agent schedules
+
+Recurring agent jobs (cron-cadence workflow runs over newly-published entries) — see
+[AI, agents & search](./ai-agents-and-search.md#agent-schedules).
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/agent-schedules` | `preview:read` | List recurring agent jobs |
+| POST | `…/agent-schedules` | `content:publish` | Create schedule `{ workflow, cron (5-field UTC), contentTypeApiId?, enabled?, autoApply? }` |
+| PATCH | `…/agent-schedules/:id` | `content:publish` | Update cron / enabled / autoApply / content-type filter |
+| DELETE | `…/agent-schedules/:id` | `content:publish` | Delete schedule |
+
 ### Collaboration
 
 | Method | Path | Scope | Description |
