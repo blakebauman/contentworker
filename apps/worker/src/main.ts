@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { createAnthropicProvider } from '@cw/adapter-ai-anthropic';
 import {
   createAzureOpenAIEmbeddings,
@@ -27,7 +28,21 @@ import {
 } from '@cw/application';
 import type { DomainEvent } from '@cw/domain';
 import type { AIProvider, Clock, EmbeddingsProvider, IdGenerator } from '@cw/ports';
-import { logger, startTelemetry, withSpan } from '@cw/telemetry';
+import {
+  eventDispatchSeconds,
+  eventsConsumedTotal,
+  logger,
+  metricsText,
+  outboxRelayedTotal,
+  relayErrorsTotal,
+  relayLastTickGauge,
+  scheduledActionsTotal,
+  startDefaultMetrics,
+  startTelemetry,
+  stopTelemetry,
+  webhookDeliveriesTotal,
+  withSpan,
+} from '@cw/telemetry';
 import { LocalEmbeddingsProvider } from '@cw/test-kit';
 import { Client, Connection } from '@temporalio/client';
 import { Redis } from 'ioredis';
@@ -42,6 +57,13 @@ if (!redisUrl) throw new Error('REDIS_URL is required');
 
 const RELAY_INTERVAL_MS = Number(process.env.RELAY_INTERVAL_MS ?? 1000);
 const SCHEDULE_INTERVAL_MS = Number(process.env.SCHEDULE_INTERVAL_MS ?? 5000);
+// Health + metrics port (K8s probes, Prometheus scrape). 9464 is the
+// conventional Prometheus exporter port.
+const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? 9464);
+// Liveness fails when the relay loop hasn't completed a tick in this window —
+// a hung relay (stuck connection, deadlock) then restarts the pod instead of
+// silently stalling event delivery.
+const RELAY_STALE_MS = Math.max(RELAY_INTERVAL_MS * 10, 60_000);
 
 const clock: Clock = { now: () => new Date() };
 const ids: IdGenerator = { newId: () => uuidv7() };
@@ -140,6 +162,7 @@ async function main() {
     await withSpan(
       'event.dispatch',
       async () => {
+        const stopTimer = eventDispatchSeconds.startTimer({ type: ev.type });
         try {
           const runs = await consumeEvent(
             ctx,
@@ -150,6 +173,8 @@ async function main() {
               invoker,
               bus,
               onLiveError: (err) => logger.error({ err }, 'live publish error'),
+              onWebhookDelivery: ({ delivered }) =>
+                webhookDeliveriesTotal.inc({ outcome: delivered ? 'success' : 'failed' }),
               agents,
               agentConfig,
             },
@@ -161,10 +186,14 @@ async function main() {
               `${r.workflow} complete`,
             );
           }
+          eventsConsumedTotal.inc({ type: ev.type, outcome: 'ok' });
           logger.info({ type: ev.type, entryId }, 'event dispatched');
         } catch (err) {
+          eventsConsumedTotal.inc({ type: ev.type, outcome: 'error' });
           logger.error({ type: ev.type, entryId, err }, 'dispatch error');
           throw err; // let BullMQ retry/dead-letter
+        } finally {
+          stopTimer();
         }
       },
       { 'event.type': ev.type, ...(entryId ? { 'entry.id': entryId } : {}) },
@@ -181,29 +210,93 @@ async function main() {
     'worker consuming events',
   );
 
-  // Outbox relay loop: drain pending events onto the queue.
+  // Outbox relay loop: drain pending events onto the queue. lastRelayTick is
+  // hang detection only — it updates even on erroring ticks (finally), so a
+  // Postgres outage or poison row alerts via cw_relay_errors_total instead of
+  // restart-looping a worker whose consumer loops are healthy. Only a tick
+  // that never RETURNS (deadlock, stuck socket) fails liveness.
+  let lastRelayTick = Date.now();
   const tick = async () => {
     try {
       const n = await relayOutbox(ctx, queue);
-      if (n > 0) logger.info({ relayed: n }, 'outbox relayed');
+      if (n > 0) {
+        outboxRelayedTotal.inc(n);
+        logger.info({ relayed: n }, 'outbox relayed');
+      }
     } catch (err) {
+      relayErrorsTotal.inc();
       logger.error({ err }, 'relay error');
+    } finally {
+      lastRelayTick = Date.now();
+      relayLastTickGauge.set(lastRelayTick / 1000);
     }
   };
-  setInterval(tick, RELAY_INTERVAL_MS);
+  const relayTimer = setInterval(tick, RELAY_INTERVAL_MS);
   logger.info({ intervalMs: RELAY_INTERVAL_MS }, 'worker relaying outbox');
 
   // Scheduled-actions loop: fire any publish/unpublish whose time has arrived.
   const scheduleTick = async () => {
     try {
       const { executed, failed } = await runDueScheduledActions(ctx);
+      if (executed > 0) scheduledActionsTotal.inc({ outcome: 'executed' }, executed);
+      if (failed > 0) scheduledActionsTotal.inc({ outcome: 'failed' }, failed);
       if (executed > 0 || failed > 0) logger.info({ executed, failed }, 'scheduled actions run');
     } catch (err) {
       logger.error({ err }, 'scheduled actions error');
     }
   };
-  setInterval(scheduleTick, SCHEDULE_INTERVAL_MS);
+  const scheduleTimer = setInterval(scheduleTick, SCHEDULE_INTERVAL_MS);
   logger.info({ intervalMs: SCHEDULE_INTERVAL_MS }, 'worker running scheduled actions');
+
+  // Health (K8s liveness/readiness) + Prometheus metrics.
+  startDefaultMetrics('cw-worker');
+  const health = createServer(async (req, res) => {
+    if (req.url === '/healthz') {
+      const stale = Date.now() - lastRelayTick > RELAY_STALE_MS;
+      res.writeHead(stale ? 500 : 200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: stale ? 'relay stalled' : 'ok' }));
+      return;
+    }
+    // Readiness is unconditional: it only gates the metrics Service endpoints,
+    // and dropping the scrape target during an incident would hide the data.
+    if (req.url === '/readyz') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
+    if (req.url === '/metrics') {
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' });
+      res.end(await metricsText());
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  health.listen(HEALTH_PORT, () => logger.info({ port: HEALTH_PORT }, 'worker health listening'));
+
+  // Graceful shutdown: stop the loops, drain the BullMQ consumer (in-flight
+  // jobs finish; the outbox/queue redeliver anything else), then close
+  // connections so pod rotation never hard-kills mid-dispatch.
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({ signal }, 'worker shutting down');
+    clearInterval(relayTimer);
+    clearInterval(scheduleTimer);
+    health.close();
+    try {
+      await queue.close();
+      await bus.close();
+      connection.disconnect();
+      await store.close();
+      await stopTelemetry();
+    } catch (err) {
+      logger.error({ err }, 'shutdown cleanup error');
+    }
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
 main().catch((err) => {

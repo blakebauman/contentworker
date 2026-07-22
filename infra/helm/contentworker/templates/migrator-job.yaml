@@ -17,11 +17,13 @@ spec:
       restartPolicy: Never
       serviceAccountName: {{ include "cw.serviceAccountName" . }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- include "cw.scheduling" . | nindent 6 }}
       containers:
         - name: migrator
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["pnpm", "--filter", "@cw/migrator", "start"]
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           # Configmap carries EMBEDDINGS_DIM (pgvector column width) and any
           # SKIP_PGVECTOR override alongside the secret's DATABASE_URL.
           envFrom:

@@ -14,7 +14,9 @@ spec:
       labels: {{- include "cw.selectorLabels" (dict "ctx" . "component" "worker") | nindent 8 }}
     spec:
       serviceAccountName: {{ include "cw.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- include "cw.scheduling" . | nindent 6 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -23,11 +25,27 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["pnpm", "--filter", "@cw/worker", "start"]
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: HEALTH_PORT
+              value: {{ .Values.worker.healthPort | quote }}
           envFrom:
             - configMapRef:
                 name: {{ include "cw.fullname" . }}-config
             - secretRef:
                 name: {{ include "cw.secretName" . }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.worker.healthPort }}
+          # /healthz reports 500 when the outbox relay loop stalls, so a hung
+          # worker restarts instead of silently halting event delivery.
+          readinessProbe:
+            httpGet: { path: /readyz, port: health }
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+            initialDelaySeconds: 15
+            periodSeconds: 20
           resources: {{- toYaml .Values.worker.resources | nindent 12 }}
 {{- if .Values.worker.autoscaling.enabled }}
 ---

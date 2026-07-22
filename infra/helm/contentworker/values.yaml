@@ -78,6 +78,9 @@ api:
   replicas: 2
   role: all
   port: 8787
+  # Prometheus /metrics listener — separate from the API port so the ingress
+  # (path /) never publishes process internals.
+  metricsPort: 9464
   split:
     enabled: false
     delivery: { replicas: 3 }
@@ -94,6 +97,11 @@ api:
 
 worker:
   replicas: 1
+  # Health + Prometheus metrics port (/healthz fails when the relay stalls).
+  healthPort: 9464
+  # Drain window for in-flight dispatches on rotation. Raise (e.g. 600) when
+  # in-process agents run on publish — a dispatch can then take minutes.
+  terminationGracePeriodSeconds: 120
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
@@ -127,6 +135,10 @@ agents:
 # when agents.runtime=temporal.
 agentWorker:
   replicas: 1
+  # Health + Prometheus metrics port (healthy while the Temporal worker polls).
+  healthPort: 9464
+  # Drain window for in-flight Temporal activities on rotation.
+  terminationGracePeriodSeconds: 120
   resources:
     requests: { cpu: 100m, memory: 512Mi }
     limits: { cpu: "1", memory: 1Gi }
@@ -206,3 +218,44 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
   fsGroup: 1000
+
+# Container-level hardening applied to every app container (api, worker,
+# agent-worker, mcp, migrator).
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities: { drop: ["ALL"] }
+  seccompProfile: { type: RuntimeDefault }
+  # tsx compiles in-memory but esbuild can spill to /tmp; set true and mount an
+  # emptyDir at /tmp to tighten further.
+  readOnlyRootFilesystem: false
+
+# Scheduling knobs applied to every app workload (bundled dev datastores excluded).
+scheduling:
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+# PodDisruptionBudgets for multi-replica workloads. Single-replica workloads are
+# skipped automatically — a PDB there would block node drains.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Default-deny ingress to all chart pods, with allowances for the API/MCP
+# service ports, worker/agent-worker metrics, and the bundled datastores.
+# Off by default — requires a NetworkPolicy-enforcing CNI.
+networkPolicy:
+  enabled: false
+  # Additional `from` peers for api/mcp ingress (empty = any in-cluster peer).
+  ingressFrom: []
+
+# Prometheus Operator scrape config for /metrics (api on its HTTP port,
+# worker/agent-worker on their health port).
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    # Extra labels for ServiceMonitor discovery (e.g. release: prom-stack for
+    # kube-prometheus-stack installs).
+    labels: {}
