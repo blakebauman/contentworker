@@ -6,7 +6,13 @@ import {
   secureTokenEqual,
 } from '@cw/application';
 import type { AgentRunner, AppContext, RagDeps } from '@cw/application';
-import { type PermissionScope, type Principal, authorize, scopesForKind } from '@cw/domain';
+import {
+  type AgentReview,
+  type PermissionScope,
+  type Principal,
+  authorize,
+  scopesForKind,
+} from '@cw/domain';
 import type { AIProvider, BlobStore, EventBus, Hasher } from '@cw/ports';
 import { logger } from '@cw/telemetry';
 import type { Context, MiddlewareHandler } from 'hono';
@@ -47,6 +53,11 @@ export interface AuthDeps {
   readonly agents: AgentRunner;
   /** Domain-event source for the Live Content API (SSE). */
   readonly bus: EventBus;
+  /** Delivers review decisions to a durable HITL watcher (optional). */
+  readonly signalReview?: (
+    review: AgentReview,
+    decision: 'approved' | 'rejected',
+  ) => Promise<boolean>;
   /** Validates admin SSO session cookies when no bearer token is sent. */
   readonly sessionSecret?: string;
   /**

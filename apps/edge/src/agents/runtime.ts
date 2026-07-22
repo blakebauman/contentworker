@@ -1,14 +1,25 @@
-import type { AgentRunResult, AgentRuntime, WorkflowInput, WorkflowName } from '@cw/agent-runtime';
+import type {
+  AgentRunResult,
+  AgentRuntime,
+  ReviewWatchInput,
+  WorkflowInput,
+  WorkflowName,
+} from '@cw/agent-runtime';
 import type { IdGenerator } from '@cw/ports';
 
 const POLL_INTERVAL_MS = 2_000;
 const MAX_WAIT_MS = 10 * 60_000;
 
 /** Parameters passed to the AgentWorkflow entrypoint (see agents/workflow.ts). */
-export interface AgentWfParams {
-  readonly workflow: WorkflowName;
-  readonly input: WorkflowInput;
-}
+export type AgentWfParams =
+  | { readonly workflow: Exclude<WorkflowName, 'review'>; readonly input: WorkflowInput }
+  | { readonly workflow: 'review'; readonly input: ReviewWatchInput };
+
+/** Event type delivering a human review decision to the watcher instance. */
+export const REVIEW_DECISION_EVENT = 'review-decision';
+
+/** Deterministic watcher instance id — decision senders derive it too. */
+export const reviewInstanceId = (reviewId: string) => `review-${reviewId}`;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -27,6 +38,7 @@ export class CloudflareWorkflowsAgentRuntime implements AgentRuntime {
   ) {}
 
   async run(workflow: WorkflowName, input: WorkflowInput): Promise<AgentRunResult> {
+    if (workflow === 'review') throw new Error('start the review watcher via watchReview');
     const params: AgentWfParams = { workflow, input };
     const instance = await this.wf.create({
       id: `agent-${workflow}-${this.ids.newId()}`,
@@ -48,5 +60,30 @@ export class CloudflareWorkflowsAgentRuntime implements AgentRuntime {
       }
       await sleep(POLL_INTERVAL_MS);
     }
+  }
+
+  /** Fire-and-forget start of the durable review watcher (idempotent id). */
+  async watchReview(input: ReviewWatchInput): Promise<void> {
+    await this.wf
+      .create({ id: reviewInstanceId(input.reviewId), params: { workflow: 'review', input } })
+      .catch((err) => {
+        // An already-started watcher (duplicate delivery) is fine.
+        if (!String(err).includes('already') && !String(err).includes('exists')) throw err;
+      });
+  }
+}
+
+/** Delivers a decision to a watcher instance; false when it is gone/closed. */
+export async function sendReviewDecision(
+  wf: Workflow,
+  reviewId: string,
+  decision: 'approved' | 'rejected',
+): Promise<boolean> {
+  try {
+    const instance = await wf.get(reviewInstanceId(reviewId));
+    await instance.sendEvent({ type: REVIEW_DECISION_EVENT, payload: decision });
+    return true;
+  } catch {
+    return false;
   }
 }

@@ -1,4 +1,5 @@
 import {
+  type AgentReview,
   type AgentSchedule,
   type ApiKey,
   type Asset,
@@ -25,6 +26,7 @@ import {
 import type {
   AIActionDefinition,
   AIActionRepo,
+  AgentReviewRepo,
   AgentRunRecord,
   AgentRunRepo,
   AgentScheduleRepo,
@@ -1255,6 +1257,125 @@ const toScheduled = (r: ScheduledRow): ScheduledAction => ({
   error: r.error ?? undefined,
 });
 
+function makeAgentReviewRepo(db: Db): AgentReviewRepo {
+  type Row = typeof schema.agentReviews.$inferSelect;
+  const toReview = (r: Row): AgentReview => ({
+    id: r.id,
+    workflow: r.workflow,
+    entryId: r.entryId,
+    proposed: r.proposed,
+    notes: r.notes,
+    status: r.status,
+    awaiting: r.awaiting,
+    createdAt: r.createdAt.toISOString(),
+    decidedAt: r.decidedAt?.toISOString(),
+    decidedBy: r.decidedBy ?? undefined,
+    appliedAt: r.appliedAt?.toISOString(),
+  });
+  return {
+    async create(scope, review) {
+      await db.insert(schema.agentReviews).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: review.id,
+        workflow: review.workflow,
+        entryId: review.entryId,
+        proposed: review.proposed,
+        notes: [...review.notes],
+        status: review.status,
+        awaiting: review.awaiting,
+        createdAt: new Date(review.createdAt),
+        decidedAt: review.decidedAt ? new Date(review.decidedAt) : null,
+        decidedBy: review.decidedBy ?? null,
+        appliedAt: review.appliedAt ? new Date(review.appliedAt) : null,
+      });
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.agentReviews)
+        .where(and(scopeFilter(schema.agentReviews, scope), eq(schema.agentReviews.id, id)));
+      return row ? toReview(row) : null;
+    },
+    async list(scope, query) {
+      const conditions = [scopeFilter(schema.agentReviews, scope)];
+      if (query?.status) conditions.push(eq(schema.agentReviews.status, query.status));
+      if (query?.entryId) conditions.push(eq(schema.agentReviews.entryId, query.entryId));
+      const rows = await db
+        .select()
+        .from(schema.agentReviews)
+        .where(and(...conditions))
+        .orderBy(desc(schema.agentReviews.createdAt), asc(schema.agentReviews.id))
+        .limit(Math.min(query?.limit ?? 100, 1000));
+      return rows.map(toReview);
+    },
+    async decide(scope, id, decision) {
+      const updated = await db
+        .update(schema.agentReviews)
+        .set({
+          status: decision.status,
+          decidedAt: new Date(decision.decidedAt),
+          decidedBy: decision.decidedBy ?? null,
+        })
+        .where(
+          and(
+            scopeFilter(schema.agentReviews, scope),
+            eq(schema.agentReviews.id, id),
+            eq(schema.agentReviews.status, 'pending'),
+          ),
+        )
+        .returning({ id: schema.agentReviews.id });
+      return updated.length > 0;
+    },
+    async markAwaiting(scope, id) {
+      const armed = await db
+        .update(schema.agentReviews)
+        .set({ awaiting: true })
+        .where(
+          and(
+            scopeFilter(schema.agentReviews, scope),
+            eq(schema.agentReviews.id, id),
+            eq(schema.agentReviews.status, 'pending'),
+            eq(schema.agentReviews.awaiting, false),
+          ),
+        )
+        .returning({ id: schema.agentReviews.id });
+      if (armed.length > 0) return 'armed';
+      const [row] = await db
+        .select({ status: schema.agentReviews.status })
+        .from(schema.agentReviews)
+        .where(and(scopeFilter(schema.agentReviews, scope), eq(schema.agentReviews.id, id)));
+      return row?.status ?? 'pending';
+    },
+    async clearAwaiting(scope, id) {
+      await db
+        .update(schema.agentReviews)
+        .set({ awaiting: false })
+        .where(and(scopeFilter(schema.agentReviews, scope), eq(schema.agentReviews.id, id)));
+    },
+    async markApplied(scope, id, at) {
+      const won = await db
+        .update(schema.agentReviews)
+        .set({ appliedAt: new Date(at) })
+        .where(
+          and(
+            scopeFilter(schema.agentReviews, scope),
+            eq(schema.agentReviews.id, id),
+            isNull(schema.agentReviews.appliedAt),
+          ),
+        )
+        .returning({ id: schema.agentReviews.id });
+      return won.length > 0;
+    },
+    async clearApplied(scope, id) {
+      await db
+        .update(schema.agentReviews)
+        .set({ appliedAt: null })
+        .where(and(scopeFilter(schema.agentReviews, scope), eq(schema.agentReviews.id, id)));
+    },
+  };
+}
+
 function makeAgentScheduleRepo(db: Db): AgentScheduleRepo {
   type Row = typeof schema.agentSchedules.$inferSelect;
   const toSchedule = (r: Row): AgentSchedule => ({
@@ -1802,6 +1923,7 @@ export function createPostgresStore(
     releases: makeReleaseRepo(db),
     scheduledActions: makeScheduledActionRepo(db),
     agentSchedules: makeAgentScheduleRepo(db),
+    agentReviews: makeAgentReviewRepo(db),
     comments: makeCommentRepo(db),
     tasks: makeTaskRepo(db),
     workflows: makeWorkflowRepo(db),

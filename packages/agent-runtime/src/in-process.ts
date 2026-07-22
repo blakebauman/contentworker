@@ -32,6 +32,10 @@ export class InProcessAgentRuntime implements AgentRuntime {
         return curateWorkflow(this.activities, input);
       case 'repurpose':
         return repurposeWorkflow(this.activities, input);
+      case 'review':
+        // The watcher is only started via watchReview on durable runtimes;
+        // in-process decisions apply through the direct path instead.
+        throw new Error('the review watcher runs only on durable runtimes');
     }
   }
 }

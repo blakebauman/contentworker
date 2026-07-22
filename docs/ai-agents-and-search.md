@@ -167,7 +167,7 @@ calls `authorize` before delegating to the same use-case as the HTTP route.
 | Taxonomy | `taxonomy_list_tags`, `taxonomy_create_tag`, `taxonomy_list_concepts`, `taxonomy_create_concept`, `taxonomy_create_scheme` |
 | Assets | `assets_list`, `asset_set_metadata`, `asset_usage`, `asset_generate_alt_text`, `asset_auto_tag`, `asset_transform_url` |
 | Branching | `environments_compare`, `environments_merge`, `environment_aliases_list`, `environment_alias_set`, `environment_alias_delete` |
-| Platform | `functions_list`, `function_create`, `function_delete`, `app_extensions_list`, `app_extension_create`, `app_extension_delete`, `ai_actions_list`, `ai_action_create`, `ai_action_run`, `schedule_action`, `agent_schedule_create`, `agent_schedule_list`, `agent_schedule_update`, `agent_schedule_delete`, `audit_log_list` |
+| Platform | `functions_list`, `function_create`, `function_delete`, `app_extensions_list`, `app_extension_create`, `app_extension_delete`, `ai_actions_list`, `ai_action_create`, `ai_action_run`, `schedule_action`, `agent_schedule_create`, `agent_schedule_list`, `agent_schedule_update`, `agent_schedule_delete`, `agent_review_list`, `agent_review_approve`, `agent_review_reject`, `audit_log_list` |
 
 Canonical list: `apps/mcp-server/src/server.ts`.
 
@@ -259,6 +259,29 @@ Moderation is also available on demand — `POST .../entries/:id/moderate` (Mana
 the `entry_moderate` MCP tool both call the same `moderateEntry` use-case, which runs the
 workflow in-process and returns `{ flagged, status, decisions, usage }`. A flagged result is a
 recorded hold, not a state change: callers (or a webhook consumer) decide whether to unpublish.
+
+## Human-in-the-loop reviews
+
+A workflow run that ends `needs_review` (autoApply off, or low confidence) persists its
+proposal as a pending **agent review** — the field values, the agent's reasoning notes, and
+the entry it targets. Reviewers list and decide them on both surfaces:
+
+- HTTP: `GET …/agent-reviews?status=pending`, `POST …/agent-reviews/:id/approve`,
+  `POST …/agent-reviews/:id/reject` (`preview:read` to list, `content:write` to decide).
+- MCP: `agent_review_list`, `agent_review_approve`, `agent_review_reject`.
+
+Approval applies the proposed values as a new draft version through the normal update
+use-case (validated, versioned) — **exactly once**, guarded by a CAS apply marker.
+
+On durable runtimes the decision travels as a real signal: after a `needs_review` outcome
+the runtime arms a detached **review-watcher workflow** (instance id `review-<reviewId>`)
+that parks — for up to 7 days — until the decision arrives as a **Temporal Signal**
+(`review-decision`) or a **Cloudflare Workflow event**, then applies/records durably. The
+decide use-case signals the watcher when one is armed and falls back to applying directly
+when it isn't (in-process runtime, watcher timed out, or signal delivery failed) — the CAS
+markers make every combination race-safe: concurrent reviewers can't both decide, and no
+path can double-apply. The initiating consumer never waits on a human: the agent run
+completes immediately at `needs_review`; only the detached watcher parks.
 
 ## Agent schedules
 

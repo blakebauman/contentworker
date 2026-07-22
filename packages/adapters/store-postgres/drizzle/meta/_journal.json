@@ -162,6 +162,13 @@
       "when": 1784702399746,
       "tag": "0022_glorious_micromacro",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784740649449,
+      "tag": "0023_bouncy_firelord",
+      "breakpoints": true
     }
   ]
 }

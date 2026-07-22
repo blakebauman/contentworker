@@ -30,7 +30,7 @@ if (config.seedDev) {
   });
 }
 
-const app = createApp(ctx, config, rag, blob, ai, bus, rateLimiter);
+const app = createApp(ctx, config, rag, blob, ai, bus, rateLimiter, wired.signalReview);
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   const backend = config.databaseUrl ? 'postgres' : 'in-memory store';

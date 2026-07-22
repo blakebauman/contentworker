@@ -242,6 +242,9 @@ importers:
       '@scalar/hono-api-reference':
         specifier: ^0.11.9
         version: 0.11.9(hono@4.12.27)
+      '@temporalio/client':
+        specifier: ^1.18.1
+        version: 1.18.1
       graphql:
         specifier: ^16.10.0
         version: 16.14.2
@@ -418,6 +421,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.13.0
         version: 1.29.0(zod@3.25.76)
+      '@temporalio/client':
+        specifier: ^1.18.1
+        version: 1.18.1
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1

@@ -1,9 +1,19 @@
 import type { IdGenerator } from '@cw/ports';
+import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { Client } from '@temporalio/client';
-import type { AgentRunResult, AgentRuntime, WorkflowInput, WorkflowName } from './types.js';
+import { REVIEW_DECISION_SIGNAL as SIGNAL, reviewWorkflowId as wfId } from './types.js';
+import type {
+  AgentRunResult,
+  AgentRuntime,
+  ReviewWatchInput,
+  WorkflowInput,
+  WorkflowName,
+} from './types.js';
 
 /** The task queue the agent workflows + activities are hosted on. */
 export const AGENT_TASK_QUEUE = 'contentworker-agents';
+
+export { REVIEW_DECISION_SIGNAL, reviewWorkflowId } from './types.js';
 
 /**
  * Durable `AgentRuntime` backed by Temporal. Starts a workflow and awaits its
@@ -27,5 +37,32 @@ export class TemporalAgentRuntime implements AgentRuntime {
       args: [input],
     });
     return handle.result();
+  }
+
+  /** Fire-and-forget start of the durable review watcher (idempotent id). */
+  async watchReview(input: ReviewWatchInput): Promise<void> {
+    await this.client.workflow
+      .start('review', {
+        taskQueue: this.taskQueue,
+        workflowId: wfId(input.reviewId),
+        args: [input],
+      })
+      .catch((err) => {
+        // An already-started watcher (duplicate delivery) is fine.
+        if (!(err instanceof WorkflowExecutionAlreadyStartedError)) throw err;
+      });
+  }
+
+  /** Delivers a decision to the watcher; false when it is no longer running. */
+  async signalReviewDecision(
+    reviewId: string,
+    decision: 'approved' | 'rejected',
+  ): Promise<boolean> {
+    try {
+      await this.client.workflow.getHandle(wfId(reviewId)).signal(SIGNAL, decision);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

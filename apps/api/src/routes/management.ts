@@ -28,6 +28,7 @@ import {
   createTag,
   createTask,
   createWebhook,
+  decideAgentReview,
   defineWorkflow,
   deleteAIAction,
   deleteAgentSchedule,
@@ -47,6 +48,7 @@ import {
   draftEntry,
   findDuplicates,
   generateAltText,
+  getAgentReview,
   getAsset,
   getAssetUsage,
   getContentType,
@@ -61,6 +63,7 @@ import {
   getVersion,
   getWorkflow,
   listAIActions,
+  listAgentReviews,
   listAgentRuns,
   listAgentSchedules,
   listApiKeys,
@@ -126,6 +129,7 @@ import {
   type Webhook,
   assertWritableFields,
   authorizeContent,
+  canAccessContentType,
   maskDeniedFields,
 } from '@cw/domain';
 import { type Context, Hono } from 'hono';
@@ -1016,6 +1020,64 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.delete(`${BASE}/agent-schedules/:id`, requireScope(SCOPES.contentPublish), async (c) => {
     await deleteAgentSchedule(ctx, scopeOf(c), c.req.param('id'));
     return c.body(null, 204);
+  });
+
+  // --- agent reviews (human-in-the-loop decisions on agent proposals) ------
+  const reviewStatus = (raw: string | undefined) =>
+    raw === 'pending' || raw === 'approved' || raw === 'rejected' ? raw : undefined;
+  // Granular RBAC for a review's proposal: role-bound principals must hold
+  // write on the entry's content type, and the proposed fields must all be
+  // writable — the same enforcement an equivalent direct update would face.
+  const authorizeReviewDecision = async (c: Context<AuthVars>, reviewId: string) => {
+    const principal = c.get('principal');
+    if (!principal.contentGrants) return;
+    const review = await getAgentReview(ctx, scopeOf(c), reviewId);
+    const entry = await getEntry(ctx, scopeOf(c), review.entryId).catch(() => null);
+    if (!entry) return; // entry gone — the apply will no-op
+    authorizeContent(principal, 'write', entry.entry.contentTypeApiId);
+    assertWritableFields(principal, entry.entry.contentTypeApiId, review.proposed);
+  };
+  app.get(`${BASE}/agent-reviews`, requireScope(SCOPES.previewRead), async (c) => {
+    const items = await listAgentReviews(ctx, scopeOf(c), {
+      status: reviewStatus(c.req.query('status')),
+      entryId: c.req.query('entryId'),
+    });
+    const principal = c.get('principal');
+    if (!principal.contentGrants) return c.json({ items });
+    // Role-bound principals: drop reviews of unreadable types, mask denied fields.
+    const visible = [];
+    for (const review of items) {
+      const entry = await getEntry(ctx, scopeOf(c), review.entryId).catch(() => null);
+      if (!entry) continue;
+      const type = entry.entry.contentTypeApiId;
+      if (!canAccessContentType(principal, 'read', type)) continue;
+      visible.push({ ...review, proposed: maskDeniedFields(principal, type, review.proposed) });
+    }
+    return c.json({ items: visible });
+  });
+  app.post(`${BASE}/agent-reviews/:id/approve`, requireScope(SCOPES.contentWrite), async (c) => {
+    await authorizeReviewDecision(c, c.req.param('id'));
+    return c.json(
+      await decideAgentReview(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        { approve: true, decidedBy: c.get('principal').subject ?? c.get('principal').kind },
+        { signalReview: deps.signalReview },
+      ),
+    );
+  });
+  app.post(`${BASE}/agent-reviews/:id/reject`, requireScope(SCOPES.contentWrite), async (c) => {
+    await authorizeReviewDecision(c, c.req.param('id'));
+    return c.json(
+      await decideAgentReview(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        { approve: false, decidedBy: c.get('principal').subject ?? c.get('principal').kind },
+        { signalReview: deps.signalReview },
+      ),
+    );
   });
 
   // --- comments (on entries) ---------------------------------------------

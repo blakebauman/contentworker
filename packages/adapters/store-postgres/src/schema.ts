@@ -383,6 +383,30 @@ export const scheduledActions = pgTable(
   ],
 );
 
+export const agentReviews = pgTable(
+  'agent_reviews',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    workflow: text('workflow').notNull(),
+    entryId: text('entry_id').notNull(),
+    proposed: jsonb('proposed').$type<EntryFields>().notNull(),
+    notes: jsonb('notes').$type<string[]>().notNull(),
+    status: text('status').$type<'pending' | 'approved' | 'rejected'>().notNull(),
+    awaiting: boolean('awaiting').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decidedBy: text('decided_by'),
+    appliedAt: timestamp('applied_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.spaceId, t.environmentId, t.id] }),
+    // Reviewers list pending reviews per scope, newest first.
+    index('agent_reviews_pending').on(t.spaceId, t.environmentId, t.status, t.createdAt),
+  ],
+);
+
 export const agentSchedules = pgTable(
   'agent_schedules',
   {

@@ -202,6 +202,17 @@ Recurring agent jobs (cron-cadence workflow runs over newly-published entries) �
 | PATCH | `…/agent-schedules/:id` | `content:publish` | Update cron / enabled / autoApply / content-type filter |
 | DELETE | `…/agent-schedules/:id` | `content:publish` | Delete schedule |
 
+### Agent reviews
+
+Human-in-the-loop decisions on agent proposals — see
+[AI, agents & search](./ai-agents-and-search.md#human-in-the-loop-reviews).
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| GET | `…/agent-reviews` | `preview:read` | List reviews (`?status=pending`, `?entryId=`) |
+| POST | `…/agent-reviews/:id/approve` | `content:write` | Approve: applies the proposal exactly once (or signals the durable watcher) |
+| POST | `…/agent-reviews/:id/reject` | `content:write` | Reject: nothing is applied |
+
 ### Collaboration
 
 | Method | Path | Scope | Description |
