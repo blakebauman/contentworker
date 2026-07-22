@@ -79,6 +79,7 @@ import {
   type Principal,
   SCOPES,
   type Scope,
+  ValidationError,
   assertWritableFields,
   authorize,
   authorizeContent,
@@ -773,6 +774,17 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentPublish, scopeOf(args));
       await guardEntry(scopeOf(args), args.id, 'publish');
+      if (deps.moderateBeforePublish) {
+        const verdict = await moderateEntry(ctx, agents, scopeOf(args), args.id);
+        if (verdict.flagged) {
+          throw new ValidationError([
+            {
+              field: 'moderation',
+              message: `Publish blocked by moderation: ${verdict.decisions.join('; ') || 'policy violation'}`,
+            },
+          ]);
+        }
+      }
       return ok(await publishEntry(ctx, scopeOf(args), args.id));
     },
   );

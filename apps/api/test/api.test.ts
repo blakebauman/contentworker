@@ -77,6 +77,45 @@ describe('API vertical slice over HTTP', () => {
     expect(body.fields.title['en-US']).toBe('Hi');
   });
 
+  it('publishes normally through the pre-publish moderation gate when content is clean', async () => {
+    // Gate on: publish runs moderation first. The stub classifier does not flag,
+    // so a clean entry still publishes (the gate only blocks flagged content).
+    const gated: ApiConfig = { ...config, moderateBeforePublish: true };
+    const { ctx, rag, blob, ai } = wire(gated);
+    const app = createApp(ctx, gated, rag, blob, ai);
+    await app.request(`${M}/content-types`, {
+      method: 'POST',
+      headers: cma,
+      body: JSON.stringify({
+        apiId: 'article',
+        name: 'Article',
+        displayField: 'title',
+        fields: [
+          {
+            apiId: 'title',
+            name: 'Title',
+            type: 'Symbol',
+            localized: false,
+            required: true,
+            position: 0,
+          },
+        ],
+      }),
+    });
+    await app.request(`${M}/content-types/article/published`, { method: 'POST', headers: cma });
+    const entryRes = await app.request(`${M}/entries`, {
+      method: 'POST',
+      headers: cma,
+      body: JSON.stringify({ contentTypeApiId: 'article', fields: { title: { 'en-US': 'Hi' } } }),
+    });
+    const { entry } = (await entryRes.json()) as { entry: { id: string } };
+    const pub = await app.request(`${M}/entries/${entry.id}/published`, {
+      method: 'POST',
+      headers: cma,
+    });
+    expect(pub.status).toBe(200);
+  });
+
   it('rejects writes without a key (401)', async () => {
     const app = makeApp();
     const res = await app.request(`${M}/content-types`, {

@@ -85,6 +85,7 @@ function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
       agents: new InProcessAgentRuntime(makeActivities({ ctx: wired.ctx, ai: wired.ai })),
       hasher: createHasher(env.TOKEN_PEPPER),
       adminToken: mcpToken,
+      moderateBeforePublish: wired.config.moderateBeforePublish,
     };
     app.route('/', mcpRoutes(mcpDeps));
   }

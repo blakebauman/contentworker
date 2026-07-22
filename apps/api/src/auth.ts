@@ -56,6 +56,8 @@ export interface AuthDeps {
   readonly rateLimiter?: AuthRateLimit;
   /** Number of trusted reverse proxies in front (for X-Forwarded-For parsing). */
   readonly trustedProxyCount?: number;
+  /** When true, publish runs moderation first and blocks flagged content. */
+  readonly moderateBeforePublish?: boolean;
 }
 
 const ADMIN: Principal = {
