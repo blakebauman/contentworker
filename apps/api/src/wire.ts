@@ -15,9 +15,10 @@ import { createOpenSearchIndex } from '@cw/adapter-search-opensearch';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { createQdrantStore } from '@cw/adapter-vector-qdrant';
+import { REVIEW_DECISION_SIGNAL, reviewWorkflowId } from '@cw/agent-runtime';
 import { assertNoFakeAdapters } from '@cw/application';
 import type { AppContext, FakeAdapterBinding, RagDeps } from '@cw/application';
-import { type ApiKeyKind, scopesForKind } from '@cw/domain';
+import { type AgentReview, type ApiKeyKind, scopesForKind } from '@cw/domain';
 import type {
   AIProvider,
   BlobStore,
@@ -58,6 +59,11 @@ export interface Wired {
   readonly bus: EventBus;
   /** Shared failed-auth limiter when Redis is configured; else the in-process one. */
   readonly rateLimiter?: AuthRateLimit;
+  /** Delivers review decisions to the durable HITL watcher (Temporal only). */
+  readonly signalReview?: (
+    review: AgentReview,
+    decision: 'approved' | 'rejected',
+  ) => Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -156,6 +162,36 @@ function makeCostGuard(config: ApiConfig, redis?: Redis): CostGuard | undefined 
 }
 
 /**
+ * Review-decision signaler for AGENT_RUNTIME=temporal: delivers a human
+ * decision to the durable review watcher as a Temporal Signal. The client is
+ * created lazily on first use (most API processes never decide a review), and
+ * any failure returns false — the decision use-case then applies directly,
+ * which the exactly-once marker makes safe.
+ */
+function makeSignalReview(): Wired['signalReview'] {
+  if (process.env.AGENT_RUNTIME !== 'temporal') return undefined;
+  let clientPromise: Promise<import('@temporalio/client').Client> | undefined;
+  return async (review, decision) => {
+    try {
+      const { Client, Connection } = await import('@temporalio/client');
+      clientPromise ??= Connection.connect({
+        address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
+      }).then(
+        (connection) =>
+          new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? 'default' }),
+      );
+      const client = await clientPromise;
+      await client.workflow
+        .getHandle(reviewWorkflowId(review.id))
+        .signal(REVIEW_DECISION_SIGNAL, decision);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+}
+
+/**
  * The composition root: the one place adapters are bound to ports. Selects the
  * Postgres store + Redis cache when their URLs are set, otherwise in-memory
  * equivalents seeded with a default space (for dev, tests, and demos).
@@ -212,6 +248,7 @@ export function wire(config: ApiConfig): Wired {
       ai,
       bus,
       rateLimiter,
+      signalReview: makeSignalReview(),
       close: async () => {
         for (const c of closers) await c();
       },
@@ -256,6 +293,7 @@ export function wire(config: ApiConfig): Wired {
     ai,
     bus,
     rateLimiter,
+    signalReview: makeSignalReview(),
     close: async () => {
       for (const c of closers) await c();
     },

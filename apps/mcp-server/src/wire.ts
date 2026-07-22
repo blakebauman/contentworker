@@ -9,9 +9,15 @@ import { createOpenSearchIndex } from '@cw/adapter-search-opensearch';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { createQdrantStore } from '@cw/adapter-vector-qdrant';
-import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
+import {
+  InProcessAgentRuntime,
+  REVIEW_DECISION_SIGNAL,
+  makeActivities,
+  reviewWorkflowId,
+} from '@cw/agent-runtime';
 import { aiBudgetLimits, assertNoFakeAdapters, createHasher } from '@cw/application';
 import type { AgentRunner, AppContext, FakeAdapterBinding, RagDeps } from '@cw/application';
+import type { AgentReview } from '@cw/domain';
 import type {
   AIProvider,
   Clock,
@@ -69,6 +75,11 @@ export interface McpDeps {
   readonly ctx: AppContext;
   readonly ai: AIProvider;
   readonly rag: RagDeps;
+  /** Delivers review decisions to a durable HITL watcher (optional). */
+  readonly signalReview?: (
+    review: AgentReview,
+    decision: 'approved' | 'rejected',
+  ) => Promise<boolean>;
   /** Agent-workflow runtime for on-demand agent actions (moderation). */
   readonly agents: AgentRunner;
   readonly hasher: Hasher;
@@ -76,6 +87,33 @@ export interface McpDeps {
   readonly adminToken: string;
   /** When true, publish runs moderation first and blocks flagged content. */
   readonly moderateBeforePublish?: boolean;
+}
+
+/**
+ * Review-decision signaler for AGENT_RUNTIME=temporal (lazy client; any
+ * failure returns false and the decision use-case applies directly, which
+ * the exactly-once marker makes safe). Mirrors apps/api/src/wire.ts.
+ */
+function makeSignalReview(env: NodeJS.ProcessEnv): McpDeps['signalReview'] {
+  if (env.AGENT_RUNTIME !== 'temporal') return undefined;
+  let clientPromise: Promise<import('@temporalio/client').Client> | undefined;
+  return async (review, decision) => {
+    try {
+      const { Client, Connection } = await import('@temporalio/client');
+      clientPromise ??= Connection.connect({
+        address: env.TEMPORAL_ADDRESS ?? 'localhost:7233',
+      }).then(
+        (connection) => new Client({ connection, namespace: env.TEMPORAL_NAMESPACE ?? 'default' }),
+      );
+      const client = await clientPromise;
+      await client.workflow
+        .getHandle(reviewWorkflowId(review.id))
+        .signal(REVIEW_DECISION_SIGNAL, decision);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 }
 
 /**
@@ -139,6 +177,7 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
     ctx,
     ai,
     rag: { embeddings, vectors, searchIndex },
+    signalReview: makeSignalReview(env),
     // On-demand agent actions run in-process (synchronous request/response);
     // the durable Temporal path serves the worker's on-publish runs.
     agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),

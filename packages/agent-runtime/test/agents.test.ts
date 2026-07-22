@@ -96,6 +96,53 @@ describe('P8: durable agents (in-process executor)', () => {
     expect(result.proposed?.summary?.['en-US']).toBe('x');
     // Entry unchanged (still version 1).
     expect((await ctx.store.entries.get(scope, id))?.entry.currentVersion).toBe(1);
+    // The proposal is persisted as a pending review (the durable HITL half).
+    expect(result.reviewId).toBeTruthy();
+    const review = await ctx.store.agentReviews.get(scope, result.reviewId as string);
+    expect(review?.status).toBe('pending');
+    expect(review?.proposed.summary?.['en-US']).toBe('x');
+    expect(review?.entryId).toBe(id);
+  });
+
+  it('a watcher arming after the decision observes it (approved applies once, rejected records nothing)', async () => {
+    const id = await seed(ctx);
+    const ai = new StubAIProvider(() => ({ summary: 'x', seoDescription: 'y' }));
+    const activities = makeActivities({ ctx, ai });
+    const runtime = new InProcessAgentRuntime(activities);
+    const { reviewWorkflow } = await import('../src/workflows.js');
+    const { decideAgentReview } = await import('@cw/application');
+
+    // Approved before the watcher armed: decide applied directly…
+    const run = await runtime.run('enrich', { scope, entryId: id, autoApply: false });
+    const reviewId = run.reviewId as string;
+    await decideAgentReview(ctx, scope, reviewId, { approve: true });
+    const versions = (await ctx.store.entries.listVersions(scope, id)).length;
+    // …so the late watcher loses the apply CAS and must not re-apply.
+    const outcome = await reviewWorkflow(activities, { scope, reviewId, entryId: id });
+    expect(outcome.status).toBe('completed');
+    expect((await ctx.store.entries.listVersions(scope, id)).length).toBe(versions);
+    const runs = await ctx.store.agentRuns.list(scope, {});
+    expect(runs.filter((r) => r.decisions.includes('applied after review approval'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('the review watcher settles immediately without durable waits', async () => {
+    const id = await seed(ctx);
+    const ai = new StubAIProvider(() => ({ summary: 'x', seoDescription: 'y' }));
+    const activities = makeActivities({ ctx, ai });
+    const runtime = new InProcessAgentRuntime(activities);
+    const run = await runtime.run('enrich', { scope, entryId: id, autoApply: false });
+    const reviewId = run.reviewId as string;
+
+    // Waitless watcher (via the shared workflow fn): arms, then stands down —
+    // the review stays pending and decidable through the direct path.
+    const { reviewWorkflow } = await import('../src/workflows.js');
+    const outcome = await reviewWorkflow(activities, { scope, reviewId, entryId: id });
+    expect(outcome.status).toBe('skipped');
+    const review = await ctx.store.agentReviews.get(scope, reviewId);
+    expect(review?.status).toBe('pending');
+    expect(review?.awaiting).toBe(false);
   });
 
   it('routes to review on low confidence (model filled only some fields)', async () => {

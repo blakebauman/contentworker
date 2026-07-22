@@ -34,6 +34,7 @@
     "@cw/telemetry": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.13.0",
+    "@temporalio/client": "^1.18.1",
     "ioredis": "^5.11.1",
     "tsx": "^4.19.2",
     "uuid": "^11.0.3",

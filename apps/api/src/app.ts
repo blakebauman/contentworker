@@ -33,6 +33,7 @@ export function createApp(
   ai: AIProvider,
   bus: EventBus = noopBus,
   rateLimiter?: AuthRateLimit,
+  signalReview?: AuthDeps['signalReview'],
 ): Hono {
   const app = new Hono();
   app.onError(onError);
@@ -87,6 +88,7 @@ export function createApp(
     // on-publish runs (AGENT_RUNTIME=temporal).
     agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),
     rateLimiter,
+    signalReview,
     trustedProxyCount: config.trustedProxyCount,
     moderateBeforePublish: config.moderateBeforePublish,
   };

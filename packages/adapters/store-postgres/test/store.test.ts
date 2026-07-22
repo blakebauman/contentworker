@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { AppContext } from '@cw/application';
 import {
   authenticate,
+  createAgentReview,
   createAgentSchedule,
   createApiKey,
   createAppExtension,
@@ -263,6 +264,50 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
 
     await deleteAgentSchedule(ctx, scope, created.id);
     expect((await listAgentSchedules(ctx, scope)).map((s) => s.id)).not.toContain(created.id);
+  });
+
+  it('round-trips the agent-reviews repo (CAS decide/arm/apply)', async () => {
+    const review = await createAgentReview(ctx, scope, {
+      workflow: 'enrich',
+      entryId: 'entry-x',
+      proposed: { summary: { 'en-US': 'proposed' } },
+      notes: ['note one'],
+    });
+    const [pending] = await store.agentReviews.list(scope, { status: 'pending' });
+    expect(pending?.id).toBe(review.id);
+    expect(pending?.proposed.summary?.['en-US']).toBe('proposed');
+
+    // Arm is a CAS: first caller arms, a second observes.
+    expect(await store.agentReviews.markAwaiting(scope, review.id)).toBe('armed');
+    expect(await store.agentReviews.markAwaiting(scope, review.id)).toBe('pending');
+    await store.agentReviews.clearAwaiting(scope, review.id);
+
+    // Decide is a CAS: the second decision loses.
+    expect(
+      await store.agentReviews.decide(scope, review.id, {
+        status: 'approved',
+        decidedAt: '2026-01-02T00:00:00.000Z',
+        decidedBy: 'contract-test',
+      }),
+    ).toBe(true);
+    expect(
+      await store.agentReviews.decide(scope, review.id, {
+        status: 'rejected',
+        decidedAt: '2026-01-02T00:00:01.000Z',
+      }),
+    ).toBe(false);
+
+    // Exactly-once apply marker.
+    expect(await store.agentReviews.markApplied(scope, review.id, '2026-01-02T00:00:02.000Z')).toBe(
+      true,
+    );
+    expect(await store.agentReviews.markApplied(scope, review.id, '2026-01-02T00:00:03.000Z')).toBe(
+      false,
+    );
+    const decided = await store.agentReviews.get(scope, review.id);
+    expect(decided?.status).toBe('approved');
+    expect(decided?.decidedBy).toBe('contract-test');
+    expect(decided?.appliedAt).toBe('2026-01-02T00:00:02.000Z');
   });
 
   it('round-trips the functions repo', async () => {

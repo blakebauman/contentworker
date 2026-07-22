@@ -20,6 +20,7 @@ import {
   createScheme,
   createTag,
   createTask,
+  decideAgentReview,
   deleteAgentSchedule,
   deleteAppExtension,
   deleteEnvironmentAlias,
@@ -29,6 +30,7 @@ import {
   draftEntry,
   findDuplicates,
   generateAltText,
+  getAgentReview,
   getAssetUsage,
   getContentType,
   getPreviewEntry,
@@ -36,6 +38,7 @@ import {
   getVersion,
   hybridSearch,
   listAIActions,
+  listAgentReviews,
   listAgentSchedules,
   listAppExtensions,
   listAssets,
@@ -1168,6 +1171,92 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           autoApply: args.autoApply,
           contentTypeApiId: args.contentTypeApiId,
         }),
+      );
+    },
+  );
+
+  // --- agent reviews (human-in-the-loop) -----------------------------------
+  server.tool(
+    'agent_review_list',
+    'List agent proposals awaiting (or past) human review.',
+    {
+      status: z.enum(['pending', 'approved', 'rejected']).optional(),
+      entryId: z.string().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      const items = await listAgentReviews(ctx, scopeOf(args), {
+        status: args.status,
+        entryId: args.entryId,
+      });
+      if (!principal.contentGrants) return ok({ items });
+      const visible = [];
+      for (const review of items) {
+        try {
+          const entry = await getPreviewEntry(ctx, scopeOf(args), review.entryId);
+          if (!canAccessContentType(principal, 'read', entry.contentType)) continue;
+          visible.push({
+            ...review,
+            proposed: maskDeniedFields(principal, entry.contentType, review.proposed),
+          });
+        } catch {
+          // entry gone — skip rather than leak an unmaskable proposal
+        }
+      }
+      return ok({ items: visible });
+    },
+  );
+
+  // Granular RBAC for a review decision: role-bound principals need write on
+  // the entry's content type and every proposed field must be writable.
+  const guardReviewDecision = async (s: Scope, reviewId: string) => {
+    if (!principal.contentGrants) return;
+    const review = await getAgentReview(ctx, s, reviewId);
+    try {
+      const entry = await getPreviewEntry(ctx, s, review.entryId);
+      authorizeContent(principal, 'write', entry.contentType);
+      assertWritableFields(principal, entry.contentType, review.proposed);
+    } catch (err) {
+      if ((err as { code?: string }).code === 'not_found') return; // entry gone
+      throw err;
+    }
+  };
+
+  server.tool(
+    'agent_review_approve',
+    'Approve a pending agent proposal: its field values are applied as a new draft version (exactly once).',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      await guardReviewDecision(scopeOf(args), args.id);
+      return ok(
+        await decideAgentReview(
+          ctx,
+          scopeOf(args),
+          args.id,
+          { approve: true, decidedBy: principal.subject ?? principal.kind },
+          { signalReview: deps.signalReview },
+        ),
+      );
+    },
+  );
+
+  server.tool(
+    'agent_review_reject',
+    'Reject a pending agent proposal (nothing is applied).',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      await guardReviewDecision(scopeOf(args), args.id);
+      return ok(
+        await decideAgentReview(
+          ctx,
+          scopeOf(args),
+          args.id,
+          { approve: false, decidedBy: principal.subject ?? principal.kind },
+          { signalReview: deps.signalReview },
+        ),
       );
     },
   );

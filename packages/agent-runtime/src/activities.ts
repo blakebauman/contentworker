@@ -1,8 +1,10 @@
 import {
   type AppContext,
   UNTRUSTED_CONTENT_GUARD,
+  applyProposedFields,
+  createAgentReview,
   generateWithBudget,
-  updateEntry,
+  settleReviewOutcome,
   wrapUntrusted,
 } from '@cw/application';
 import type { EntryFields, Scope } from '@cw/domain';
@@ -85,13 +87,25 @@ export function makeActivities(deps: ActivitiesDeps): Activities {
     async applyFields(scope, entryId, enriched) {
       // Merge enriched values into the entry's current fields, then save a new
       // draft version (the core validates the full set).
-      const found = await ctx.store.entries.get(scope, entryId);
-      if (!found) return;
-      const merged: EntryFields = { ...found.fields };
-      for (const [apiId, localized] of Object.entries(enriched)) {
-        merged[apiId] = { ...(merged[apiId] ?? {}), ...localized };
-      }
-      await updateEntry(ctx, scope, entryId, merged);
+      await applyProposedFields(ctx, scope, entryId, enriched);
+    },
+
+    async createReview(scope, input) {
+      const review = await createAgentReview(ctx, scope, {
+        workflow: input.workflow,
+        entryId: input.entryId,
+        proposed: input.proposed,
+        notes: input.notes,
+      });
+      return { reviewId: review.id };
+    },
+
+    async armReview(scope, reviewId) {
+      return ctx.store.agentReviews.markAwaiting(scope, reviewId);
+    },
+
+    async settleReview(scope, reviewId, outcome) {
+      await settleReviewOutcome(ctx, scope, reviewId, outcome);
     },
 
     async classify(scope, text) {

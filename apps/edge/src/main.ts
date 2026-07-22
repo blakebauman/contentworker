@@ -16,6 +16,7 @@ import {
 import type { DomainEvent, Scope } from '@cw/domain';
 import type { McpDeps } from '@cw/mcp-server/wire';
 import { Hono } from 'hono';
+import { sendReviewDecision } from './agents/runtime.js';
 import { AgentWorkflow } from './agents/workflow.js';
 import { CostGuardDO, createDoCostGuard } from './do/cost-guard.js';
 import { LiveHubDO, createDoEventBus } from './do/live-hub.js';
@@ -107,13 +108,28 @@ function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
       hasher: createHasher(env.TOKEN_PEPPER),
       adminToken: mcpToken,
       moderateBeforePublish: wired.config.moderateBeforePublish,
+      signalReview: env.AGENT_WF
+        ? (review, decision) => sendReviewDecision(env.AGENT_WF as Workflow, review.id, decision)
+        : undefined,
     };
     app.route('/', mcpRoutes(mcpDeps));
   }
 
   app.route(
     '/',
-    createApp(wired.ctx, wired.config, wired.rag, wired.blob, wired.ai, wired.bus, rateLimiter),
+    createApp(
+      wired.ctx,
+      wired.config,
+      wired.rag,
+      wired.blob,
+      wired.ai,
+      wired.bus,
+      rateLimiter,
+      // Review decisions reach the durable watcher as Workflow events.
+      env.AGENT_WF
+        ? (review, decision) => sendReviewDecision(env.AGENT_WF as Workflow, review.id, decision)
+        : undefined,
+    ),
   );
   return app;
 }

@@ -1,11 +1,17 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
-import { type Activities, type AgentRunResult, makeActivities } from '@cw/agent-runtime';
+import {
+  type Activities,
+  type AgentRunResult,
+  type DurableWaits,
+  makeActivities,
+} from '@cw/agent-runtime';
 import {
   curateWorkflow,
   enrichWorkflow,
   moderateWorkflow,
   repurposeWorkflow,
+  reviewWorkflow,
 } from '@cw/agent-runtime/workflows';
 import { type AppContext, type FakeAdapterBinding, assertNoFakeAdapters } from '@cw/application';
 import type { AIProvider, ContentStore, IdGenerator } from '@cw/ports';
@@ -14,7 +20,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { createDoCostGuard } from '../do/cost-guard.js';
 import type { EdgeEnv } from '../env.js';
 import { makeAI } from '../wire.js';
-import type { AgentWfParams } from './runtime.js';
+import { type AgentWfParams, REVIEW_DECISION_EVENT } from './runtime.js';
 
 const workflows = {
   enrich: enrichWorkflow,
@@ -48,6 +54,9 @@ function stepActivities(step: WorkflowStep, real: Activities): Activities {
     applyFields: wrap('applyFields', real.applyFields.bind(real)),
     classify: wrap('classify', real.classify.bind(real)),
     record: wrap('record', real.record.bind(real)),
+    createReview: wrap('createReview', real.createReview.bind(real)),
+    armReview: wrap('armReview', real.armReview.bind(real)),
+    settleReview: wrap('settleReview', real.settleReview.bind(real)),
   };
 }
 
@@ -64,8 +73,8 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
     step: WorkflowStep,
   ): Promise<AgentRunResult> {
     const { workflow, input } = event.payload;
-    const run = workflows[workflow];
-    if (!run) throw new Error(`unknown agent workflow "${workflow}"`);
+    const run = workflow === 'review' ? undefined : workflows[workflow];
+    if (workflow !== 'review' && !run) throw new Error(`unknown agent workflow "${workflow}"`);
 
     // Durable runs need the shared database: without HYPERDRIVE this store is
     // a fresh empty in-memory one (the demo store lives in the fetch isolate),
@@ -94,7 +103,26 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
 
     try {
       const activities = stepActivities(step, makeActivities({ ctx, ai }));
-      return await run(activities, input);
+      if (event.payload.workflow === 'review') {
+        // HITL watcher: the human decision arrives as a Workflow event;
+        // waitForEvent parks durably (days) and rejects on timeout → null.
+        const waits: DurableWaits = {
+          awaitReviewDecision: async (reviewId, timeoutMs) => {
+            try {
+              const decided = await step.waitForEvent<'approved' | 'rejected'>(
+                `decision:${reviewId}`,
+                { type: REVIEW_DECISION_EVENT, timeout: timeoutMs },
+              );
+              return decided.payload ?? null;
+            } catch {
+              return null;
+            }
+          },
+        };
+        return await reviewWorkflow(activities, event.payload.input, waits);
+      }
+      if (!run) throw new Error(`unknown agent workflow "${workflow}"`);
+      return await run(activities, input as import('@cw/agent-runtime').WorkflowInput);
     } finally {
       if (connectionString) await (store as ContentStore & { close(): Promise<void> }).close();
     }

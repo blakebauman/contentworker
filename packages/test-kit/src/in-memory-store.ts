@@ -1,4 +1,5 @@
 import {
+  type AgentReview,
   type AgentSchedule,
   type ApiKey,
   type Asset,
@@ -27,6 +28,7 @@ import {
 import type {
   AIActionDefinition,
   AIActionRepo,
+  AgentReviewRepo,
   AgentRunRecord,
   AgentRunRepo,
   AgentScheduleRepo,
@@ -513,6 +515,62 @@ export class InMemoryContentStore implements ContentStore {
         .filter((r) => r.action.status === 'pending' && r.action.scheduledFor <= now)
         .sort((a, b) => (a.action.scheduledFor < b.action.scheduledFor ? -1 : 1))
         .slice(0, limit),
+  };
+
+  private readonly agentReviewData = new Map<string, AgentReview>();
+
+  readonly agentReviews: AgentReviewRepo = {
+    create: async (scope, review) => {
+      this.agentReviewData.set(`${scopeKey(scope)}::${review.id}`, review);
+    },
+    get: async (scope, id) => this.agentReviewData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    list: async (scope, query) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.agentReviewData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v)
+        .filter((r) => !query?.status || r.status === query.status)
+        .filter((r) => !query?.entryId || r.entryId === query.entryId)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+        .slice(0, Math.min(query?.limit ?? 100, 1000));
+    },
+    decide: async (scope, id, decision) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const review = this.agentReviewData.get(key);
+      if (!review || review.status !== 'pending') return false;
+      this.agentReviewData.set(key, {
+        ...review,
+        status: decision.status,
+        decidedAt: decision.decidedAt,
+        decidedBy: decision.decidedBy,
+      });
+      return true;
+    },
+    markAwaiting: async (scope, id) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const review = this.agentReviewData.get(key);
+      if (!review) return 'pending';
+      if (review.status !== 'pending' || review.awaiting) return review.status;
+      this.agentReviewData.set(key, { ...review, awaiting: true });
+      return 'armed';
+    },
+    clearAwaiting: async (scope, id) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const review = this.agentReviewData.get(key);
+      if (review) this.agentReviewData.set(key, { ...review, awaiting: false });
+    },
+    markApplied: async (scope, id, at) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const review = this.agentReviewData.get(key);
+      if (!review || review.appliedAt) return false;
+      this.agentReviewData.set(key, { ...review, appliedAt: at });
+      return true;
+    },
+    clearApplied: async (scope, id) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const review = this.agentReviewData.get(key);
+      if (review) this.agentReviewData.set(key, { ...review, appliedAt: undefined });
+    },
   };
 
   private readonly agentScheduleData = new Map<string, { scope: Scope; schedule: AgentSchedule }>();

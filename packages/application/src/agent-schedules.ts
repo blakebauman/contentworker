@@ -192,6 +192,11 @@ export async function runDueAgentSchedules(
           entryId: published.entryId,
           autoApply: schedule.autoApply,
         });
+        if (outcome.status === 'needs_review' && outcome.reviewId) {
+          await agents
+            .watchReview?.({ scope, reviewId: outcome.reviewId, entryId: published.entryId })
+            .catch(() => {});
+        }
         await recordAgentRun(ctx, scope, {
           workflow: schedule.workflow,
           entryId: published.entryId,

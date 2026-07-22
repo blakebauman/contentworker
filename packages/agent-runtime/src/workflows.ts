@@ -1,6 +1,79 @@
-import type { Activities, AgentRunResult, WorkflowInput } from './types.js';
+import type {
+  Activities,
+  AgentRunResult,
+  DurableWaits,
+  ReviewWatchInput,
+  WorkflowInput,
+} from './types.js';
+import { DEFAULT_REVIEW_TIMEOUT_MS } from './types.js';
 
 const ZERO = { inputTokens: 0, outputTokens: 0 };
+
+/** Persists a proposal as a pending review and shapes the needs_review result. */
+async function proposeForReview(
+  act: Activities,
+  workflow: AgentRunResult['workflow'],
+  input: WorkflowInput,
+  proposed: NonNullable<AgentRunResult['proposed']>,
+  decisions: string[],
+  usage: AgentRunResult['usage'],
+): Promise<AgentRunResult> {
+  const { reviewId } = await act.createReview(input.scope, {
+    workflow,
+    entryId: input.entryId,
+    proposed,
+    notes: decisions,
+  });
+  return {
+    workflow,
+    entryId: input.entryId,
+    status: 'needs_review',
+    decisions,
+    usage,
+    proposed,
+    reviewId,
+  };
+}
+
+/**
+ * The detached HITL watcher: armed against a pending review, it waits durably
+ * for the human decision (Temporal Signal / Cloudflare Workflow event) and
+ * settles the outcome — apply-once on approval, record on rejection, stand
+ * down on timeout so a later decision applies through the direct path. Runs
+ * fire-and-forget (nobody awaits its result); every effect goes through `act`.
+ */
+export async function reviewWorkflow(
+  act: Activities,
+  input: ReviewWatchInput,
+  waits?: DurableWaits,
+): Promise<AgentRunResult> {
+  const base = { workflow: 'review' as const, entryId: input.entryId, usage: ZERO };
+  const armed = await act.armReview(input.scope, input.reviewId);
+  if (armed === 'approved' || armed === 'rejected') {
+    // Decided before the watcher armed — settle observes the decision.
+    await act.settleReview(input.scope, input.reviewId, armed);
+    return {
+      ...base,
+      status: armed === 'approved' ? 'completed' : 'rejected',
+      decisions: [`decided before watch: ${armed}`],
+    };
+  }
+  if (armed !== 'armed' || !waits) {
+    await act.settleReview(input.scope, input.reviewId, 'timeout');
+    return { ...base, status: 'skipped', decisions: ['no durable wait available'] };
+  }
+  const decision = await waits.awaitReviewDecision(
+    input.reviewId,
+    input.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS,
+  );
+  await act.settleReview(input.scope, input.reviewId, decision ?? 'timeout');
+  return {
+    ...base,
+    status:
+      decision === 'approved' ? 'completed' : decision === 'rejected' ? 'rejected' : 'needs_review',
+    decisions: [decision ? `reviewer ${decision}` : 'timed out awaiting review'],
+  };
+}
 
 /**
  * Enrich: fill empty Text/Symbol fields (other than the display field) with
@@ -57,17 +130,17 @@ export async function enrichWorkflow(
   const lowConfidence = enrichedKeys.length < empty.length;
   if (!input.autoApply || lowConfidence) {
     await act.record(input.scope, input.entryId, `enrich proposes: ${enrichedKeys.join(', ')}`);
-    return {
-      workflow: 'enrich',
-      entryId: input.entryId,
-      status: 'needs_review',
-      decisions: [
+    return proposeForReview(
+      act,
+      'enrich',
+      input,
+      fields,
+      [
         `proposed ${enrichedKeys.join(', ')}`,
         lowConfidence ? 'low confidence' : 'autoApply disabled',
       ],
       usage,
-      proposed: fields,
-    };
+    );
   }
 
   await act.applyFields(input.scope, input.entryId, fields);
@@ -143,17 +216,17 @@ export async function curateWorkflow(
   const lowConfidence = Object.keys(fields).length < filled.length;
   if (!input.autoApply || lowConfidence) {
     await act.record(input.scope, input.entryId, `curate proposes: ${changedKeys.join(', ')}`);
-    return {
-      workflow: 'curate',
-      entryId: input.entryId,
-      status: 'needs_review',
-      decisions: [
+    return proposeForReview(
+      act,
+      'curate',
+      input,
+      changed,
+      [
         `proposed ${changedKeys.join(', ')}`,
         lowConfidence ? 'low confidence' : 'autoApply disabled',
       ],
       usage,
-      proposed: changed,
-    };
+    );
   }
 
   await act.applyFields(input.scope, input.entryId, changed);
@@ -215,14 +288,14 @@ export async function repurposeWorkflow(
   }
 
   await act.record(input.scope, input.entryId, `repurpose proposes: ${variantKeys.join(', ')}`);
-  return {
-    workflow: 'repurpose',
-    entryId: input.entryId,
-    status: 'needs_review',
-    decisions: [`proposed ${variantKeys.join(', ')}`],
+  return proposeForReview(
+    act,
+    'repurpose',
+    input,
+    fields,
+    [`proposed ${variantKeys.join(', ')}`],
     usage,
-    proposed: fields,
-  };
+  );
 }
 
 /**

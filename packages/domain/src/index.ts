@@ -12,6 +12,7 @@ export * from './rich-text/rich-text.js';
 export * from './release/release.js';
 export * from './scheduling/scheduled-action.js';
 export * from './scheduling/agent-schedule.js';
+export * from './agents/agent-review.js';
 export * from './scheduling/cron.js';
 export * from './collaboration/comment.js';
 export * from './collaboration/task.js';

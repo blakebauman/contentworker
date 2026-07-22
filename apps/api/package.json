@@ -51,6 +51,7 @@
     "@hono/node-server": "^1.13.7",
     "@hono/standard-validator": "^0.2.3",
     "@scalar/hono-api-reference": "^0.11.9",
+    "@temporalio/client": "^1.18.1",
     "graphql": "^16.10.0",
     "hono": "^4.6.14",
     "hono-openapi": "^1.3.1",

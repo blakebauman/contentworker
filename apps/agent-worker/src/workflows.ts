@@ -1,4 +1,10 @@
-import type { Activities, AgentRunResult, WorkflowInput } from '@cw/agent-runtime';
+import type {
+  Activities,
+  AgentRunResult,
+  DurableWaits,
+  ReviewWatchInput,
+  WorkflowInput,
+} from '@cw/agent-runtime';
 /**
  * Temporal workflow definitions. These run in Temporal's deterministic sandbox,
  * so this module imports ONLY workflow-safe code: the pure `enrichWorkflow` /
@@ -12,8 +18,9 @@ import {
   enrichWorkflow,
   moderateWorkflow,
   repurposeWorkflow,
+  reviewWorkflow,
 } from '@cw/agent-runtime/workflows';
-import { proxyActivities } from '@temporalio/workflow';
+import { condition, defineSignal, proxyActivities, setHandler } from '@temporalio/workflow';
 
 const activities = proxyActivities<Activities>({
   startToCloseTimeout: '2 minutes',
@@ -34,4 +41,23 @@ export async function curate(input: WorkflowInput): Promise<AgentRunResult> {
 
 export async function repurpose(input: WorkflowInput): Promise<AgentRunResult> {
   return repurposeWorkflow(activities, input);
+}
+
+// HITL: the detached review watcher. A human decision arrives as a Temporal
+// Signal; `condition` waits durably (days) with a timeout, and the shared
+// reviewWorkflow settles the outcome through activities.
+export const reviewDecisionSignal = defineSignal<['approved' | 'rejected']>('review-decision');
+
+export async function review(input: ReviewWatchInput): Promise<AgentRunResult> {
+  let decision: 'approved' | 'rejected' | undefined;
+  setHandler(reviewDecisionSignal, (d) => {
+    decision = d;
+  });
+  const waits: DurableWaits = {
+    awaitReviewDecision: async (_reviewId, timeoutMs) => {
+      await condition(() => decision !== undefined, timeoutMs);
+      return decision ?? null;
+    },
+  };
+  return reviewWorkflow(activities, input, waits);
 }

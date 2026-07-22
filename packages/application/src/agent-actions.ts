@@ -25,12 +25,25 @@ export interface AgentRunner {
     workflow: 'enrich' | 'moderate' | 'curate' | 'repurpose',
     input: { readonly scope: Scope; readonly entryId: string; readonly autoApply?: boolean },
   ): Promise<AgentRunOutcome>;
+  /**
+   * Optional (durable runtimes only): starts the detached HITL watcher for a
+   * pending review, which waits for the human decision as a signal/event and
+   * applies on approval. Absent, decisions apply through the direct path.
+   */
+  watchReview?(input: {
+    readonly scope: Scope;
+    readonly reviewId: string;
+    readonly entryId: string;
+    readonly timeoutMs?: number;
+  }): Promise<void>;
 }
 
 export interface AgentRunOutcome {
-  readonly status: 'completed' | 'needs_review' | 'held' | 'skipped';
+  readonly status: 'completed' | 'needs_review' | 'held' | 'skipped' | 'rejected';
   readonly decisions: string[];
   readonly usage: { inputTokens: number; outputTokens: number };
+  /** Persisted review awaiting a human decision (when needs_review). */
+  readonly reviewId?: string;
 }
 
 export type FindingSeverity = 'info' | 'warning' | 'error';
@@ -222,6 +235,11 @@ export async function runPublishAgents(
   const runs: PublishAgentRunSummary[] = [];
   for (const workflow of workflows) {
     const r = await agents.run(workflow, { scope, entryId, autoApply: config.autoApply });
+    if (r.status === 'needs_review' && r.reviewId) {
+      // Durable runtimes arm the detached HITL watcher; failures fall back to
+      // the direct-apply decision path, so best-effort is safe.
+      await agents.watchReview?.({ scope, reviewId: r.reviewId, entryId }).catch(() => {});
+    }
     await recordAgentRun(ctx, scope, {
       workflow,
       entryId,

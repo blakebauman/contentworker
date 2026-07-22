@@ -1,4 +1,5 @@
 import type {
+  AgentReview,
   AgentSchedule,
   ApiKey,
   Asset,
@@ -51,6 +52,7 @@ export interface ContentStore {
   readonly releases: ReleaseRepo;
   readonly scheduledActions: ScheduledActionRepo;
   readonly agentSchedules: AgentScheduleRepo;
+  readonly agentReviews: AgentReviewRepo;
   readonly comments: CommentRepo;
   readonly tasks: TaskRepo;
   readonly workflows: WorkflowRepo;
@@ -337,6 +339,40 @@ export interface ScheduledActionRepo {
 export interface ScopedAgentSchedule {
   readonly scope: Scope;
   readonly schedule: AgentSchedule;
+}
+
+export interface AgentReviewRepo {
+  create(scope: Scope, review: AgentReview): Promise<void>;
+  get(scope: Scope, id: string): Promise<AgentReview | null>;
+  list(
+    scope: Scope,
+    query?: { status?: AgentReview['status']; entryId?: string; limit?: number },
+  ): Promise<AgentReview[]>;
+  /**
+   * CAS pending → decided. Returns false when the review was already decided
+   * (a concurrent reviewer won) — the caller must not act on a lost race.
+   */
+  decide(
+    scope: Scope,
+    id: string,
+    decision: { status: 'approved' | 'rejected'; decidedAt: string; decidedBy?: string },
+  ): Promise<boolean>;
+  /**
+   * CAS arming of the durable watcher: pending + !awaiting → awaiting. Returns
+   * the review's current status when the arm was NOT taken (already decided —
+   * the watcher then observes instead of waiting), or 'armed'.
+   */
+  markAwaiting(scope: Scope, id: string): Promise<'armed' | AgentReview['status']>;
+  /** Clears `awaiting` (watcher timed out/completed without a decision). */
+  clearAwaiting(scope: Scope, id: string): Promise<void>;
+  /**
+   * CAS exactly-once apply marker. Returns true for the single caller that
+   * owns applying the proposal; every later caller gets false and skips.
+   */
+  markApplied(scope: Scope, id: string, at: string): Promise<boolean>;
+  /** Compensation: rolls the apply marker back when the apply itself threw,
+   *  so the proposal stays re-drivable instead of falsely recorded applied. */
+  clearApplied(scope: Scope, id: string): Promise<void>;
 }
 
 export interface AgentScheduleRepo {
