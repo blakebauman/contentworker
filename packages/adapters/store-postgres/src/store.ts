@@ -1895,10 +1895,13 @@ export interface PostgresStoreOptions {
   readonly prepare?: boolean;
 }
 
+/** The underlying postgres.js client type (composition-root sharing only). */
+export type PostgresClient = ReturnType<typeof postgres>;
+
 export function createPostgresStore(
   connectionString: string,
   options: PostgresStoreOptions = {},
-): ContentStore & { close(): Promise<void> } {
+): ContentStore & { close(): Promise<void>; readonly sql: PostgresClient } {
   const sql = postgres(connectionString, {
     ...(options.max !== undefined ? { max: options.max } : {}),
     ...(options.fetchTypes !== undefined ? { fetch_types: options.fetchTypes } : {}),
@@ -1906,6 +1909,10 @@ export function createPostgresStore(
   });
   const db = drizzle(sql, { schema });
   return {
+    // Exposed for composition roots ONLY: co-located adapters on the same
+    // database (pgvector) share this pool instead of opening a second one.
+    // Never crosses a port boundary — ContentStore stays driver-free.
+    sql,
     spaces: makeSpaceRepo(db),
     contentTypes: makeContentTypeRepo(db),
     entries: makeEntryRepo(db),

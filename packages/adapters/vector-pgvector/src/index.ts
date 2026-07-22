@@ -55,16 +55,25 @@ export async function ensurePgVectorSchema(
   }
 }
 
+/** A postgres.js client this adapter can run on (shared-pool wiring). */
+export type PgVectorClient = Sql;
+
 /**
  * pgvector-backed VectorStore. Schema is applied by the migrator
  * (`ensurePgVectorSchema`); `ensureSchema()` remains for tests/dev bootstraps.
  * Cosine distance via the `<=>` operator; score = 1 - distance.
+ *
+ * Accepts either a connection string (the adapter owns the client and
+ * `close()` ends it) or an existing postgres.js client — composition roots
+ * pass the content store's client so one process holds ONE pool to the
+ * database, not two; `close()` then leaves the shared client alone.
  */
 export function createPgVectorStore(
-  connectionString: string,
+  connection: string | PgVectorClient,
   opts: PgVectorOptions = {},
 ): VectorStore & { ensureSchema(): Promise<void>; close(): Promise<void> } {
-  const sql = postgres(connectionString);
+  const owned = typeof connection === 'string';
+  const sql = typeof connection === 'string' ? postgres(connection) : connection;
   const dimensions = opts.dimensions ?? 1536;
   const modelId = opts.modelId ?? 'unknown';
   let ready: Promise<void> | null = null;
@@ -120,7 +129,7 @@ export function createPgVectorStore(
       );
     },
     async close() {
-      await sql.end();
+      if (owned) await sql.end();
     },
   };
 }
