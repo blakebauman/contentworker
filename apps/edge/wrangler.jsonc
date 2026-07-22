@@ -114,8 +114,14 @@
     "AGENTS_ENRICH": "false",
     "AGENTS_MODERATE": "false",
     "AGENTS_AUTO_APPLY": "false",
+    // Alternate Anthropic endpoint (LLM gateway / egress proxy); empty = default.
+    "ANTHROPIC_BASE_URL": "",
     "EMBEDDINGS_PROVIDER": "",
     "EMBEDDINGS_DIM": "1536",
+    // EMBEDDINGS_PROVIDER=openai: any OpenAI-compatible /v1 endpoint (OpenAI,
+    // Ollama, vLLM, TEI); EMBEDDINGS_API_KEY via `wrangler secret put` if needed.
+    "EMBEDDINGS_BASE_URL": "",
+    "EMBEDDINGS_MODEL": "",
     // Staging runs persistent (Hyperdrive) but without R2/embeddings/Anthropic
     // configured; name those fakes explicitly so the boot guard accepts them.
     // PRODUCTION: set to "" (and configure the real adapters) — a persistent

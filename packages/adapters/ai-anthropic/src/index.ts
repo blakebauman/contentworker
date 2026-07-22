@@ -10,6 +10,11 @@ const MODEL_BY_TIER: Record<ModelTier, string> = {
 
 export interface AnthropicProviderOptions {
   apiKey?: string;
+  /**
+   * Alternate API base URL (LLM gateway, egress proxy, air-gapped mirror).
+   * Defaults to ANTHROPIC_BASE_URL, else the SDK's public endpoint.
+   */
+  baseUrl?: string;
   /** Effort for flagship/balanced tiers (not sent for `fast` — Haiku rejects it). */
   defaultEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }
@@ -61,7 +66,10 @@ function extractJson(text: string): unknown {
  * (output_config.format) when an outputSchema is supplied.
  */
 export function createAnthropicProvider(opts: AnthropicProviderOptions = {}): AIProvider {
-  const client = new Anthropic({ apiKey: opts.apiKey ?? process.env.ANTHROPIC_API_KEY });
+  const client = new Anthropic({
+    apiKey: opts.apiKey ?? process.env.ANTHROPIC_API_KEY,
+    baseURL: opts.baseUrl ?? process.env.ANTHROPIC_BASE_URL,
+  });
   const defaultEffort = opts.defaultEffort ?? 'medium';
 
   return {

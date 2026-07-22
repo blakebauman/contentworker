@@ -5,6 +5,7 @@ import {
 } from '@cw/adapter-ai-azure-openai';
 import { createS3BlobStore } from '@cw/adapter-blob-s3';
 import { createKvCache } from '@cw/adapter-cache-kv';
+import { createOpenAIEmbeddings } from '@cw/adapter-embeddings-openai';
 import { createCfQueueProducer } from '@cw/adapter-queue-cf';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createVectorizeStore } from '@cw/adapter-vector-vectorize';
@@ -165,7 +166,12 @@ export function makeAgents(env: EdgeEnv, ctx: AppContext, ai: AIProvider): Agent
 /** AI provider: same policy as the Node composition roots. */
 export function makeAI(env: EdgeEnv, fakes?: FakeAdapterBinding[]): AIProvider {
   if (env.AI_PROVIDER === 'azure-openai') return createAzureOpenAIProvider();
-  if (env.ANTHROPIC_API_KEY) return createAnthropicProvider({ apiKey: env.ANTHROPIC_API_KEY });
+  if (env.ANTHROPIC_API_KEY) {
+    return createAnthropicProvider({
+      apiKey: env.ANTHROPIC_API_KEY,
+      baseUrl: env.ANTHROPIC_BASE_URL || undefined,
+    });
+  }
   fakes?.push({
     key: 'ai',
     detail: 'StubAIProvider (placeholder generations) — set ANTHROPIC_API_KEY or AI_PROVIDER',
@@ -218,17 +224,26 @@ function makeBlob(env: EdgeEnv, fakes: FakeAdapterBinding[]): BlobStore {
 function makeRag(env: EdgeEnv, fakes: FakeAdapterBinding[]): RagDeps {
   // Explicit EMBEDDINGS_PROVIDER=local is informed consent to hash embeddings;
   // only the silent default (unset/unknown) counts as a fake.
-  if (env.EMBEDDINGS_PROVIDER !== 'azure-openai' && env.EMBEDDINGS_PROVIDER !== 'local') {
+  const provider = env.EMBEDDINGS_PROVIDER;
+  const dim = Number(env.EMBEDDINGS_DIM ?? 1536);
+  if (provider !== 'azure-openai' && provider !== 'openai' && provider !== 'local') {
     fakes.push({
       key: 'embeddings',
       detail:
-        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai, or =local to accept explicitly',
+        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai or =openai (any OpenAI-compatible endpoint), or =local to accept explicitly',
     });
   }
   const embeddings: EmbeddingsProvider =
-    env.EMBEDDINGS_PROVIDER === 'azure-openai'
+    provider === 'azure-openai'
       ? createAzureOpenAIEmbeddings()
-      : new LocalEmbeddingsProvider(Number(env.EMBEDDINGS_DIM ?? 1536));
+      : provider === 'openai'
+        ? createOpenAIEmbeddings({
+            baseUrl: env.EMBEDDINGS_BASE_URL,
+            apiKey: env.EMBEDDINGS_API_KEY,
+            model: env.EMBEDDINGS_MODEL,
+            dimensions: dim,
+          })
+        : new LocalEmbeddingsProvider(dim);
   if (!env.VECTORIZE) {
     fakes.push({
       key: 'vectors',

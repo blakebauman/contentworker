@@ -35,6 +35,7 @@
     "@cw/adapter-ai-anthropic": "workspace:*",
     "@cw/adapter-ai-azure-openai": "workspace:*",
     "@cw/adapter-blob-s3": "workspace:*",
+    "@cw/adapter-embeddings-openai": "workspace:*",
     "@cw/adapter-redis": "workspace:*",
     "@cw/adapter-store-postgres": "workspace:*",
     "@cw/adapter-vector-pgvector": "workspace:*",

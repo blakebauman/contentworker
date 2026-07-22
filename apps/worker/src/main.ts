@@ -3,6 +3,7 @@ import {
   createAzureOpenAIEmbeddings,
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
+import { createOpenAIEmbeddings } from '@cw/adapter-embeddings-openai';
 import { createHttpFunctionInvoker, createWebhookSender } from '@cw/adapter-http-effects';
 import {
   createRedisCache,
@@ -51,22 +52,25 @@ function makeRag(connectionString: string): RagDeps | undefined {
   if (!provider) return undefined;
   // Explicit 'local' is informed consent to hash embeddings; an unknown value
   // would otherwise silently select them. The worker always runs persistent.
-  if (provider !== 'azure-openai' && provider !== 'local') {
+  if (provider !== 'azure-openai' && provider !== 'openai' && provider !== 'local') {
     assertNoFakeAdapters({
       persistent: true,
       allowFakeAdapters: process.env.ALLOW_FAKE_ADAPTERS,
       fakes: [
         {
           key: 'embeddings',
-          detail: `unknown EMBEDDINGS_PROVIDER '${provider}' falls back to hash-based embeddings — use azure-openai, or local to accept explicitly`,
+          detail: `unknown EMBEDDINGS_PROVIDER '${provider}' falls back to hash-based embeddings — use azure-openai or openai (any OpenAI-compatible endpoint), or local to accept explicitly`,
         },
       ],
     });
   }
+  const dim = Number(process.env.EMBEDDINGS_DIM ?? 1536);
   const embeddings: EmbeddingsProvider =
     provider === 'azure-openai'
       ? createAzureOpenAIEmbeddings()
-      : new LocalEmbeddingsProvider(Number(process.env.EMBEDDINGS_DIM ?? 1536));
+      : provider === 'openai'
+        ? createOpenAIEmbeddings({ dimensions: dim })
+        : new LocalEmbeddingsProvider(dim);
   const vectors = createPgVectorStore(connectionString, {
     dimensions: embeddings.dimensions,
     modelId: embeddings.modelId,
