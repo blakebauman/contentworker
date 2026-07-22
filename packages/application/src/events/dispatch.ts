@@ -2,7 +2,12 @@ import type { DomainEvent } from '@cw/domain';
 import type { Cache, FunctionInvoker, WebhookSender } from '@cw/ports';
 import type { AppContext } from '../context.js';
 import { invokeFunctionsForEvent } from '../functions.js';
-import { type RagDeps, indexEntryEmbeddings, removeEntryEmbeddings } from '../rag.js';
+import {
+  type RagDeps,
+  indexEntryEmbeddings,
+  reindexEmbeddings,
+  removeEntryEmbeddings,
+} from '../rag.js';
 
 export interface DispatchDeps {
   readonly sender: WebhookSender;
@@ -26,6 +31,17 @@ export async function dispatchEvent(
   event: DomainEvent,
 ): Promise<void> {
   const scope = event.scope;
+
+  // Background reindex job: run the (bounded) embed loop here on the consumer,
+  // not on the triggering request. Nothing else applies to this event type.
+  if (event.type === 'search.reindex_requested') {
+    if (deps.rag) {
+      await reindexEmbeddings(deps.rag, ctx, scope, {
+        contentTypeApiId: event.contentTypeApiId,
+      });
+    }
+    return;
+  }
 
   // 1. Webhook fan-out.
   const webhooks = await ctx.store.webhooks.listByTopic(scope, event.type);

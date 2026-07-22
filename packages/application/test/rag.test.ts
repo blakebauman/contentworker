@@ -18,6 +18,7 @@ import {
   publishEntry,
   reindexEmbeddings,
   removeEntryEmbeddings,
+  requestReindex,
   semanticSearch,
 } from '../src/index.js';
 
@@ -192,7 +193,7 @@ describe('reindex embeddings', () => {
     });
   });
 
-  it('enforces a cooldown between reindex runs when a cache is present', async () => {
+  it('requestReindex enqueues an outbox event and enforces a cooldown', async () => {
     const entries = new Map<string, string>();
     const cache = {
       get: async (k: string) => entries.get(k) ?? null,
@@ -200,11 +201,12 @@ describe('reindex embeddings', () => {
       invalidateTag: async () => {},
     };
     const guarded: AppContext = { ...ctx, cache };
-    await publishArticle(scope, 'postgres relational database');
-    // First run succeeds and sets the cooldown.
-    await expect(reindexEmbeddings(deps, guarded, scope, {})).resolves.toBeTruthy();
-    // Second run within the window is rejected.
-    await expect(reindexEmbeddings(deps, guarded, scope, {})).rejects.toThrow(/cooldown/i);
+    // First request is accepted and appends a reindex event to the outbox.
+    await expect(requestReindex(guarded, scope, {})).resolves.toEqual({ enqueued: true });
+    const pending = await ctx.store.outbox.readPending(10);
+    expect(pending.some((e) => e.type === 'search.reindex_requested')).toBe(true);
+    // A second request within the window is rejected.
+    await expect(requestReindex(guarded, scope, {})).rejects.toThrow(/cooldown/i);
   });
 
   it('only touches the requested scope', async () => {

@@ -4,6 +4,8 @@ import {
   InMemoryCache,
   InMemoryContentStore,
   InMemoryEventBus,
+  InMemoryVectorStore,
+  LocalEmbeddingsProvider,
   RecordingWebhookSender,
   SequenceIdGenerator,
 } from '@cw/test-kit';
@@ -18,6 +20,7 @@ import {
   createSpace,
   createWebhook,
   publishEntry,
+  semanticSearch,
 } from '../src/index.js';
 
 const scope = { spaceId: 'shop', environmentId: 'main' };
@@ -140,6 +143,27 @@ describe('consumeEvent', () => {
     expect(runsForUnpublish).toEqual([]);
     expect(runsWithoutAgents).toEqual([]);
     expect(calls).toEqual([]);
+  });
+
+  it('runs a reindex when it consumes a search.reindex_requested event', async () => {
+    await publishEntry(ctx, scope, entryId);
+    const rag = {
+      embeddings: new LocalEmbeddingsProvider(256),
+      vectors: new InMemoryVectorStore(),
+    };
+    // Nothing indexed yet in this harness.
+    expect((await semanticSearch(rag, scope, 'V1', { topK: 5 })).length).toBe(0);
+
+    const reindexEvent: DomainEvent = {
+      id: 'evt-reindex',
+      type: 'search.reindex_requested',
+      scope,
+      occurredAt: '2026-01-01T00:00:00.000Z',
+    };
+    await consumeEvent(ctx, { sender, rag }, reindexEvent);
+
+    // The published entry is now embedded and searchable.
+    expect((await semanticSearch(rag, scope, 'V1', { topK: 5 })).length).toBeGreaterThan(0);
   });
 
   it('reports live-bus failures via onLiveError without failing the consume', async () => {

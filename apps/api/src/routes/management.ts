@@ -89,10 +89,10 @@ import {
   publishEntry,
   publishRelease,
   reassignTask,
-  reindexEmbeddings,
   relatedEntries,
   removeEntryFromRelease,
   reopenTask,
+  requestReindex,
   resolveTask,
   restoreVersion,
   revokeApiKey,
@@ -659,20 +659,20 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   // embedding-model change). Idempotent per entry; safe to re-run.
   app.post(
     `${BASE}/search/reindex`,
-    doc('AI & agents', 'Reindex embeddings for all published entries', {
+    doc('AI & agents', 'Request a reindex of all published entries', {
+      status: 202,
       description:
-        'Re-embeds every published entry in the environment (optionally one content ' +
-        'type) so content published before an embeddings change becomes semantically ' +
-        'searchable without a republish.',
+        'Enqueues a background reindex (via the outbox → queue) that re-embeds every ' +
+        'published entry in the environment (optionally one content type). Returns 202; ' +
+        'the work runs on the worker. Rate-limited per scope (429 if requested too soon).',
     }),
     requireScope(SCOPES.contentManage),
     async (c) => {
       const body = await parseBody(c, reindexBody);
-      return c.json(
-        await reindexEmbeddings(rag, ctx, scopeOf(c), {
-          contentTypeApiId: body.contentTypeApiId,
-        }),
-      );
+      const result = await requestReindex(ctx, scopeOf(c), {
+        contentTypeApiId: body.contentTypeApiId,
+      });
+      return c.json(result, 202);
     },
   );
   app.post(
