@@ -75,6 +75,9 @@ horizontally regardless; the split is operational isolation, not throughput.
 
 ## Semantics & tradeoffs vs the Node path
 
+The full side-by-side matrix (including the Node column) lives in
+[Consistency & guarantees](./consistency.md); the highlights for this target:
+
 - **Delivery cache staleness:** KV propagates writes eventually; a publish can
   be served stale from a remote PoP for up to ~60s (tag versions are re-read on
   every hit, so within-PoP invalidation is immediate). CDN-class semantics,
