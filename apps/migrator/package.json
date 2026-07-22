@@ -10,13 +10,13 @@
   "dependencies": {
     "@cw/adapter-store-postgres": "workspace:*",
     "@cw/adapter-vector-pgvector": "workspace:*",
+    "@cw/telemetry": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.5",
-    "@cw/telemetry": "workspace:*"
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
   "license": "Apache-2.0"

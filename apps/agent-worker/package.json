@@ -17,19 +17,19 @@
     "@cw/application": "workspace:*",
     "@cw/domain": "workspace:*",
     "@cw/ports": "workspace:*",
+    "@cw/telemetry": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "@temporalio/client": "^1.11.6",
     "@temporalio/worker": "^1.11.6",
     "@temporalio/workflow": "^1.11.6",
     "ioredis": "^5.4.2",
-    "uuid": "^11.0.3",
-    "@cw/telemetry": "workspace:*"
+    "tsx": "^4.19.2",
+    "uuid": "^11.0.3"
   },
   "devDependencies": {
     "@cw/agent-runtime": "workspace:*",
     "@temporalio/testing": "^1.11.6",
     "@types/node": "^22.20.0",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
