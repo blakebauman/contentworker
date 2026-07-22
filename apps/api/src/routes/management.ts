@@ -136,6 +136,51 @@ import {
 import { doc } from '../docs/openapi.js';
 import * as docs from '../docs/schemas.js';
 import { MAX_PAGE_LIMIT, clampCount } from '../query.js';
+import {
+  altTextBody,
+  appExtensionBody,
+  assetMetadataBody,
+  auditBody,
+  autofillBody,
+  broaderBody,
+  bulkEntriesBody,
+  canvasBody,
+  commentBody,
+  conceptBody,
+  contentTypeBody,
+  createAiActionBody,
+  createApiKeyBody,
+  createAssetBody,
+  createEntryBody,
+  createEnvironmentBody,
+  createFunctionBody,
+  createReleaseBody,
+  createSpaceBody,
+  createTaskBody,
+  draftEntryBody,
+  entryMetadataBody,
+  idsBody,
+  mergeBody,
+  parseBody,
+  previewLinkBody,
+  reindexBody,
+  releaseItemBody,
+  roleBody,
+  runAiActionBody,
+  scheduleBody,
+  schemeBody,
+  setAliasBody,
+  summarizeBody,
+  tagBody,
+  tierOnlyBody,
+  transitionBody,
+  translateBody,
+  updateEntryBody,
+  updateTaskBody,
+  updateWebhookBody,
+  webhookBody,
+  workflowBody,
+} from '../validation.js';
 
 // Reads the route's scope, preferring the alias-resolved environment id stamped
 // by environmentMiddleware over the raw `:env` param.
@@ -215,7 +260,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.spaceAdmin),
     async (c) => {
-      const body = await c.req.json();
+      const body = await parseBody(c, createSpaceBody);
       const created = await createSpace(ctx, body);
       return c.json({ id: created.spaceId, name: created.name }, 201);
     },
@@ -225,7 +270,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listEnvironments(ctx, c.req.param('space')) }),
   );
   app.post('/spaces/:space/environments', requireScope(SCOPES.spaceAdmin), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, createEnvironmentBody);
     await createEnvironment(ctx, c.req.param('space'), body.id, body.name);
     return c.json({ id: body.id }, 201);
   });
@@ -239,7 +284,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     '/spaces/:space/environment-aliases/:alias',
     requireScope(SCOPES.spaceAdmin),
     async (c) => {
-      const body = await c.req.json();
+      const body = await parseBody(c, setAliasBody);
       return c.json(
         await setEnvironmentAlias(
           ctx,
@@ -282,7 +327,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   // Apply selected content types/entries from source→target (additive).
   app.post('/spaces/:space/merge', requireScope(SCOPES.contentManage), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, mergeBody);
     return c.json(
       await mergeEnvironments(ctx, c.req.param('space'), body.source, body.target, {
         contentTypes: body.contentTypes,
@@ -310,25 +355,16 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.spaceAdmin),
     async (c) => {
-      const body = (await c.req.json()) as {
-        kind?: unknown;
-        name?: unknown;
-        scopes?: unknown;
-        roleId?: unknown;
-      };
-      const kind = body.kind;
-      if (kind !== 'cma' && kind !== 'cda' && kind !== 'cpa') {
-        throw new ValidationError([{ field: 'kind', message: 'kind must be cma, cda, or cpa' }]);
-      }
-      // spaceId is taken ONLY from the authorized route param and set last, so a
-      // caller-supplied `spaceId` in the body can never rebind the key to another
-      // tenant. Fields are picked explicitly rather than spread for the same reason.
+      const body = await parseBody(c, createApiKeyBody);
+      // spaceId is taken ONLY from the authorized route param, so a caller-supplied
+      // `spaceId` can never rebind the key to another tenant (the schema strips
+      // unknown keys, so it never reaches here regardless).
       const created = await createApiKey(ctx, hasher, {
         spaceId: c.req.param('space'),
-        kind,
-        name: typeof body.name === 'string' ? body.name : undefined,
-        scopes: Array.isArray(body.scopes) ? (body.scopes as string[]) : undefined,
-        roleId: typeof body.roleId === 'string' ? body.roleId : undefined,
+        kind: body.kind,
+        name: body.name,
+        scopes: body.scopes,
+        roleId: body.roleId,
       });
       // Return the raw token once; only its hash is stored.
       return c.json(
@@ -347,13 +383,15 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listRoles(ctx, c.req.param('space')) }),
   );
   app.post('/spaces/:space/roles', requireScope(SCOPES.spaceAdmin), async (c) =>
-    c.json(await createRole(ctx, c.req.param('space'), await c.req.json()), 201),
+    c.json(await createRole(ctx, c.req.param('space'), await parseBody(c, roleBody)), 201),
   );
   app.get('/spaces/:space/roles/:id', requireScope(SCOPES.spaceAdmin), async (c) =>
     c.json(await getRole(ctx, c.req.param('space'), c.req.param('id'))),
   );
   app.put('/spaces/:space/roles/:id', requireScope(SCOPES.spaceAdmin), async (c) =>
-    c.json(await updateRole(ctx, c.req.param('space'), c.req.param('id'), await c.req.json())),
+    c.json(
+      await updateRole(ctx, c.req.param('space'), c.req.param('id'), await parseBody(c, roleBody)),
+    ),
   );
   app.delete('/spaces/:space/roles/:id', requireScope(SCOPES.spaceAdmin), async (c) => {
     await deleteRole(ctx, c.req.param('space'), c.req.param('id'));
@@ -377,7 +415,11 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     doc('Content types', 'Create a content type', { ok: docs.contentType, status: 201 }),
     requireScope(SCOPES.contentManage),
     async (c) => {
-      const ct = await createContentType(ctx, scopeOf(c), await c.req.json());
+      const ct = await createContentType(
+        ctx,
+        scopeOf(c),
+        (await parseBody(c, contentTypeBody)) as unknown as Parameters<typeof createContentType>[2],
+      );
       return c.json(ct, 201);
     },
   );
@@ -419,24 +461,24 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     doc('Entries', 'Create a draft entry', { ok: docs.createdEntry, status: 201 }),
     requireScope(SCOPES.contentWrite),
     async (c) => {
-      const body = await c.req.json();
+      const body = await parseBody(c, createEntryBody);
       const principal = c.get('principal');
       authorizeContent(principal, 'write', body.contentTypeApiId);
       assertWritableFields(principal, body.contentTypeApiId, body.fields ?? {});
-      const view = await createEntry(ctx, scopeOf(c), body);
+      const view = await createEntry(ctx, scopeOf(c), body as Parameters<typeof createEntry>[2]);
       return c.json(view, 201);
     },
   );
   // AI-draft an entry's fields. Generated values pass the same validators a
   // human write does, so an agent can't produce an entry a person couldn't.
   app.post(`${BASE}/entries/generate`, requireScope(SCOPES.contentWrite), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, draftEntryBody);
     authorizeContent(c.get('principal'), 'write', body.contentTypeApiId);
     return c.json(await draftEntry(ctx, ai, scopeOf(c), body));
   });
   // Canvas: map free-form prose into structured fields (same validation gate).
   app.post(`${BASE}/entries/canvas`, requireScope(SCOPES.contentWrite), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, canvasBody);
     authorizeContent(c.get('principal'), 'write', body.contentTypeApiId);
     return c.json(await canvasToEntry(ctx, ai, scopeOf(c), body));
   });
@@ -456,10 +498,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   app.post(`${BASE}/entries/:id/preview-link`, requireScope(SCOPES.contentWrite), async (c) => {
     await guardEntry(c, c.req.param('id'), 'read');
-    const body = (await c.req.json().catch(() => ({}))) as {
-      ttlHours?: number;
-      previewBaseUrl?: string;
-    };
+    const body = await parseBody(c, previewLinkBody);
     const origin = c.req.header('origin') ?? '';
     const link = await createPreviewLink(ctx, hasher, scopeOf(c), c.req.param('id'), {
       ttlHours: body.ttlHours,
@@ -477,7 +516,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     doc('Entries', 'Save a new draft version', { ok: docs.entry }),
     requireScope(SCOPES.contentWrite),
     async (c) => {
-      const body = await c.req.json();
+      const body = await parseBody(c, updateEntryBody);
       const principal = c.get('principal');
       if (principal.contentGrants) {
         const { entry } = await getEntry(ctx, scopeOf(c), c.req.param('id'));
@@ -489,7 +528,15 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
   // --- AI content operations over an entry -------------------------------
   app.post(`${BASE}/entries/:id/translate`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(await translateEntry(ctx, ai, scopeOf(c), c.req.param('id'), await c.req.json())),
+    c.json(
+      await translateEntry(
+        ctx,
+        ai,
+        scopeOf(c),
+        c.req.param('id'),
+        await parseBody(c, translateBody),
+      ),
+    ),
   );
   app.post(`${BASE}/entries/:id/summarize`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(
@@ -498,12 +545,14 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         ai,
         scopeOf(c),
         c.req.param('id'),
-        await c.req.json().catch(() => ({})),
+        await parseBody(c, summarizeBody),
       ),
     ),
   );
   app.post(`${BASE}/entries/:id/autofill`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(await autofillField(ctx, ai, scopeOf(c), c.req.param('id'), await c.req.json())),
+    c.json(
+      await autofillField(ctx, ai, scopeOf(c), c.req.param('id'), await parseBody(c, autofillBody)),
+    ),
   );
   app.post(`${BASE}/entries/:id/suggest-tags`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(
@@ -512,7 +561,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         ai,
         scopeOf(c),
         c.req.param('id'),
-        await c.req.json().catch(() => ({})),
+        await parseBody(c, tierOnlyBody),
       ),
     ),
   );
@@ -521,7 +570,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listFunctions(ctx, scopeOf(c)) }),
   );
   app.post(`${BASE}/functions`, requireScope(SCOPES.contentManage), async (c) =>
-    c.json(await createFunction(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(await createFunction(ctx, scopeOf(c), await parseBody(c, createFunctionBody)), 201),
   );
   app.delete(`${BASE}/functions/:id`, requireScope(SCOPES.contentManage), async (c) => {
     await deleteFunction(ctx, scopeOf(c), c.req.param('id'));
@@ -533,7 +582,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listAppExtensions(ctx, scopeOf(c)) }),
   );
   app.post(`${BASE}/app-extensions`, requireScope(SCOPES.contentManage), async (c) =>
-    c.json(await createAppExtension(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(await createAppExtension(ctx, scopeOf(c), await parseBody(c, appExtensionBody)), 201),
   );
   app.delete(`${BASE}/app-extensions/:id`, requireScope(SCOPES.contentManage), async (c) => {
     await deleteAppExtension(ctx, scopeOf(c), c.req.param('id'));
@@ -542,36 +591,35 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
 
   // --- bulk operations ---------------------------------------------------
   app.post(`${BASE}/bulk/entries`, requireScope(SCOPES.contentWrite), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, bulkEntriesBody);
     const principal = c.get('principal');
     for (const item of body.items ?? []) {
       authorizeContent(principal, 'write', item.contentTypeApiId);
       assertWritableFields(principal, item.contentTypeApiId, item.fields ?? {});
     }
-    return c.json(await bulkCreateEntries(ctx, scopeOf(c), body.items ?? []), 201);
+    return c.json(
+      await bulkCreateEntries(
+        ctx,
+        scopeOf(c),
+        (body.items ?? []) as Parameters<typeof bulkCreateEntries>[2],
+      ),
+      201,
+    );
   });
   app.post(`${BASE}/bulk/entries/publish`, requireScope(SCOPES.contentPublish), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, idsBody);
     for (const id of body.ids ?? []) await guardEntry(c, id, 'publish');
     return c.json(await bulkEntryAction(ctx, scopeOf(c), 'publish', body.ids ?? []));
   });
   app.post(`${BASE}/bulk/entries/unpublish`, requireScope(SCOPES.contentPublish), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, idsBody);
     for (const id of body.ids ?? []) await guardEntry(c, id, 'publish');
     return c.json(await bulkEntryAction(ctx, scopeOf(c), 'unpublish', body.ids ?? []));
   });
 
   // --- agent actions (audit → work packages) -----------------------------
   app.post(`${BASE}/entries/:id/audit`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(
-      await auditEntry(
-        ctx,
-        ai,
-        scopeOf(c),
-        c.req.param('id'),
-        await c.req.json().catch(() => ({})),
-      ),
-    ),
+    c.json(await auditEntry(ctx, ai, scopeOf(c), c.req.param('id'), await parseBody(c, auditBody))),
   );
   // On-demand moderation: classify the entry's text; a flagged result is a
   // recorded hold (`flagged: true`), not a state change — callers decide.
@@ -619,13 +667,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.contentManage),
     async (c) => {
-      const body = ((await c.req.json().catch(() => null)) ?? {}) as {
-        contentTypeApiId?: unknown;
-      };
+      const body = await parseBody(c, reindexBody);
       return c.json(
         await reindexEmbeddings(rag, ctx, scopeOf(c), {
-          contentTypeApiId:
-            typeof body.contentTypeApiId === 'string' ? body.contentTypeApiId : undefined,
+          contentTypeApiId: body.contentTypeApiId,
         }),
       );
     },
@@ -751,7 +796,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.contentWrite),
     async (c) => {
-      const created = await createAsset(ctx, blob, scopeOf(c), await c.req.json());
+      const created = await createAsset(ctx, blob, scopeOf(c), await parseBody(c, createAssetBody));
       return c.json(created, 201);
     },
   );
@@ -759,7 +804,14 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json(await getAsset(ctx, scopeOf(c), c.req.param('id'))),
   );
   app.patch(`${BASE}/assets/:id/metadata`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(await setAssetMetadata(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+    c.json(
+      await setAssetMetadata(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        await parseBody(c, assetMetadataBody),
+      ),
+    ),
   );
   app.get(`${BASE}/assets/:id/usage`, requireScope(SCOPES.previewRead), async (c) =>
     c.json({ items: await getAssetUsage(ctx, scopeOf(c), c.req.param('id')) }),
@@ -781,19 +833,13 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         ai,
         scopeOf(c),
         c.req.param('id'),
-        await c.req.json().catch(() => ({})),
+        await parseBody(c, altTextBody),
       ),
     ),
   );
   app.post(`${BASE}/assets/:id/auto-tag`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(
-      await autoTagAsset(
-        ctx,
-        ai,
-        scopeOf(c),
-        c.req.param('id'),
-        await c.req.json().catch(() => ({})),
-      ),
+      await autoTagAsset(ctx, ai, scopeOf(c), c.req.param('id'), await parseBody(c, tierOnlyBody)),
     ),
   );
   app.post(`${BASE}/assets/:id/published`, requireScope(SCOPES.contentPublish), async (c) =>
@@ -808,7 +854,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listAIActions(ctx, scopeOf(c)) }),
   );
   app.post(`${BASE}/ai-actions`, requireScope(SCOPES.contentManage), async (c) =>
-    c.json(await createAIAction(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(await createAIAction(ctx, scopeOf(c), await parseBody(c, createAiActionBody)), 201),
   );
   app.delete(`${BASE}/ai-actions/:id`, requireScope(SCOPES.contentManage), async (c) => {
     await deleteAIAction(ctx, scopeOf(c), c.req.param('id'));
@@ -821,7 +867,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         ai,
         scopeOf(c),
         c.req.param('id'),
-        await c.req.json().catch(() => ({})),
+        await parseBody(c, runAiActionBody),
       ),
     ),
   );
@@ -855,11 +901,27 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     },
   );
   app.post(`${BASE}/webhooks`, requireScope(SCOPES.spaceAdmin), async (c) =>
-    c.json(webhookSummary(await createWebhook(ctx, scopeOf(c), await c.req.json())), 201),
+    c.json(
+      webhookSummary(
+        await createWebhook(
+          ctx,
+          scopeOf(c),
+          (await parseBody(c, webhookBody)) as Parameters<typeof createWebhook>[2],
+        ),
+      ),
+      201,
+    ),
   );
   app.put(`${BASE}/webhooks/:id`, requireScope(SCOPES.spaceAdmin), async (c) =>
     c.json(
-      webhookSummary(await updateWebhook(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+      webhookSummary(
+        await updateWebhook(
+          ctx,
+          scopeOf(c),
+          c.req.param('id'),
+          (await parseBody(c, updateWebhookBody)) as Parameters<typeof updateWebhook>[3],
+        ),
+      ),
     ),
   );
   app.delete(`${BASE}/webhooks/:id`, requireScope(SCOPES.spaceAdmin), async (c) => {
@@ -881,7 +943,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listReleases(ctx, scopeOf(c)) }),
   );
   app.post(`${BASE}/releases`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(await createRelease(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(await createRelease(ctx, scopeOf(c), await parseBody(c, createReleaseBody)), 201),
   );
   app.get(`${BASE}/releases/:id`, requireScope(SCOPES.previewRead), async (c) =>
     c.json(await getRelease(ctx, scopeOf(c), c.req.param('id'))),
@@ -891,7 +953,14 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.body(null, 204);
   });
   app.post(`${BASE}/releases/:id/items`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(await addEntryToRelease(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+    c.json(
+      await addEntryToRelease(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        await parseBody(c, releaseItemBody),
+      ),
+    ),
   );
   app.delete(`${BASE}/releases/:id/items/:entityId`, requireScope(SCOPES.contentWrite), async (c) =>
     c.json(
@@ -909,7 +978,14 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
   );
   app.post(`${BASE}/scheduled-actions`, requireScope(SCOPES.contentPublish), async (c) =>
-    c.json(await scheduleAction(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(
+      await scheduleAction(
+        ctx,
+        scopeOf(c),
+        (await parseBody(c, scheduleBody)) as unknown as Parameters<typeof scheduleAction>[2],
+      ),
+      201,
+    ),
   );
   app.delete(`${BASE}/scheduled-actions/:id`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await cancelScheduledAction(ctx, scopeOf(c), c.req.param('id'))),
@@ -921,7 +997,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.json({ items: await listComments(ctx, scopeOf(c), c.req.param('id')) });
   });
   app.post(`${BASE}/entries/:id/comments`, requireScope(SCOPES.contentWrite), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, commentBody);
     const created = await addComment(ctx, scopeOf(c), {
       entryId: c.req.param('id'),
       body: body.body,
@@ -941,7 +1017,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     return c.json({ items: await listTasks(ctx, scopeOf(c), c.req.param('id')) });
   });
   app.post(`${BASE}/entries/:id/tasks`, requireScope(SCOPES.contentWrite), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, createTaskBody);
     const created = await createTask(ctx, scopeOf(c), {
       entryId: c.req.param('id'),
       body: body.body,
@@ -951,7 +1027,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   });
   // PUT applies one change: resolve/reopen (status) or reassign (assignee).
   app.put(`${BASE}/tasks/:id`, requireScope(SCOPES.contentWrite), async (c) => {
-    const body = await c.req.json();
+    const body = await parseBody(c, updateTaskBody);
     const id = c.req.param('id');
     const scope = scopeOf(c);
     if (body.status === 'resolved') return c.json(await resolveTask(ctx, scope, id));
@@ -970,7 +1046,14 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listWorkflows(ctx, scopeOf(c)) }),
   );
   app.post(`${BASE}/workflows`, requireScope(SCOPES.contentManage), async (c) =>
-    c.json(await defineWorkflow(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(
+      await defineWorkflow(
+        ctx,
+        scopeOf(c),
+        (await parseBody(c, workflowBody)) as Parameters<typeof defineWorkflow>[2],
+      ),
+      201,
+    ),
   );
   app.get(`${BASE}/workflows/:id`, requireScope(SCOPES.previewRead), async (c) =>
     c.json(await getWorkflow(ctx, scopeOf(c), c.req.param('id'))),
@@ -989,7 +1072,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     `${BASE}/entries/:id/workflow/transition`,
     requireScope(SCOPES.previewRead),
     async (c) => {
-      const body = await c.req.json();
+      const body = await parseBody(c, transitionBody);
       return c.json(
         await transitionEntry(
           ctx,
@@ -1006,7 +1089,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listSchemes(ctx, scopeOf(c)) }),
   );
   app.post(`${BASE}/taxonomy/schemes`, requireScope(SCOPES.contentManage), async (c) =>
-    c.json(await createScheme(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(await createScheme(ctx, scopeOf(c), await parseBody(c, schemeBody)), 201),
   );
   app.delete(`${BASE}/taxonomy/schemes/:id`, requireScope(SCOPES.contentManage), async (c) => {
     await deleteScheme(ctx, scopeOf(c), c.req.param('id'));
@@ -1017,13 +1100,13 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listConcepts(ctx, scopeOf(c), c.req.query('scheme')) }),
   );
   app.post(`${BASE}/taxonomy/concepts`, requireScope(SCOPES.contentManage), async (c) =>
-    c.json(await createConcept(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(await createConcept(ctx, scopeOf(c), await parseBody(c, conceptBody)), 201),
   );
   app.put(
     `${BASE}/taxonomy/concepts/:id/broader`,
     requireScope(SCOPES.contentManage),
     async (c) => {
-      const body = await c.req.json();
+      const body = await parseBody(c, broaderBody);
       return c.json(
         await setConceptBroader(ctx, scopeOf(c), c.req.param('id'), body.broaderId ?? null),
       );
@@ -1038,7 +1121,7 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     c.json({ items: await listTags(ctx, scopeOf(c)) }),
   );
   app.post(`${BASE}/taxonomy/tags`, requireScope(SCOPES.contentManage), async (c) =>
-    c.json(await createTag(ctx, scopeOf(c), await c.req.json()), 201),
+    c.json(await createTag(ctx, scopeOf(c), await parseBody(c, tagBody)), 201),
   );
   app.delete(`${BASE}/taxonomy/tags/:id`, requireScope(SCOPES.contentManage), async (c) => {
     await deleteTag(ctx, scopeOf(c), c.req.param('id'));
@@ -1053,7 +1136,14 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     );
   });
   app.put(`${BASE}/entries/:id/metadata`, requireScope(SCOPES.contentWrite), async (c) =>
-    c.json(await setEntryMetadata(ctx, scopeOf(c), c.req.param('id'), await c.req.json())),
+    c.json(
+      await setEntryMetadata(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        await parseBody(c, entryMetadataBody),
+      ),
+    ),
   );
 
   return app;
