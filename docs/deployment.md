@@ -89,6 +89,20 @@ supply only what differs.
 | migrator | Job (pre-install/upgrade hook) | Runs migrations before app pods start |
 | postgres / redis | StatefulSet / Deployment | **bundled for local only**; managed services in cloud |
 
+### Worker autoscaling: CPU HPA or KEDA queue depth
+
+The worker ships with an optional CPU HPA (`worker.autoscaling`), but CPU is a
+poor proxy for its real load — the BullMQ backlog is. With
+[KEDA](https://keda.sh) installed in the cluster, `worker.keda.enabled: true`
+renders a `ScaledObject` that scales the worker Deployment on the events
+wait-list length (`bull:cw.events:wait`, threshold `worker.keda.listLength`
+jobs per replica, between `minReplicas` and `maxReplicas`). Set
+`worker.keda.redisAddress` (host:port — KEDA cannot parse `REDIS_URL`) and,
+for AUTH-enabled Redis, point `worker.keda.passwordSecretKey` at the password
+key in the platform secret (rendered as a `TriggerAuthentication`). While KEDA
+is enabled the chart suppresses the worker's CPU HPA so the two controllers
+never fight over replicas.
+
 ### Monolith vs. split API
 
 - **Monolith** (`api.split.enabled: false`, default): one `api` Deployment with `ROLE=all`.
