@@ -83,6 +83,43 @@ Hooks (all return `AsyncState<T> = { data?: T; error?: Error; loading: boolean }
 
 SSR-safe: no fetch happens on the server unless a hook is actually invoked.
 
+## `@cw/sdk-vue` — Vue 3 composables
+
+The same surface as the React hooks, as composables. Install the client once as an app
+plugin; inputs accept plain values, refs, or getters and re-fetch on change.
+
+```ts
+// main.ts (Nuxt: inside a plugin — nuxtApp.vueApp.use(...))
+import { createDeliveryClient } from '@cw/sdk-core';
+import { createContentworker } from '@cw/sdk-vue';
+
+app.use(createContentworker(createDeliveryClient({ baseUrl, space, environment, token })));
+```
+
+```vue
+<script setup lang="ts">
+import { useEntry } from '@cw/sdk-vue';
+const props = defineProps<{ id: string }>();
+// Getter input: re-fetches whenever props.id changes.
+const { data, error, loading } = useEntry(() => props.id, { locale: 'en-US' });
+</script>
+```
+
+Composables (all return `AsyncRefs<T> = { data, error, loading }` as refs):
+
+- `useEntry<F>(id, { locale?, include? })`
+- `useEntries<F>(query?)`
+- `useSemanticSearch(query, { topK? })` — returns `[]` for an empty query (no request)
+- `useDeliveryClient()` — the injected client
+
+Fetching starts on mount (client-side), matching the React hooks' SSR behavior — this
+holds outside components too (plugins, stores): on the server nothing fetches. Rapid
+input changes are race-safe (stale settlements are discarded) and a re-fetch clears the
+previous data. Query tracking is top-level: replace the query or its nested
+`filters`/`order` arrays (or pass a getter) — in-place mutation of a nested element is
+not observed. For server-fetched Nuxt data, wrap the client's promise methods in
+`useAsyncData` instead.
+
 ## `@cw/sdk-edge` — tiny single-locale client
 
 Minimal client for IoT, wearables, and kiosks. Always resolves to **one locale** and supports
@@ -104,6 +141,7 @@ client locale (no locale nesting).
 | --- | --- |
 | Node/SSR/backend, or building your own integration | `@cw/sdk-core` |
 | React apps | `@cw/sdk-web` |
+| Vue 3 / Nuxt apps | `@cw/sdk-vue` |
 | Constrained devices, single-locale, minimal payload | `@cw/sdk-edge` |
 | React Native apps with offline sync | `@cw/sdk-react-native` |
 | Email campaigns from republished content | `@cw/sdk-email` |
