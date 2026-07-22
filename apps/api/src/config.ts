@@ -4,8 +4,19 @@
  */
 export type Role = 'all' | 'management' | 'delivery' | 'preview';
 
+/**
+ * True when this deployment mounts the given API surface. ROLE is a single
+ * role or a comma-separated union (e.g. `delivery,preview` for a scale-out
+ * read plane that serves drafts too); `all` mounts everything.
+ */
+export function mountsRole(config: Pick<ApiConfig, 'role'>, role: Exclude<Role, 'all'>): boolean {
+  const roles = config.role.split(',').map((s) => s.trim());
+  return roles.includes('all') || roles.includes(role);
+}
+
 export interface ApiConfig {
-  readonly role: Role;
+  /** One {@link Role}, or a comma-separated union — check via {@link mountsRole}. */
+  readonly role: string;
   readonly port: number;
   /** When absent, an in-memory store is used (dev / tests / demos). */
   readonly databaseUrl?: string;
@@ -74,8 +85,12 @@ export interface ApiConfig {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
-  const role = (env.ROLE ?? 'all') as Role;
-  if (!['all', 'management', 'preview', 'delivery'].includes(role)) {
+  const role = (env.ROLE ?? 'all').trim();
+  const roles = role.split(',').map((s) => s.trim());
+  if (
+    roles.length === 0 ||
+    roles.some((r) => !['all', 'management', 'preview', 'delivery'].includes(r))
+  ) {
     throw new Error(`Invalid ROLE "${role}"`);
   }
   let oidcGroupRoleMap: Record<string, string> = {};

@@ -68,10 +68,46 @@ pnpm --filter @cw/edge exec wrangler dev -e demo   # zero-infra demo (in-memory 
 ## Scale-out (enterprise)
 
 One deploy is a complete system. To isolate blast radius and limits at scale,
-deploy the same script per role with wrangler environments — `env.delivery`,
-`env.management`, `env.pipeline` — overriding `ROLE` and routes, and attach the
-`cw-events` consumer only to the pipeline deployment. Workers autoscale
-horizontally regardless; the split is operational isolation, not throughput.
+the same script ships as three role-isolated workers via the configured
+wrangler environments (Workers autoscale horizontally regardless; the split is
+operational isolation, not throughput):
+
+- **`cw-edge-pipeline`** — the event backbone: queue consumers (`cw-events`,
+  `cw-agents`, DLQ), the cron sweeper, agents — and the **owner of every
+  Durable Object class and the AgentWorkflow**. Durable Objects live in
+  exactly one worker; the other roles bind into this one via `script_name`,
+  so all three share the same live hub, rate-limit, and budget state.
+- **`cw-edge-management`** — Management API + MCP + the admin SPA; produces
+  onto `cw-events` (outbox nudges) and signals review-watcher Workflows.
+- **`cw-edge-delivery`** — the public read plane: `ROLE=delivery,preview`
+  mounts the Delivery + Preview APIs and the DO-served SSE hub. Read-only for
+  content: no queue producer, no cron.
+
+```bash
+# Deploy order matters — pipeline first (it creates the DO/Workflow classes):
+wrangler deploy -e pipeline
+wrangler deploy -e management     # build the admin SPA first (assets)
+wrangler deploy -e delivery
+```
+
+Secrets are per-worker (`wrangler secret put <NAME> -e <env>`). Every worker
+needs `ADMIN_TOKEN`, `TOKEN_PEPPER`, `CMA_KEY`, `CDA_KEY`, `CPA_KEY`
+(`REQUIRE_SECURE_SECRETS=true` refuses dev defaults) — set the **same values
+on all three**: they share one database, and a per-worker `TOKEN_PEPPER`
+would break API-key auth across workers. Management additionally needs
+`SESSION_SECRET` + `MCP_TOKEN`; management + pipeline need
+`ANTHROPIC_API_KEY`. Attach zone routes per env in `wrangler.jsonc`
+(commented placeholders); pipeline is intentionally unreachable over HTTP
+(`workers_dev: false`, no routes).
+
+Per-env vars are deliberately minimal (code defaults + the fail-closed adapter
+guard catch drift). The Hyperdrive/KV/Vectorize ids are the same shared
+resources as the all-in-one deployment — but scale-out **replaces** the
+all-in-one `cw-edge` worker rather than running beside it: a queue can have
+only one consumer worker, and the Workflow name `cw-agent` is account-unique,
+so `wrangler deploy -e pipeline` fails while `cw-edge` still holds them.
+Cut over by deleting the all-in-one worker (or redeploying it without queue
+consumers and the workflow) before deploying pipeline.
 
 ## Semantics & tradeoffs vs the Node path
 

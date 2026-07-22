@@ -20,7 +20,7 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 
 | Var | Default | Purpose |
 | --- | --- | --- |
-| `ROLE` | `all` | API surface: `all` / `management` / `delivery` / `preview` |
+| `ROLE` | `all` | API surface: `all` / `management` / `delivery` / `preview`, or a comma-separated union (e.g. `delivery,preview`) |
 | `PORT` | `8787` (api), `8788` (mcp-server) | HTTP listen port |
 | `DATABASE_URL` | — | Postgres connection string; absent → in-memory store |
 | `REDIS_URL` | — | Redis connection string; absent → no cache (and the worker won't start) |
