@@ -1,4 +1,5 @@
 import type {
+  AgentSchedule,
   ApiKey,
   Asset,
   Comment,
@@ -49,6 +50,7 @@ export interface ContentStore {
   readonly agentRuns: AgentRunRepo;
   readonly releases: ReleaseRepo;
   readonly scheduledActions: ScheduledActionRepo;
+  readonly agentSchedules: AgentScheduleRepo;
   readonly comments: CommentRepo;
   readonly tasks: TaskRepo;
   readonly workflows: WorkflowRepo;
@@ -331,6 +333,41 @@ export interface ScheduledActionRepo {
   findDue(now: string, limit?: number): Promise<ScopedScheduledAction[]>;
 }
 
+/** A due agent schedule paired with its scope (cross-scope worker poll). */
+export interface ScopedAgentSchedule {
+  readonly scope: Scope;
+  readonly schedule: AgentSchedule;
+}
+
+export interface AgentScheduleRepo {
+  create(scope: Scope, schedule: AgentSchedule): Promise<void>;
+  get(scope: Scope, id: string): Promise<AgentSchedule | null>;
+  list(scope: Scope): Promise<AgentSchedule[]>;
+  save(scope: Scope, schedule: AgentSchedule): Promise<void>;
+  delete(scope: Scope, id: string): Promise<void>;
+  /** Enabled schedules due at/before `now`, across every scope, oldest first. */
+  findDue(now: string, limit?: number): Promise<ScopedAgentSchedule[]>;
+  /**
+   * Optimistic claim of one due firing: advances `nextRunAt` from
+   * `expectedNextRunAt` to `nextRunAt` iff it still holds that value. Returns
+   * false when another runner won the race — concurrent workers (replicas,
+   * rolling updates, worker + edge cron) then never double-run a firing.
+   */
+  claimNextRun(
+    scope: Scope,
+    id: string,
+    expectedNextRunAt: string,
+    nextRunAt: string,
+  ): Promise<boolean>;
+  /** Persists only a run's window cursor — never the user-editable fields, so
+   *  a concurrent PATCH can't be clobbered by a completing run. */
+  saveRunState(
+    scope: Scope,
+    id: string,
+    state: { lastRunAt: string; cursorEntryId?: string },
+  ): Promise<void>;
+}
+
 /** Space-level configuration needed for validation and locale fallback. */
 export interface SpaceConfig {
   readonly spaceId: string;
@@ -412,6 +449,15 @@ export interface EntryQuery {
    * publishes/unpublishes, unlike `skip` (used by the resumable reindex job).
    */
   readonly afterEntryId?: string;
+  /**
+   * Compound keyset cursor in publish order: only entries strictly after
+   * `(publishedAt, entryId)` — i.e. published later, or published at the same
+   * instant with a greater entry id. Matches the default
+   * `publishedAt, entryId` ordering, so paging is exact across
+   * same-transaction publishes that share a publish instant (used by agent
+   * schedules' delta windows).
+   */
+  readonly after?: { readonly publishedAt: string; readonly entryId: string };
   /** Field-level predicates (all must match). `field` is a field apiId or `sys.*`. */
   readonly filters?: readonly QueryFilter[];
   /** Sort keys, applied in order. */

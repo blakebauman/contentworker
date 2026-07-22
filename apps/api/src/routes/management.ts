@@ -11,6 +11,7 @@ import {
   canvasToEntry,
   compareEnvironments,
   createAIAction,
+  createAgentSchedule,
   createApiKey,
   createAppExtension,
   createAsset,
@@ -29,6 +30,7 @@ import {
   createWebhook,
   defineWorkflow,
   deleteAIAction,
+  deleteAgentSchedule,
   deleteAppExtension,
   deleteComment,
   deleteConcept,
@@ -60,6 +62,7 @@ import {
   getWorkflow,
   listAIActions,
   listAgentRuns,
+  listAgentSchedules,
   listApiKeys,
   listAppExtensions,
   listAssets,
@@ -109,6 +112,7 @@ import {
   translateEntry,
   unpublishAsset,
   unpublishEntry,
+  updateAgentSchedule,
   updateEntry,
   updateRole,
   updateWebhook,
@@ -137,6 +141,8 @@ import { doc } from '../docs/openapi.js';
 import * as docs from '../docs/schemas.js';
 import { MAX_PAGE_LIMIT, clampCount } from '../query.js';
 import {
+  agentScheduleBody,
+  agentSchedulePatchBody,
   altTextBody,
   appExtensionBody,
   assetMetadataBody,
@@ -989,6 +995,28 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
   app.delete(`${BASE}/scheduled-actions/:id`, requireScope(SCOPES.contentPublish), async (c) =>
     c.json(await cancelScheduledAction(ctx, scopeOf(c), c.req.param('id'))),
   );
+
+  // --- agent schedules (recurring agent jobs) ------------------------------
+  app.get(`${BASE}/agent-schedules`, requireScope(SCOPES.previewRead), async (c) =>
+    c.json({ items: await listAgentSchedules(ctx, scopeOf(c)) }),
+  );
+  app.post(`${BASE}/agent-schedules`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await createAgentSchedule(ctx, scopeOf(c), await parseBody(c, agentScheduleBody)), 201),
+  );
+  app.patch(`${BASE}/agent-schedules/:id`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(
+      await updateAgentSchedule(
+        ctx,
+        scopeOf(c),
+        c.req.param('id'),
+        await parseBody(c, agentSchedulePatchBody),
+      ),
+    ),
+  );
+  app.delete(`${BASE}/agent-schedules/:id`, requireScope(SCOPES.contentPublish), async (c) => {
+    await deleteAgentSchedule(ctx, scopeOf(c), c.req.param('id'));
+    return c.body(null, 204);
+  });
 
   // --- comments (on entries) ---------------------------------------------
   app.get(`${BASE}/entries/:id/comments`, requireScope(SCOPES.previewRead), async (c) => {

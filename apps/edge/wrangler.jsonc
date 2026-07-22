@@ -133,6 +133,8 @@
     "AGENTS_ENRICH": "false",
     "AGENTS_MODERATE": "false",
     "AGENTS_AUTO_APPLY": "false",
+    // Recurring agent jobs run from the cron trigger when enabled.
+    "AGENTS_SCHEDULES": "false",
     // Alternate Anthropic endpoint (LLM gateway / egress proxy); empty = default.
     "ANTHROPIC_BASE_URL": "",
     "EMBEDDINGS_PROVIDER": "",

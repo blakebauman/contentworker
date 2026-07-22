@@ -1,4 +1,5 @@
 import {
+  type AgentSchedule,
   type ApiKey,
   type Asset,
   type Comment,
@@ -28,6 +29,7 @@ import type {
   AIActionRepo,
   AgentRunRecord,
   AgentRunRepo,
+  AgentScheduleRepo,
   AppExtension,
   AppExtensionRepo,
   AssetRepo,
@@ -194,6 +196,13 @@ export class InMemoryContentStore implements ContentStore {
         const cursor = query.afterEntryId;
         rows = rows.filter((r) => r.entryId > cursor);
       }
+      if (query.after) {
+        const { publishedAt, entryId } = query.after;
+        rows = rows.filter(
+          (r) =>
+            r.publishedAt > publishedAt || (r.publishedAt === publishedAt && r.entryId > entryId),
+        );
+      }
       // Keyset paging (afterEntryId, '' = from the start) orders by entryId
       // (stable cursor); the default is publishedAt asc so a `since` cursor
       // advances deterministically. Explicit `order` overrides in runEntryQuery.
@@ -208,7 +217,11 @@ export class InMemoryContentStore implements ContentStore {
             ? -1
             : a.publishedAt > b.publishedAt
               ? 1
-              : 0,
+              : a.entryId < b.entryId
+                ? -1
+                : a.entryId > b.entryId
+                  ? 1
+                  : 0,
       );
       const filtered = runEntryQuery(
         rows,
@@ -500,6 +513,54 @@ export class InMemoryContentStore implements ContentStore {
         .filter((r) => r.action.status === 'pending' && r.action.scheduledFor <= now)
         .sort((a, b) => (a.action.scheduledFor < b.action.scheduledFor ? -1 : 1))
         .slice(0, limit),
+  };
+
+  private readonly agentScheduleData = new Map<string, { scope: Scope; schedule: AgentSchedule }>();
+
+  readonly agentSchedules: AgentScheduleRepo = {
+    create: async (scope, schedule) => {
+      this.agentScheduleData.set(`${scopeKey(scope)}::${schedule.id}`, { scope, schedule });
+    },
+    get: async (scope, id) =>
+      this.agentScheduleData.get(`${scopeKey(scope)}::${id}`)?.schedule ?? null,
+    list: async (scope) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.agentScheduleData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v.schedule)
+        .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    },
+    save: async (scope, schedule) => {
+      this.agentScheduleData.set(`${scopeKey(scope)}::${schedule.id}`, { scope, schedule });
+    },
+    delete: async (scope, id) => {
+      this.agentScheduleData.delete(`${scopeKey(scope)}::${id}`);
+    },
+    findDue: async (now, limit = 100) =>
+      [...this.agentScheduleData.values()]
+        .filter((r) => r.schedule.enabled && r.schedule.nextRunAt <= now)
+        .sort((a, b) => (a.schedule.nextRunAt < b.schedule.nextRunAt ? -1 : 1))
+        .slice(0, limit),
+    claimNextRun: async (scope, id, expectedNextRunAt, nextRunAt) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const row = this.agentScheduleData.get(key);
+      if (!row || row.schedule.nextRunAt !== expectedNextRunAt) return false;
+      this.agentScheduleData.set(key, { scope, schedule: { ...row.schedule, nextRunAt } });
+      return true;
+    },
+    saveRunState: async (scope, id, state) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const row = this.agentScheduleData.get(key);
+      if (!row) return;
+      this.agentScheduleData.set(key, {
+        scope,
+        schedule: {
+          ...row.schedule,
+          lastRunAt: state.lastRunAt,
+          cursorEntryId: state.cursorEntryId,
+        },
+      });
+    },
   };
 
   private readonly commentData = new Map<string, Comment>();

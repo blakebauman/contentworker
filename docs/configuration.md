@@ -162,6 +162,9 @@ ceiling to `0` to disable metering.
 | `AI_MAX_REQUESTS_PER_WINDOW` | `60` | Max AI requests per space per window (`0` disables) |
 | `AI_MAX_TOKENS_PER_WINDOW` | `200000` | Max input+output tokens per space per window (`0` disables) |
 | `AI_BUDGET_WINDOW_SECONDS` | `60` | Rolling window length |
+| `AI_AGENT_MAX_REQUESTS_PER_WINDOW` | — | Separate, typically stricter window for BACKGROUND agent spend (scheduled + on-publish runs). Unset → background shares the standard window |
+| `AI_AGENT_MAX_TOKENS_PER_WINDOW` | — | Token ceiling for the background window |
+| `AI_AGENT_BUDGET_WINDOW_SECONDS` | `AI_BUDGET_WINDOW_SECONDS` | Background window length. On the edge target the background window shares the DO's limit values but counts separately (`agent:` prefix) |
 
 > On Cloudflare (`apps/edge`) the budget is enforced by the `CostGuardDO`
 > Durable Object (the `AI_BUDGET` binding) — shared across isolates and colos.
@@ -184,6 +187,10 @@ publish-time indexing. The API can still serve search with local embeddings when
 | `RELAY_INTERVAL_MS` | `1000` | Outbox poll interval |
 | `HEALTH_PORT` | `9464` | Health (`/healthz`, `/readyz`) + Prometheus `/metrics` port on the worker and agent-worker; on the API it serves `/metrics` only (health stays on the API port). Worker liveness fails only when the relay loop *hangs* (a tick that never returns); erroring ticks surface via `cw_relay_errors_total` instead of restart-looping |
 | `AGENTS_ENRICH` | `false` | Run the enrich agent on `entry.published` (needs an AI provider) |
+| `AGENTS_SCHEDULES` | `false` | Run recurring agent jobs (cron-based `agent-schedules`) from the worker loop / edge cron |
+| `AGENT_SCHEDULE_INTERVAL_MS` | `60000` | Due-schedule poll cadence on the Node worker (edge uses the 1-minute cron) |
+| `AGENT_SCHEDULE_MAX_ENTRIES` | `25` | Entry cap per schedule run; a truncated window resumes next firing |
+| `AGENT_SCHEDULE_MAX_RUN_TOKENS` | `100000` | Token ceiling per schedule run; the run stops mid-batch once exceeded |
 | `AGENTS_MODERATE` | `false` | Run the moderation agent on `entry.published` (classify; flagged content is retracted from delivery) |
 | `AGENTS_MODERATE_BLOCKING` | `false` | Synchronous pre-publish gate: run moderation **before** publishing and reject (422) flagged content instead of retracting it after |
 | `AGENTS_AUTO_APPLY` | `false` | Auto-apply enrichment vs. route to human review |

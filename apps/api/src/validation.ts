@@ -1,3 +1,4 @@
+import { AGENT_WORKFLOWS } from '@cw/application';
 import { ValidationError } from '@cw/domain';
 import type { Context } from 'hono';
 import { z } from 'zod';
@@ -201,6 +202,21 @@ export const scheduleBody = z.object({
   entityType: z.enum(['entry', 'release']),
   entityId: zId,
   scheduledFor: z.string().min(1).max(64),
+});
+export const agentScheduleBody = z.object({
+  workflow: z.enum(AGENT_WORKFLOWS),
+  // 5-field cron, UTC; the domain validates the expression itself.
+  cron: z.string().min(9).max(100),
+  contentTypeApiId: zId.optional(),
+  enabled: z.boolean().optional(),
+  autoApply: z.boolean().optional(),
+});
+export const agentSchedulePatchBody = z.object({
+  cron: z.string().min(9).max(100).optional(),
+  enabled: z.boolean().optional(),
+  autoApply: z.boolean().optional(),
+  // null clears the content-type restriction.
+  contentTypeApiId: zId.nullable().optional(),
 });
 export const commentBody = z.object({
   body: z.string().min(1).max(20_000),

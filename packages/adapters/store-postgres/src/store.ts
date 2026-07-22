@@ -1,4 +1,5 @@
 import {
+  type AgentSchedule,
   type ApiKey,
   type Asset,
   type Comment,
@@ -26,6 +27,7 @@ import type {
   AIActionRepo,
   AgentRunRecord,
   AgentRunRepo,
+  AgentScheduleRepo,
   AppExtension,
   AppExtensionRepo,
   AssetRepo,
@@ -48,6 +50,7 @@ import type {
   ReleaseRepo,
   RoleRepo,
   ScheduledActionRepo,
+  ScopedAgentSchedule,
   ScopedScheduledAction,
   SpaceRepo,
   TaskRepo,
@@ -55,7 +58,21 @@ import type {
   WebhookRepo,
   WorkflowRepo,
 } from '@cw/ports';
-import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lte, sql, sum } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+  sum,
+} from 'drizzle-orm';
 import { type PostgresJsDatabase, drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema.js';
@@ -282,6 +299,19 @@ function makeEntryRepo(db: Db): EntryRepo {
         conditions.push(gt(schema.entryPublished.publishedAt, new Date(query.since)));
       if (query.afterEntryId !== undefined && query.afterEntryId !== '')
         conditions.push(gt(schema.entryPublished.entryId, query.afterEntryId));
+      if (query.after) {
+        // Strictly after (publishedAt, entryId) in the default publish order —
+        // exact across same-transaction publishes sharing a publish instant.
+        const boundary = new Date(query.after.publishedAt);
+        const cond = or(
+          gt(schema.entryPublished.publishedAt, boundary),
+          and(
+            eq(schema.entryPublished.publishedAt, boundary),
+            gt(schema.entryPublished.entryId, query.after.entryId),
+          ),
+        );
+        if (cond) conditions.push(cond);
+      }
       let select = db
         .select()
         .from(schema.entryPublished)
@@ -1225,6 +1255,115 @@ const toScheduled = (r: ScheduledRow): ScheduledAction => ({
   error: r.error ?? undefined,
 });
 
+function makeAgentScheduleRepo(db: Db): AgentScheduleRepo {
+  type Row = typeof schema.agentSchedules.$inferSelect;
+  const toSchedule = (r: Row): AgentSchedule => ({
+    id: r.id,
+    workflow: r.workflow,
+    contentTypeApiId: r.contentTypeApiId ?? undefined,
+    cron: r.cron,
+    enabled: r.enabled,
+    autoApply: r.autoApply,
+    lastRunAt: r.lastRunAt?.toISOString(),
+    cursorEntryId: r.cursorEntryId ?? undefined,
+    nextRunAt: r.nextRunAt.toISOString(),
+    createdAt: r.createdAt.toISOString(),
+  });
+  return {
+    async create(scope, s) {
+      await db.insert(schema.agentSchedules).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: s.id,
+        workflow: s.workflow,
+        contentTypeApiId: s.contentTypeApiId ?? null,
+        cron: s.cron,
+        enabled: s.enabled,
+        autoApply: s.autoApply,
+        lastRunAt: s.lastRunAt ? new Date(s.lastRunAt) : null,
+        cursorEntryId: s.cursorEntryId ?? null,
+        nextRunAt: new Date(s.nextRunAt),
+        createdAt: new Date(s.createdAt),
+      });
+    },
+    async get(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.agentSchedules)
+        .where(and(scopeFilter(schema.agentSchedules, scope), eq(schema.agentSchedules.id, id)));
+      return row ? toSchedule(row) : null;
+    },
+    async list(scope) {
+      const rows = await db
+        .select()
+        .from(schema.agentSchedules)
+        .where(scopeFilter(schema.agentSchedules, scope))
+        .orderBy(asc(schema.agentSchedules.createdAt), asc(schema.agentSchedules.id));
+      return rows.map(toSchedule);
+    },
+    async save(scope, s) {
+      await db
+        .update(schema.agentSchedules)
+        .set({
+          workflow: s.workflow,
+          contentTypeApiId: s.contentTypeApiId ?? null,
+          cron: s.cron,
+          enabled: s.enabled,
+          autoApply: s.autoApply,
+          lastRunAt: s.lastRunAt ? new Date(s.lastRunAt) : null,
+          cursorEntryId: s.cursorEntryId ?? null,
+          nextRunAt: new Date(s.nextRunAt),
+        })
+        .where(and(scopeFilter(schema.agentSchedules, scope), eq(schema.agentSchedules.id, s.id)));
+    },
+    async delete(scope, id) {
+      await db
+        .delete(schema.agentSchedules)
+        .where(and(scopeFilter(schema.agentSchedules, scope), eq(schema.agentSchedules.id, id)));
+    },
+    async claimNextRun(scope, id, expectedNextRunAt, nextRunAt) {
+      const claimed = await db
+        .update(schema.agentSchedules)
+        .set({ nextRunAt: new Date(nextRunAt) })
+        .where(
+          and(
+            scopeFilter(schema.agentSchedules, scope),
+            eq(schema.agentSchedules.id, id),
+            eq(schema.agentSchedules.nextRunAt, new Date(expectedNextRunAt)),
+          ),
+        )
+        .returning({ id: schema.agentSchedules.id });
+      return claimed.length > 0;
+    },
+    async saveRunState(scope, id, state) {
+      await db
+        .update(schema.agentSchedules)
+        .set({
+          lastRunAt: new Date(state.lastRunAt),
+          cursorEntryId: state.cursorEntryId ?? null,
+        })
+        .where(and(scopeFilter(schema.agentSchedules, scope), eq(schema.agentSchedules.id, id)));
+    },
+    async findDue(now, limit = 100): Promise<ScopedAgentSchedule[]> {
+      const rows = await db
+        .select()
+        .from(schema.agentSchedules)
+        .where(
+          and(
+            eq(schema.agentSchedules.enabled, true),
+            lte(schema.agentSchedules.nextRunAt, new Date(now)),
+          ),
+        )
+        .orderBy(asc(schema.agentSchedules.nextRunAt))
+        .limit(limit);
+      return rows.map((r) => ({
+        scope: { spaceId: r.spaceId, environmentId: r.environmentId },
+        schedule: toSchedule(r),
+      }));
+    },
+  };
+}
+
 function makeScheduledActionRepo(db: Db): ScheduledActionRepo {
   const rowValues = (scope: Scope, a: ScheduledAction) => ({
     spaceId: scope.spaceId,
@@ -1662,6 +1801,7 @@ export function createPostgresStore(
     previewTokens: makePreviewTokenRepo(db),
     releases: makeReleaseRepo(db),
     scheduledActions: makeScheduledActionRepo(db),
+    agentSchedules: makeAgentScheduleRepo(db),
     comments: makeCommentRepo(db),
     tasks: makeTaskRepo(db),
     workflows: makeWorkflowRepo(db),

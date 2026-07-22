@@ -11,6 +11,7 @@ import { type AppContext, type FakeAdapterBinding, assertNoFakeAdapters } from '
 import type { AIProvider, ContentStore, IdGenerator } from '@cw/ports';
 import { InMemoryContentStore } from '@cw/test-kit';
 import { v7 as uuidv7 } from 'uuid';
+import { createDoCostGuard } from '../do/cost-guard.js';
 import type { EdgeEnv } from '../env.js';
 import { makeAI } from '../wire.js';
 import type { AgentWfParams } from './runtime.js';
@@ -84,7 +85,12 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
       fakes,
     });
     const ids: IdGenerator = { newId: () => uuidv7() };
-    const ctx: AppContext = { store, clock: { now: () => new Date() }, ids };
+    // Durable runs meter against the background agent window (`agent:` DO
+    // prefix) — previously workflow-hosted generations were unmetered.
+    const costGuard = this.env.AI_BUDGET
+      ? createDoCostGuard(this.env.AI_BUDGET, 'agent:')
+      : undefined;
+    const ctx: AppContext = { store, clock: { now: () => new Date() }, ids, costGuard };
 
     try {
       const activities = stepActivities(step, makeActivities({ ctx, ai }));

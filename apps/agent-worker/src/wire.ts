@@ -3,7 +3,7 @@ import { createAzureOpenAIProvider } from '@cw/adapter-ai-azure-openai';
 import { createRedisCostGuard } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { type Activities, makeActivities } from '@cw/agent-runtime';
-import { type AppContext, aiBudgetLimits } from '@cw/application';
+import { type AppContext, agentBudgetLimits, aiBudgetLimits } from '@cw/application';
 import type { AIProvider, Clock, ContentStore, CostGuard, IdGenerator } from '@cw/ports';
 import { InMemoryContentStore, InMemoryCostGuard } from '@cw/test-kit';
 import { Redis } from 'ioredis';
@@ -22,13 +22,20 @@ export function wireActivities(env: NodeJS.ProcessEnv = process.env): {
     : (new InMemoryContentStore() as ContentStore);
   const ai: AIProvider =
     env.AI_PROVIDER === 'azure-openai' ? createAzureOpenAIProvider() : createAnthropicProvider();
-  // Share the AI budget window with the API/worker via Redis when configured;
-  // fall back to an in-process window for single-node/dev.
-  const limits = aiBudgetLimits(env);
+  // Every workflow this host executes is BACKGROUND agent work, so prefer the
+  // AI_AGENT_* window (separate `cwagent` Redis keys) when configured — batch
+  // spend then can't exhaust the interactive window. Falls back to the shared
+  // interactive window, then to an in-process window for single-node/dev.
+  const agentLimits = agentBudgetLimits(env);
+  const limits = agentLimits ?? aiBudgetLimits(env);
   let costGuard: CostGuard | undefined;
   if (limits) {
     costGuard = env.REDIS_URL
-      ? createRedisCostGuard(new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }), limits)
+      ? createRedisCostGuard(
+          new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }),
+          limits,
+          agentLimits ? { keyPrefix: 'cwagent' } : {},
+        )
       : new InMemoryCostGuard(limits);
   }
   const ctx: AppContext = { store, clock, ids, costGuard };

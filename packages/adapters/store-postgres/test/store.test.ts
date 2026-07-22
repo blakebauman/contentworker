@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { AppContext } from '@cw/application';
 import {
   authenticate,
+  createAgentSchedule,
   createApiKey,
   createAppExtension,
   createContentType,
@@ -9,9 +10,11 @@ import {
   createFunction,
   createRole,
   createSpace,
+  deleteAgentSchedule,
   deleteFunction,
   getEntry,
   getPublishedEntry,
+  listAgentSchedules,
   listAppExtensions,
   listFunctions,
   listPublishedEntries,
@@ -19,6 +22,7 @@ import {
   publishContentType,
   publishEntry,
   unpublishEntry,
+  updateAgentSchedule,
   updateEntry,
   updateRole,
 } from '@cw/application';
@@ -208,6 +212,57 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
     const after = await authenticate(ctx, hasher, token);
     expect(after.scopes).toEqual(['preview:read']);
     expect(after.contentGrants?.[0]?.contentTypeApiId).toBe('*');
+  });
+
+  it('round-trips the agent-schedules repo (incl. cross-scope findDue)', async () => {
+    const created = await createAgentSchedule(ctx, scope, {
+      workflow: 'enrich',
+      cron: '0 2 * * *',
+      contentTypeApiId: 'article',
+    });
+    const listed = await listAgentSchedules(ctx, scope);
+    expect(listed.map((s) => s.id)).toContain(created.id);
+
+    const updated = await updateAgentSchedule(ctx, scope, created.id, {
+      cron: '30 4 * * *',
+      autoApply: true,
+    });
+    expect(updated.autoApply).toBe(true);
+    expect(updated.nextRunAt).toBe('2026-01-01T04:30:00.000Z');
+
+    // Due scan crosses scopes and respects the enabled flag.
+    const due = await store.agentSchedules.findDue('2026-01-02T00:00:00.000Z');
+    expect(due.some((d) => d.schedule.id === created.id && d.scope.spaceId === spaceId)).toBe(true);
+
+    // Optimistic claim: first CAS wins, the stale retry loses; run-state saves
+    // only the cursor (cron/enabled untouched).
+    const won = await store.agentSchedules.claimNextRun(
+      scope,
+      created.id,
+      updated.nextRunAt,
+      '2026-01-02T04:30:00.000Z',
+    );
+    expect(won).toBe(true);
+    const lost = await store.agentSchedules.claimNextRun(
+      scope,
+      created.id,
+      updated.nextRunAt,
+      '2026-01-03T04:30:00.000Z',
+    );
+    expect(lost).toBe(false);
+    await store.agentSchedules.saveRunState(scope, created.id, {
+      lastRunAt: '2026-01-02T04:30:00.000Z',
+      cursorEntryId: 'entry-cursor',
+    });
+    const afterRun = await store.agentSchedules.get(scope, created.id);
+    expect(afterRun?.cursorEntryId).toBe('entry-cursor');
+    expect(afterRun?.cron).toBe('30 4 * * *');
+    await updateAgentSchedule(ctx, scope, created.id, { enabled: false });
+    const dueAfterDisable = await store.agentSchedules.findDue('2026-01-02T00:00:00.000Z');
+    expect(dueAfterDisable.some((d) => d.schedule.id === created.id)).toBe(false);
+
+    await deleteAgentSchedule(ctx, scope, created.id);
+    expect((await listAgentSchedules(ctx, scope)).map((s) => s.id)).not.toContain(created.id);
   });
 
   it('round-trips the functions repo', async () => {
