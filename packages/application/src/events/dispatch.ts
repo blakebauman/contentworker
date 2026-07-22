@@ -9,6 +9,12 @@ import {
   runReindexJob,
 } from '../rag.js';
 
+/** Reverse-reference walk bound: embed chains deeper than this stay stale
+ *  until their own next publish (cycle-safe either way via the visited set). */
+export const MAX_INVALIDATION_DEPTH = 5;
+/** Hard ceiling on entries invalidated per event (pathological fan-in guard). */
+export const MAX_INVALIDATION_ENTRIES = 500;
+
 export interface DispatchDeps {
   readonly sender: WebhookSender;
   /** Optional — when present, delivery cache tags are invalidated. */
@@ -59,13 +65,28 @@ export async function dispatchEvent(
     });
   }
 
-  // 2. Cache invalidation for entry events.
+  // 2. Cache invalidation for entry events: the entry itself plus every entry
+  // that transitively embeds it (A embeds B embeds C → publishing C refreshes
+  // A and B), via a bounded breadth-first walk of the reverse-reference graph.
   if (deps.cache && (event.type === 'entry.published' || event.type === 'entry.unpublished')) {
-    const tags = new Set<string>([cacheTag(scope, event.entryId)]);
-    for (const edge of await ctx.store.references.findReverse(scope, event.entryId)) {
-      tags.add(cacheTag(scope, edge.fromEntryId));
+    const visited = new Set<string>([event.entryId]);
+    let frontier = [event.entryId];
+    walk: for (let depth = 0; depth < MAX_INVALIDATION_DEPTH && frontier.length > 0; depth++) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const edge of await ctx.store.references.findReverse(scope, id)) {
+          if (visited.has(edge.fromEntryId)) continue;
+          // Cap reached: stop querying entirely — everything already admitted
+          // to `visited` still gets invalidated below.
+          if (visited.size >= MAX_INVALIDATION_ENTRIES) break walk;
+          visited.add(edge.fromEntryId);
+          next.push(edge.fromEntryId);
+        }
+      }
+      frontier = next;
     }
-    for (const tag of tags) await deps.cache.invalidateTag(tag);
+    const cache = deps.cache;
+    await Promise.all([...visited].map((id) => cache.invalidateTag(cacheTag(scope, id))));
   }
 
   // 3. RAG: (re)embed on publish, drop vectors on unpublish.

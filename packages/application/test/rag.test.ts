@@ -117,6 +117,27 @@ describe('P7: RAG indexing + semantic search', () => {
     expect((await semanticSearch(deps, scope, 'zebra', { topK: 5 }))[0]?.entryId).toBe('e1');
   });
 
+  it("clamps the semantic over-fetch to the vector store's declared maxTopK", async () => {
+    const requested: number[] = [];
+    const cappedVectors = {
+      maxTopK: 50,
+      upsert: async () => {},
+      deleteByEntry: async () => {},
+      query: async (_s: unknown, _e: unknown, opts: { topK: number }) => {
+        requested.push(opts.topK);
+        return [];
+      },
+    };
+    await semanticSearch(
+      { embeddings: new LocalEmbeddingsProvider(8), vectors: cappedVectors },
+      scope,
+      'anything',
+      { topK: 100 },
+    );
+    // Uncapped stores get topK*4 (up to 400); a declared cap clamps it.
+    expect(requested).toEqual([50]);
+  });
+
   it('removes embeddings on unpublish', async () => {
     await indexEntryEmbeddings(deps, scope, {
       entryId: 'e1',

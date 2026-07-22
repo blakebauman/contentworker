@@ -22,6 +22,7 @@
     "@cw/adapter-ai-anthropic": "workspace:*",
     "@cw/adapter-ai-azure-openai": "workspace:*",
     "@cw/adapter-embeddings-openai": "workspace:*",
+    "@cw/adapter-redis": "workspace:*",
     "@cw/adapter-store-postgres": "workspace:*",
     "@cw/adapter-vector-pgvector": "workspace:*",
     "@cw/agent-runtime": "workspace:*",
@@ -31,6 +32,7 @@
     "@cw/telemetry": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.13.0",
+    "ioredis": "^5.11.1",
     "tsx": "^4.19.2",
     "uuid": "^11.0.3",
     "zod": "^3.24.1"
