@@ -6,7 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AuthDeps, AuthRateLimit } from './auth.js';
 import { createApiHasher } from './auth.js';
-import type { ApiConfig } from './config.js';
+import { type ApiConfig, mountsRole } from './config.js';
 import { doc, mountDocs } from './docs/openapi.js';
 import { healthz, readyz } from './docs/schemas.js';
 import { onError } from './http.js';
@@ -93,9 +93,9 @@ export function createApp(
     moderateBeforePublish: config.moderateBeforePublish,
   };
 
-  const mountManagement = config.role === 'all' || config.role === 'management';
-  const mountDelivery = config.role === 'all' || config.role === 'delivery';
-  const mountPreview = config.role === 'all' || config.role === 'preview';
+  const mountManagement = mountsRole(config, 'management');
+  const mountDelivery = mountsRole(config, 'delivery');
+  const mountPreview = mountsRole(config, 'preview');
 
   if (mountManagement) {
     app.route('/', oidcRoutes(deps, config));

@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cw-edge",
+  "account_id": "2d19b3b18648f0776ff1435cba466210",
   "main": "src/main.ts",
   "compatibility_date": "2026-06-01",
   // nodejs_compat provides node:crypto/Buffer for token hashing, webhook HMAC,
@@ -166,10 +167,195 @@
     "AI_BUDGET_WINDOW_SECONDS": "60"
   },
 
-  // Enterprise scale-out: deploy the same script per role with wrangler
-  // environments (env.delivery / env.management / env.pipeline), overriding
-  // ROLE and routes; attach the queue consumer only to the pipeline deployment.
+  // ---- Enterprise scale-out ---------------------------------------------------
+  // Three role-isolated deployments of the same script share one data plane.
+  // Wrangler envs inherit almost no bindings, so each env redeclares what it
+  // uses; per-env vars stay MINIMAL and lean on code defaults — the
+  // fail-closed adapter guard catches misconfiguration loudly at boot.
+  //
+  // `cw-edge-pipeline` OWNS the stateful classes (Durable Objects, the
+  // AgentWorkflow) — Durable Objects live in exactly one worker, so delivery
+  // and management bind into it via `script_name`. DEPLOY ORDER MATTERS:
+  //   1. wrangler deploy -e pipeline    (creates the DO/Workflow classes)
+  //   2. wrangler deploy -e management
+  //   3. wrangler deploy -e delivery
+  // Secrets (`wrangler secret put -e <env>`) are per-worker. On EVERY worker
+  // (REQUIRE_SECURE_SECRETS refuses dev defaults): ADMIN_TOKEN, TOKEN_PEPPER,
+  // CMA_KEY, CDA_KEY, CPA_KEY — set the SAME values on all three workers
+  // (they share one database; a per-worker TOKEN_PEPPER would break API-key
+  // auth across workers). Additionally: SESSION_SECRET + MCP_TOKEN on
+  // management; ANTHROPIC_API_KEY on management + pipeline. Attach your zone
+  // routes per env below.
+  //
+  // NOTE: `triggers`, `assets`, and `migrations` are INHERITABLE in wrangler —
+  // each env pins them explicitly so the cron sweeper, the admin SPA, and the
+  // DO class migrations don't silently leak into workers that must not have
+  // them (only pipeline runs cron and owns DO classes; only management serves
+  // the SPA).
   "env": {
+    // Public read plane: Delivery + Preview APIs and the DO-served SSE hub.
+    // Read-only for content (no queue producer — no mutations, no outbox
+    // nudges); no cron (the sweeper would run scheduled publishes here).
+    "delivery": {
+      "vars": {
+        "ROLE": "delivery,preview",
+        "REQUIRE_SECURE_SECRETS": "true",
+        "SEED_DEV": "false",
+        "ALLOW_FAKE_ADAPTERS": "ai,blob,embeddings"
+      },
+      // "routes": [{ "pattern": "cdn.example.com/*", "custom_domain": true }],
+      "triggers": { "crons": [] },
+      "migrations": [],
+      "assets": { "directory": "./no-assets" },
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "a25711edf12046b28b6465c410da760b",
+          "localConnectionString": "postgres://postgres:postgres@localhost:5432/contentworker"
+        }
+      ],
+      "kv_namespaces": [{ "binding": "KV_CACHE", "id": "43d0683e48b94bfe98ce95dc808cbf0e" }],
+      "vectorize": [{ "binding": "VECTORIZE", "index_name": "cw-vectors" }],
+      "durable_objects": {
+        "bindings": [
+          { "name": "LIVE_HUB", "class_name": "LiveHubDO", "script_name": "cw-edge-pipeline" },
+          {
+            "name": "AUTH_LIMITER",
+            "class_name": "RateLimiterDO",
+            "script_name": "cw-edge-pipeline"
+          }
+        ]
+      }
+    },
+
+    // Authoring plane: Management API + MCP + the admin SPA. Mutations relay
+    // the outbox onto cw-events; review decisions signal watcher Workflows.
+    "management": {
+      "vars": {
+        "ROLE": "management",
+        "REQUIRE_SECURE_SECRETS": "true",
+        "SEED_DEV": "false",
+        "ALLOW_FAKE_ADAPTERS": "ai,blob,embeddings",
+        "AI_MAX_REQUESTS_PER_WINDOW": "60",
+        "AI_MAX_TOKENS_PER_WINDOW": "200000",
+        "AI_BUDGET_WINDOW_SECONDS": "60",
+        "BLOB_FORCE_PATH_STYLE": "true",
+        "AWS_REGION": "auto"
+      },
+      // "routes": [{ "pattern": "cms.example.com/*", "custom_domain": true }],
+      "triggers": { "crons": [] },
+      "migrations": [],
+      "assets": {
+        "directory": "../admin/dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": [
+          "/spaces",
+          "/spaces/*",
+          "/auth/*",
+          "/mcp",
+          "/healthz",
+          "/readyz",
+          "/openapi.json",
+          "/docs"
+        ]
+      },
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "a25711edf12046b28b6465c410da760b",
+          "localConnectionString": "postgres://postgres:postgres@localhost:5432/contentworker"
+        }
+      ],
+      "kv_namespaces": [{ "binding": "KV_CACHE", "id": "43d0683e48b94bfe98ce95dc808cbf0e" }],
+      "vectorize": [{ "binding": "VECTORIZE", "index_name": "cw-vectors" }],
+      "queues": {
+        "producers": [{ "binding": "EVENTS_QUEUE", "queue": "cw-events" }]
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "AUTH_LIMITER",
+            "class_name": "RateLimiterDO",
+            "script_name": "cw-edge-pipeline"
+          },
+          { "name": "AI_BUDGET", "class_name": "CostGuardDO", "script_name": "cw-edge-pipeline" }
+        ]
+      },
+      "workflows": [
+        {
+          "binding": "AGENT_WF",
+          "name": "cw-agent",
+          "class_name": "AgentWorkflow",
+          "script_name": "cw-edge-pipeline"
+        }
+      ]
+    },
+
+    // Event backbone: queue consumers, cron sweeper, agents — and the OWNER of
+    // every Durable Object class and the AgentWorkflow. Not publicly reachable
+    // (workers.dev disabled, no routes, no assets) — it exists for queues,
+    // cron, and the DO/Workflow classes the other two workers bind into.
+    "pipeline": {
+      "workers_dev": false,
+      "assets": { "directory": "./no-assets" },
+      "vars": {
+        "ROLE": "delivery",
+        "REQUIRE_SECURE_SECRETS": "true",
+        "SEED_DEV": "false",
+        "AGENT_RUNTIME": "cloudflare-workflows",
+        "AGENTS_ENRICH": "false",
+        "AGENTS_MODERATE": "false",
+        "AGENTS_AUTO_APPLY": "false",
+        "AGENTS_SCHEDULES": "false",
+        "ALLOW_FAKE_ADAPTERS": "ai,blob,embeddings",
+        "AI_MAX_REQUESTS_PER_WINDOW": "60",
+        "AI_MAX_TOKENS_PER_WINDOW": "200000",
+        "AI_BUDGET_WINDOW_SECONDS": "60"
+      },
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "a25711edf12046b28b6465c410da760b",
+          "localConnectionString": "postgres://postgres:postgres@localhost:5432/contentworker"
+        }
+      ],
+      "kv_namespaces": [{ "binding": "KV_CACHE", "id": "43d0683e48b94bfe98ce95dc808cbf0e" }],
+      "vectorize": [{ "binding": "VECTORIZE", "index_name": "cw-vectors" }],
+      "queues": {
+        "producers": [
+          { "binding": "EVENTS_QUEUE", "queue": "cw-events" },
+          { "binding": "AGENTS_QUEUE", "queue": "cw-agents" }
+        ],
+        "consumers": [
+          {
+            "queue": "cw-events",
+            "max_batch_size": 25,
+            "max_batch_timeout": 2,
+            "max_retries": 5,
+            "dead_letter_queue": "cw-events-dlq"
+          },
+          {
+            "queue": "cw-agents",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 3,
+            "dead_letter_queue": "cw-events-dlq"
+          },
+          { "queue": "cw-events-dlq", "max_batch_size": 25, "max_batch_timeout": 5 }
+        ]
+      },
+      "triggers": { "crons": ["* * * * *"] },
+      "durable_objects": {
+        "bindings": [
+          { "name": "LIVE_HUB", "class_name": "LiveHubDO" },
+          { "name": "AUTH_LIMITER", "class_name": "RateLimiterDO" },
+          { "name": "AI_BUDGET", "class_name": "CostGuardDO" }
+        ]
+      },
+      "workflows": [{ "binding": "AGENT_WF", "name": "cw-agent", "class_name": "AgentWorkflow" }]
+    },
+
     // Zero-infrastructure demo: no bindings → seeded in-memory store, fake
     // blob, stub AI (same fallbacks as the Node dev server). Dev keys work.
     "demo": {

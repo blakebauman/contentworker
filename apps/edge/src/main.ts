@@ -2,6 +2,7 @@ import { createHttpFunctionInvoker, createWebhookSender } from '@cw/adapter-http
 import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
 import { createApp } from '@cw/api/app';
 import { type AuthDeps, createApiHasher } from '@cw/api/auth';
+import { mountsRole } from '@cw/api/config';
 import { validateApiSecrets } from '@cw/api/secure-secrets';
 import { seedDev } from '@cw/api/seed';
 import {
@@ -69,7 +70,7 @@ let devSeeded = false;
 
 function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
   const app = new Hono();
-  const mountManagement = wired.config.role === 'all' || wired.config.role === 'management';
+  const mountManagement = mountsRole(wired.config, 'management');
   // Distributed failed-auth limiter: one DO per client IP, global across
   // isolates (the in-process default only sees its own isolate's failures).
   const rateLimiter = env.AUTH_LIMITER ? createDoRateLimiter(env.AUTH_LIMITER) : undefined;
