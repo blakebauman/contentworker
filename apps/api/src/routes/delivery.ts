@@ -5,17 +5,12 @@ import {
   listContentTypes,
   listPublishedAssets,
   listPublishedEntries,
+  maskDeliveredFields,
   parseImageTransform,
   semanticSearch,
   transformPublishedAssetUrl,
 } from '@cw/application';
-import {
-  SCOPES,
-  type Scope,
-  authorizeContent,
-  canAccessContentType,
-  maskDeniedFields,
-} from '@cw/domain';
+import { SCOPES, type Scope, authorizeContent, canAccessContentType } from '@cw/domain';
 import {
   type DeliveryContext,
   type DeliveryResolvers,
@@ -174,7 +169,7 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
       const principal = c.get('principal');
       const visible = items
         .filter((e) => canAccessContentType(principal, 'read', e.contentType))
-        .map((e) => ({ ...e, fields: maskDeniedFields(principal, e.contentType, e.fields) }));
+        .map((e) => ({ ...e, fields: maskDeliveredFields(principal, e.contentType, e.fields) }));
       return c.json({ items: visible, total: visible.length });
     },
   );
@@ -195,7 +190,7 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
       authorizeContent(principal, 'read', entry.contentType);
       return c.json({
         ...entry,
-        fields: maskDeniedFields(principal, entry.contentType, entry.fields),
+        fields: maskDeliveredFields(principal, entry.contentType, entry.fields),
       });
     },
   );
@@ -336,7 +331,7 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
           // Same field-level masking as the REST single-entry path.
           return {
             ...e,
-            fields: maskDeniedFields(principal, e.contentType, e.fields),
+            fields: maskDeliveredFields(principal, e.contentType, e.fields),
           } as ResolvedEntry;
         } catch {
           return null;
@@ -359,7 +354,7 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
         ).then((items) =>
           items.map((e) => ({
             ...e,
-            fields: maskDeniedFields(principal, e.contentType, e.fields),
+            fields: maskDeliveredFields(principal, e.contentType, e.fields),
           })),
         ) as Promise<ResolvedEntry[]>;
       },
