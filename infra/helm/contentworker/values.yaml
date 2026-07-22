@@ -20,9 +20,14 @@ serviceAccount:
 config:
   # AIProvider: anthropic | azure-openai
   aiProvider: anthropic
-  # EmbeddingsProvider: "" (disabled) | local | azure-openai
+  # EmbeddingsProvider: "" (disabled) | local | azure-openai | openai
+  # (openai = any OpenAI-compatible /v1 endpoint: OpenAI, Ollama, vLLM, TEI —
+  # the self-hostable path; API key goes in the secret as EMBEDDINGS_API_KEY.)
   embeddingsProvider: local
   embeddingsDim: "1536"
+  # Only for embeddingsProvider=openai:
+  embeddingsBaseUrl: ""
+  embeddingsModel: ""
   seedSpaceId: space-1
   seedEnvId: main
   seedDefaultLocale: en-US
@@ -60,6 +65,8 @@ secrets:
     MCP_TOKEN: ""
     ANTHROPIC_API_KEY: ""
     AZURE_OPENAI_API_KEY: ""
+    # Bearer token for embeddingsProvider=openai endpoints that authenticate.
+    EMBEDDINGS_API_KEY: ""
     # Static S3-compatible credentials (MinIO etc.); leave empty with workload identity.
     AWS_ACCESS_KEY_ID: ""
     AWS_SECRET_ACCESS_KEY: ""

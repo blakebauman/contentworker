@@ -4,6 +4,7 @@ import {
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
 import { createS3BlobStore } from '@cw/adapter-blob-s3';
+import { createOpenAIEmbeddings } from '@cw/adapter-embeddings-openai';
 import {
   createRedisAuthRateLimiter,
   createRedisCache,
@@ -109,19 +110,22 @@ function makeBlob(fakes: FakeAdapterBinding[]): BlobStore {
 /** Builds RAG deps (embeddings + vector store) for the Delivery search endpoint. */
 function makeRag(databaseUrl: string | undefined, fakes: FakeAdapterBinding[]): RagDeps {
   const provider = process.env.EMBEDDINGS_PROVIDER;
+  const dim = Number(process.env.EMBEDDINGS_DIM ?? 1536);
   // An explicit EMBEDDINGS_PROVIDER=local is informed consent to hash-based
   // embeddings; only the silent default (unset/unknown) is flagged as a fake.
-  if (provider !== 'azure-openai' && provider !== 'local') {
+  if (provider !== 'azure-openai' && provider !== 'openai' && provider !== 'local') {
     fakes.push({
       key: 'embeddings',
       detail:
-        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai, or =local to accept explicitly',
+        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai or =openai (any OpenAI-compatible endpoint), or =local to accept explicitly',
     });
   }
   const embeddings: EmbeddingsProvider =
     provider === 'azure-openai'
       ? createAzureOpenAIEmbeddings()
-      : new LocalEmbeddingsProvider(Number(process.env.EMBEDDINGS_DIM ?? 1536));
+      : provider === 'openai'
+        ? createOpenAIEmbeddings({ dimensions: dim })
+        : new LocalEmbeddingsProvider(dim);
   const vectors = databaseUrl
     ? createPgVectorStore(databaseUrl, {
         dimensions: embeddings.dimensions,
