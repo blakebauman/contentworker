@@ -108,22 +108,22 @@ function reindexCooldownKey(scope: Scope, contentTypeApiId?: string): string {
   return `cw:reindex:cooldown:${scope.spaceId}:${scope.environmentId}:${contentTypeApiId ?? '*'}`;
 }
 
+export interface RequestReindexResult {
+  /** Always true when accepted — the reindex runs on the queue consumer. */
+  readonly enqueued: true;
+}
+
 /**
- * Re-embeds every published entry in the scope (optionally one content type),
- * paging through the read model. Use after a change to text extraction or the
- * embedding model so already-published content becomes searchable without a
- * republish. Each entry reindex is idempotent (stale vectors are replaced).
+ * Enqueues a background reindex (via the outbox) instead of running the expensive
+ * embed loop on the triggering request. Owns the per-scope cooldown so repeated
+ * triggers can't flood the queue: a retrigger within the window is rejected with
+ * RateLimitedError (429). The worker/queue consumer runs {@link reindexEmbeddings}.
  */
-export async function reindexEmbeddings(
-  deps: RagDeps,
+export async function requestReindex(
   ctx: AppContext,
   scope: Scope,
-  opts: { contentTypeApiId?: string; batchSize?: number } = {},
-): Promise<ReindexResult> {
-  // Cooldown + coarse singleton: a full reindex is expensive (an embedding call
-  // per chunk of every published entry), so refuse to start another for the same
-  // scope within the cooldown window. Enforced via the shared cache when present
-  // (cross-replica); in cacheless dev there is no gate.
+  opts: { contentTypeApiId?: string } = {},
+): Promise<RequestReindexResult> {
   const cooldownKey = reindexCooldownKey(scope, opts.contentTypeApiId);
   if (ctx.cache && (await ctx.cache.get(cooldownKey))) {
     throw new RateLimitedError(
@@ -134,7 +134,28 @@ export async function reindexEmbeddings(
   await ctx.cache?.set(cooldownKey, ctx.clock.now().toISOString(), {
     ttlSeconds: REINDEX_COOLDOWN_SECONDS,
   });
+  await ctx.store.outbox.append({
+    id: ctx.ids.newId(),
+    type: 'search.reindex_requested',
+    scope,
+    occurredAt: ctx.clock.now().toISOString(),
+    contentTypeApiId: opts.contentTypeApiId,
+  });
+  return { enqueued: true };
+}
 
+/**
+ * Re-embeds every published entry in the scope (optionally one content type),
+ * paging through the read model. Runs on the queue consumer (see
+ * {@link requestReindex}); each entry reindex is idempotent (stale vectors are
+ * replaced). The per-run entry cap and batch clamp bound a single run.
+ */
+export async function reindexEmbeddings(
+  deps: RagDeps,
+  ctx: AppContext,
+  scope: Scope,
+  opts: { contentTypeApiId?: string; batchSize?: number } = {},
+): Promise<ReindexResult> {
   const batchSize = Math.min(Math.max(1, opts.batchSize ?? 100), 500);
   let skip = 0;
   let entries = 0;

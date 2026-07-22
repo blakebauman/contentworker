@@ -9,7 +9,8 @@ export type DomainEvent =
   | EntryPublishedEvent
   | EntryUnpublishedEvent
   | ContentTypePublishedEvent
-  | ReleasePublishedEvent;
+  | ReleasePublishedEvent
+  | SearchReindexRequestedEvent;
 
 export interface BaseEvent {
   readonly id: string;
@@ -43,6 +44,17 @@ export interface ReleasePublishedEvent extends BaseEvent {
   readonly type: 'release.published';
   readonly releaseId: string;
   readonly entryIds: readonly string[];
+}
+
+/**
+ * A request to (re)embed every published entry in the scope — a background job,
+ * not a state-change fact. Enqueued via the outbox so the expensive work runs on
+ * the worker/queue consumer instead of the triggering request.
+ */
+export interface SearchReindexRequestedEvent extends BaseEvent {
+  readonly type: 'search.reindex_requested';
+  /** Limit the reindex to one content type, or all when omitted. */
+  readonly contentTypeApiId?: string;
 }
 
 export type EventType = DomainEvent['type'];

@@ -52,8 +52,8 @@ import {
   publishContentType,
   publishEntry,
   publishRelease,
-  reindexEmbeddings,
   relatedEntries,
+  requestReindex,
   resolveTask,
   restoreVersion,
   runAIAction,
@@ -276,16 +276,15 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
 
   server.tool(
     'content_reindex_embeddings',
-    'Re-embed every published entry in the environment (optionally one content type) so ' +
-      'content published before an embeddings change becomes semantically searchable ' +
-      'without a republish. Idempotent per entry.',
+    'Request a background reindex that re-embeds every published entry in the environment ' +
+      '(optionally one content type) so content published before an embeddings change ' +
+      'becomes semantically searchable. Enqueued via the outbox and run on the worker; ' +
+      'rate-limited per scope. Idempotent per entry.',
     { contentTypeApiId: z.string().optional(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.contentManage, scopeOf(args));
       return ok(
-        await reindexEmbeddings(rag, ctx, scopeOf(args), {
-          contentTypeApiId: args.contentTypeApiId,
-        }),
+        await requestReindex(ctx, scopeOf(args), { contentTypeApiId: args.contentTypeApiId }),
       );
     },
   );
