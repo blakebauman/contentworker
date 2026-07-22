@@ -199,4 +199,105 @@ describe('granular RBAC over HTTP', () => {
     });
     expect(restorePost.status).toBe(403);
   });
+
+  it('masks embedded entries at include depth (fields, grants, and stubs)', async () => {
+    // A story links to a post (granted, with a denied field) and a page
+    // (ungranted): the embed must be masked / reverted to a stub respectively.
+    await app.request(`${M}/content-types`, {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({
+        apiId: 'story',
+        name: 'story',
+        displayField: 'title',
+        fields: [
+          symbolField('title', 0),
+          {
+            apiId: 'refPost',
+            name: 'refPost',
+            type: 'Link',
+            linkType: 'Entry',
+            localized: false,
+            required: false,
+            position: 1,
+          },
+          {
+            apiId: 'refPage',
+            name: 'refPage',
+            type: 'Link',
+            linkType: 'Entry',
+            localized: false,
+            required: false,
+            position: 2,
+          },
+        ],
+      }),
+    });
+    await app.request(`${M}/content-types/story/published`, { method: 'POST', headers: admin });
+    const created = await app.request(`${M}/entries`, {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({
+        contentTypeApiId: 'story',
+        fields: {
+          title: { 'en-US': 'A story' },
+          refPost: { 'en-US': { id: postId, linkType: 'Entry' } },
+          refPage: { 'en-US': { id: pageId, linkType: 'Entry' } },
+        },
+      }),
+    });
+    const { entry } = (await created.json()) as { entry: { id: string } };
+    await app.request(`${M}/entries/${entry.id}/published`, { method: 'POST', headers: admin });
+
+    const roleRes = await app.request('/spaces/s1/roles', {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({
+        name: 'Story reader',
+        scopes: ['delivery:read'],
+        contentGrants: [
+          { contentTypeApiId: 'story', actions: ['read'] },
+          { contentTypeApiId: 'post', actions: ['read'], deniedFields: ['internalNotes'] },
+          // no grant on 'page'
+        ],
+      }),
+    });
+    const role = (await roleRes.json()) as { id: string };
+    const keyRes = await app.request('/spaces/s1/api-keys', {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({ kind: 'cda', roleId: role.id }),
+    });
+    const { token } = (await keyRes.json()) as { token: string };
+
+    type Embedded = { id: string; contentType?: string; fields?: Record<string, unknown> };
+    const fetchStory = async (bearer: string, query: string) => {
+      const res = await app.request(`/delivery/s1/main/entries/${entry.id}?${query}`, {
+        headers: { Authorization: `Bearer ${bearer}` },
+      });
+      expect(res.status).toBe(200);
+      return (await res.json()) as { fields: Record<string, unknown> };
+    };
+
+    // Locale-flattened read: post embed masked, page embed reverted to stub.
+    const flat = await fetchStory(token, 'include=1&locale=en-US');
+    const refPost = flat.fields.refPost as Embedded;
+    expect(refPost.fields?.title).toBe('A post');
+    expect(refPost.fields?.internalNotes).toBeUndefined();
+    expect(flat.fields.refPage).toEqual({ id: pageId, linkType: 'Entry' });
+
+    // Unflattened read: embeds sit inside per-locale maps — still reached.
+    const mapped = await fetchStory(token, 'include=1');
+    const mappedPost = (mapped.fields.refPost as Record<string, Embedded>)['en-US'];
+    expect(mappedPost?.fields?.internalNotes).toBeUndefined();
+    expect((mapped.fields.refPage as Record<string, unknown>)['en-US']).toEqual({
+      id: pageId,
+      linkType: 'Entry',
+    });
+
+    // The full-access key still gets complete embeds (no over-masking).
+    const full = await fetchStory('cda', 'include=1&locale=en-US');
+    expect((full.fields.refPost as Embedded).fields?.internalNotes).toBe('secret');
+    expect((full.fields.refPage as Embedded).fields?.title).toBe('A page');
+  });
 });

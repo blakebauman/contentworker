@@ -1,4 +1,11 @@
-import { NotFoundError, type Scope, resolveLocalizedValue } from '@cw/domain';
+import {
+  NotFoundError,
+  type Principal,
+  type Scope,
+  canAccessContentType,
+  maskDeniedFields,
+  resolveLocalizedValue,
+} from '@cw/domain';
 import type { LocaleConfig } from '@cw/domain';
 import type { EntryQuery, PublishedEntry, SpaceConfig } from '@cw/ports';
 import type { AppContext } from './context.js';
@@ -170,4 +177,85 @@ export async function listPublishedEntries(
 /** Entries that link to `id` — the reverse-reference graph (for invalidation). */
 export async function getReverseReferences(ctx: AppContext, scope: Scope, id: string) {
   return ctx.store.references.findReverse(scope, id);
+}
+
+/** Shape test for an entry `render` embedded in place of a link stub. */
+function isEmbeddedEntry(value: unknown): value is DeliveredEntry {
+  const e = value as Partial<DeliveredEntry> | null;
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    !Array.isArray(e) &&
+    typeof e.id === 'string' &&
+    typeof e.contentType === 'string' &&
+    typeof e.publishedAt === 'string' &&
+    typeof e.fields === 'object' &&
+    e.fields !== null
+  );
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * Shape test for an asset `render` embedded in place of an asset link
+ * (`{ id, file, title?, description? }` — no contentType/publishedAt).
+ */
+function isEmbeddedAsset(value: unknown): value is { id: string } {
+  const a = value as { id?: unknown; file?: unknown; contentType?: unknown };
+  return (
+    typeof a?.id === 'string' &&
+    typeof a.file === 'object' &&
+    a.file !== null &&
+    a.contentType === undefined
+  );
+}
+
+/**
+ * Field-level RBAC over a RENDERED entry, embedded links included: masks the
+ * root's denied fields, then walks every place `render` can put an embedded
+ * entry (field values, array elements, per-locale maps) and masks each embed
+ * by ITS content type — or reverts it to the unresolved `{ id, linkType }`
+ * stub when the principal holds no read grant on that type. Must run
+ * post-cache: the delivery cache is shared across principals, so a masked
+ * render may never be written back.
+ *
+ * Detection is structural, so a user-authored JSON value shaped exactly like
+ * an embedded entry is treated as one — masked or stubbed, never leaked
+ * (conservative in the safe direction). No-grants principals pass through
+ * untouched.
+ */
+export function maskDeliveredFields(
+  principal: Principal,
+  contentType: string,
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!principal.contentGrants) return fields;
+  // atLocaleMapLevel: embeds sit one plain-object level down when fields are
+  // NOT locale-flattened ({ 'en-US': <embed> }); user JSON deeper than that
+  // can never contain a render-produced embed, so the walk stops there.
+  const walk = (value: unknown, atLocaleMapLevel: boolean): unknown => {
+    if (Array.isArray(value)) return value.map((v) => walk(v, atLocaleMapLevel));
+    if (isEmbeddedEntry(value)) {
+      if (!canAccessContentType(principal, 'read', value.contentType)) {
+        return { id: value.id, linkType: 'Entry' };
+      }
+      return {
+        ...value,
+        fields: maskDeliveredFields(principal, value.contentType, value.fields),
+      };
+    }
+    // Granular principals get NO asset access on the delivery surface (the
+    // asset endpoints 403 / return null for them) — embedded assets revert
+    // to the unresolved link stub for the same policy.
+    if (isEmbeddedAsset(value)) {
+      return { id: value.id, linkType: 'Asset' };
+    }
+    if (atLocaleMapLevel && isPlainObject(value)) {
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v, false)]));
+    }
+    return value;
+  };
+  const masked = maskDeniedFields(principal, contentType, fields);
+  return Object.fromEntries(Object.entries(masked).map(([k, v]) => [k, walk(v, true)]));
 }
