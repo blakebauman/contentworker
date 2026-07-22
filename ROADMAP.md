@@ -44,7 +44,7 @@ Remaining admin work:
 
 - [x] **Scheduled publishing + versioning/rollback** — `scheduling.ts` + worker tick;
   append-only entry versions with `listVersions`/`restoreVersion` and API routes.
-- [x] **Delivery SDKs** — `@cw/sdk-core`, `@cw/sdk-web`, `@cw/sdk-edge`,
+- [x] **Delivery SDKs** — `@cw/sdk-core`, `@cw/sdk-web`, `@cw/sdk-vue`, `@cw/sdk-edge`,
   `@cw/sdk-react-native`, `@cw/sdk-email`.
 - [ ] **Management SDK** (`@cw/sdk-management`) — extract the admin's hand-written typed
   client (`apps/admin/src/lib/management.ts`) into a published package with codegen'd
