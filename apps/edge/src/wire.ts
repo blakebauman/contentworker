@@ -15,8 +15,10 @@ import {
   type AgentRunner,
   type AppContext,
   EVENTS_TOPIC,
+  type FakeAdapterBinding,
   type PublishAgentsConfig,
   type RagDeps,
+  assertNoFakeAdapters,
 } from '@cw/application';
 import { type ApiKeyKind, scopesForKind } from '@cw/domain';
 import type {
@@ -78,6 +80,16 @@ export function wireEdge(env: EdgeEnv): EdgeWired {
   const config = loadConfig(env as unknown as NodeJS.ProcessEnv);
   const closers: (() => Promise<void>)[] = [];
 
+  // Hyperdrive is the pooler: a direct DATABASE_URL must use Neon's UNPOOLED
+  // endpoint. The pooled (-pooler) host runs PgBouncer transaction pooling,
+  // which silently breaks withTransaction connection pinning and the outbox's
+  // FOR UPDATE SKIP LOCKED claiming. Checked only when DATABASE_URL is what
+  // we'd actually connect with (no Hyperdrive binding).
+  if (!env.HYPERDRIVE && env.DATABASE_URL?.includes('-pooler.')) {
+    throw new Error(
+      'DATABASE_URL points at a pooled Neon endpoint (-pooler host); use the unpooled endpoint',
+    );
+  }
   const connectionString = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
   const cache = env.KV_CACHE ? createKvCache(env.KV_CACHE) : undefined;
   const queue = env.EVENTS_QUEUE
@@ -95,7 +107,17 @@ export function wireEdge(env: EdgeEnv): EdgeWired {
     store = inMemoryStore(config);
   }
 
-  const rag = makeRag(env);
+  // Fail fast when a persistent (Hyperdrive/DATABASE_URL) deployment would run
+  // behind dev fakes — mirror of the Node composition roots' guard.
+  const fakes: FakeAdapterBinding[] = [];
+  const rag = makeRag(env, fakes);
+  const blob = makeBlob(env, fakes);
+  const ai = makeAI(env, fakes);
+  assertNoFakeAdapters({
+    persistent: Boolean(connectionString),
+    allowFakeAdapters: env.ALLOW_FAKE_ADAPTERS,
+    fakes,
+  });
   // Meter AI spend per space via the CostGuard Durable Object (shared across
   // isolates/colos). Absent binding → unmetered (demo/dev).
   const costGuard = env.AI_BUDGET ? createDoCostGuard(env.AI_BUDGET) : undefined;
@@ -105,8 +127,8 @@ export function wireEdge(env: EdgeEnv): EdgeWired {
     ctx,
     config,
     rag,
-    blob: makeBlob(env),
-    ai: makeAI(env),
+    blob,
+    ai,
     bus: new InMemoryEventBus(),
     cache,
     queue,
@@ -141,9 +163,13 @@ export function makeAgents(env: EdgeEnv, ctx: AppContext, ai: AIProvider): Agent
 }
 
 /** AI provider: same policy as the Node composition roots. */
-export function makeAI(env: EdgeEnv): AIProvider {
+export function makeAI(env: EdgeEnv, fakes?: FakeAdapterBinding[]): AIProvider {
   if (env.AI_PROVIDER === 'azure-openai') return createAzureOpenAIProvider();
   if (env.ANTHROPIC_API_KEY) return createAnthropicProvider({ apiKey: env.ANTHROPIC_API_KEY });
+  fakes?.push({
+    key: 'ai',
+    detail: 'StubAIProvider (placeholder generations) — set ANTHROPIC_API_KEY or AI_PROVIDER',
+  });
   return new StubAIProvider(devGenerate);
 }
 
@@ -163,7 +189,7 @@ function devGenerate(req: GenerateRequest): unknown {
 }
 
 /** R2 via the S3 API when BLOB_BUCKET is set (explicit credentials); else fake. */
-function makeBlob(env: EdgeEnv): BlobStore {
+function makeBlob(env: EdgeEnv, fakes: FakeAdapterBinding[]): BlobStore {
   if (env.BLOB_BUCKET) {
     return createS3BlobStore({
       bucket: env.BLOB_BUCKET,
@@ -181,15 +207,34 @@ function makeBlob(env: EdgeEnv): BlobStore {
         : {}),
     });
   }
+  fakes.push({
+    key: 'blob',
+    detail: 'FakeBlobStore (uploads are lost) — set BLOB_BUCKET + R2 S3-API credentials',
+  });
   return new FakeBlobStore();
 }
 
 /** Embeddings by env; vectors on Vectorize when bound, else in-memory. */
-function makeRag(env: EdgeEnv): RagDeps {
+function makeRag(env: EdgeEnv, fakes: FakeAdapterBinding[]): RagDeps {
+  // Explicit EMBEDDINGS_PROVIDER=local is informed consent to hash embeddings;
+  // only the silent default (unset/unknown) counts as a fake.
+  if (env.EMBEDDINGS_PROVIDER !== 'azure-openai' && env.EMBEDDINGS_PROVIDER !== 'local') {
+    fakes.push({
+      key: 'embeddings',
+      detail:
+        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai, or =local to accept explicitly',
+    });
+  }
   const embeddings: EmbeddingsProvider =
     env.EMBEDDINGS_PROVIDER === 'azure-openai'
       ? createAzureOpenAIEmbeddings()
       : new LocalEmbeddingsProvider(Number(env.EMBEDDINGS_DIM ?? 1536));
+  if (!env.VECTORIZE) {
+    fakes.push({
+      key: 'vectors',
+      detail: 'in-memory vector store (per-isolate, non-durable) — bind VECTORIZE',
+    });
+  }
   const vectors: VectorStore = env.VECTORIZE
     ? createVectorizeStore(env.VECTORIZE, {
         dimensions: embeddings.dimensions,

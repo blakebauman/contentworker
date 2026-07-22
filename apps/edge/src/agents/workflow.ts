@@ -7,7 +7,7 @@ import {
   moderateWorkflow,
   repurposeWorkflow,
 } from '@cw/agent-runtime/workflows';
-import type { AppContext } from '@cw/application';
+import { type AppContext, type FakeAdapterBinding, assertNoFakeAdapters } from '@cw/application';
 import type { AIProvider, ContentStore, IdGenerator } from '@cw/ports';
 import { InMemoryContentStore } from '@cw/test-kit';
 import { v7 as uuidv7 } from 'uuid';
@@ -73,7 +73,16 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
     const store: ContentStore = connectionString
       ? createPostgresStore(connectionString, { max: 2, fetchTypes: false })
       : (new InMemoryContentStore() as ContentStore);
-    const ai: AIProvider = makeAI(this.env);
+    // Same fail-closed policy as wireEdge: a durable run against the real
+    // database must not persist StubAIProvider placeholders. Workflow
+    // invocations don't pass through wireEdge, so the guard is repeated here.
+    const fakes: FakeAdapterBinding[] = [];
+    const ai: AIProvider = makeAI(this.env, fakes);
+    assertNoFakeAdapters({
+      persistent: Boolean(connectionString),
+      allowFakeAdapters: this.env.ALLOW_FAKE_ADAPTERS,
+      fakes,
+    });
     const ids: IdGenerator = { newId: () => uuidv7() };
     const ctx: AppContext = { store, clock: { now: () => new Date() }, ids };
 

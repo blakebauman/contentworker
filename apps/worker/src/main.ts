@@ -19,6 +19,7 @@ import {
   EVENTS_TOPIC,
   type RagDeps,
   aiBudgetLimits,
+  assertNoFakeAdapters,
   consumeEvent,
   relayOutbox,
   runDueScheduledActions,
@@ -48,6 +49,20 @@ const ids: IdGenerator = { newId: () => uuidv7() };
 function makeRag(connectionString: string): RagDeps | undefined {
   const provider = process.env.EMBEDDINGS_PROVIDER;
   if (!provider) return undefined;
+  // Explicit 'local' is informed consent to hash embeddings; an unknown value
+  // would otherwise silently select them. The worker always runs persistent.
+  if (provider !== 'azure-openai' && provider !== 'local') {
+    assertNoFakeAdapters({
+      persistent: true,
+      allowFakeAdapters: process.env.ALLOW_FAKE_ADAPTERS,
+      fakes: [
+        {
+          key: 'embeddings',
+          detail: `unknown EMBEDDINGS_PROVIDER '${provider}' falls back to hash-based embeddings — use azure-openai, or local to accept explicitly`,
+        },
+      ],
+    });
+  }
   const embeddings: EmbeddingsProvider =
     provider === 'azure-openai'
       ? createAzureOpenAIEmbeddings()
