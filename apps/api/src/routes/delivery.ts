@@ -17,7 +17,19 @@ import {
   maskDeniedFields,
 } from '@cw/domain';
 import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '@cw/graphql-gen';
-import { type GraphQLSchema, graphql } from 'graphql';
+import {
+  type ASTNode,
+  type FragmentDefinitionNode,
+  GraphQLError,
+  type GraphQLSchema,
+  NoSchemaIntrospectionCustomRule,
+  type OperationDefinitionNode,
+  type ValidationRule,
+  execute,
+  parse,
+  specifiedRules,
+  validate,
+} from 'graphql';
 import { type Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import {
@@ -33,6 +45,50 @@ import { MAX_PAGE_LIMIT, clampCount, entryQueryFrom, parseEntryQuery } from '../
 
 /** Max reference-resolution depth a delivery client may request. */
 const MAX_INCLUDE_DEPTH = 10;
+
+/** Max GraphQL selection-set nesting accepted (abuse/complexity guard). */
+const MAX_GQL_DEPTH = 12;
+
+/** Recursively measures selection-set nesting, following fragments. */
+function selectionDepth(
+  node: { selectionSet?: { selections: readonly ASTNode[] } },
+  fragments: Record<string, FragmentDefinitionNode>,
+  depth: number,
+): number {
+  const selections = node.selectionSet?.selections ?? [];
+  let max = depth;
+  for (const sel of selections) {
+    if (sel.kind === 'Field') {
+      max = Math.max(max, selectionDepth(sel, fragments, depth + 1));
+    } else if (sel.kind === 'InlineFragment') {
+      max = Math.max(max, selectionDepth(sel, fragments, depth));
+    } else if (sel.kind === 'FragmentSpread') {
+      const frag = fragments[sel.name.value];
+      if (frag) max = Math.max(max, selectionDepth(frag, fragments, depth));
+    }
+  }
+  return max;
+}
+
+/** A validation rule rejecting operations whose nesting exceeds `maxDepth`. */
+function depthLimitRule(maxDepth: number): ValidationRule {
+  return (context) => {
+    const fragments: Record<string, FragmentDefinitionNode> = {};
+    for (const def of context.getDocument().definitions) {
+      if (def.kind === 'FragmentDefinition') fragments[def.name.value] = def;
+    }
+    return {
+      OperationDefinition(node: OperationDefinitionNode) {
+        const depth = selectionDepth(node, fragments, 0);
+        if (depth > maxDepth) {
+          context.reportError(
+            new GraphQLError(`Query exceeds the maximum depth of ${maxDepth}.`, { nodes: [node] }),
+          );
+        }
+      },
+    };
+  };
+}
 
 const scopeOf = (c: Context<AuthVars>): Scope => ({
   spaceId: c.req.param('space') as string,
@@ -315,9 +371,26 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     const body = c.req.method === 'POST' ? await c.req.json().catch(() => ({})) : {};
     const source = (body as { query?: string }).query ?? c.req.query('query');
     if (!source) return c.json({ errors: [{ message: 'No GraphQL query provided' }] }, 400);
-    const result = await graphql({
-      schema: await schemaFor(scopeOf(c), c.get('principal')),
-      source,
+    const schema = await schemaFor(scopeOf(c), c.get('principal'));
+
+    let document: ReturnType<typeof parse>;
+    try {
+      document = parse(source);
+    } catch (err) {
+      const message = err instanceof GraphQLError ? err.message : 'Invalid GraphQL query';
+      return c.json({ errors: [{ message }] }, 400);
+    }
+
+    // Bound query depth (a single request can otherwise fan out unboundedly) and,
+    // in production, forbid introspection so the per-tenant schema isn't exposed.
+    const rules: ValidationRule[] = [...specifiedRules, depthLimitRule(MAX_GQL_DEPTH)];
+    if (process.env.NODE_ENV === 'production') rules.push(NoSchemaIntrospectionCustomRule);
+    const errors = validate(schema, document, rules);
+    if (errors.length > 0) return c.json({ errors }, 400);
+
+    const result = await execute({
+      schema,
+      document,
       variableValues: (body as { variables?: Record<string, unknown> }).variables,
       operationName: (body as { operationName?: string }).operationName,
     });

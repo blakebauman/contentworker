@@ -164,4 +164,39 @@ describe('granular RBAC over HTTP', () => {
     ).json()) as { fields: Record<string, unknown> };
     expect(full.fields.internalNotes).toBeDefined();
   });
+
+  it('enforces granular RBAC on version-history reads', async () => {
+    // Granted type: version snapshot is readable but the denied field is masked.
+    const versions = (await (
+      await app.request(`${M}/entries/${postId}/versions`, { headers: editor })
+    ).json()) as { items: { fields: Record<string, unknown> }[] };
+    expect(versions.items.length).toBeGreaterThan(0);
+    expect(versions.items.every((v) => v.fields.title !== undefined)).toBe(true);
+    expect(versions.items.every((v) => v.fields.internalNotes === undefined)).toBe(true);
+
+    // Ungranted type: version history is forbidden, not leaked.
+    const pageVersions = await app.request(`${M}/entries/${pageId}/versions`, { headers: editor });
+    expect(pageVersions.status).toBe(403);
+
+    // A single version snapshot of an ungranted type is likewise forbidden.
+    const pageVersion = await app.request(`${M}/entries/${pageId}/versions/1`, { headers: editor });
+    expect(pageVersion.status).toBe(403);
+  });
+
+  it('applies write authorization when restoring a version', async () => {
+    // Restoring an ungranted type is rejected.
+    const restorePage = await app.request(`${M}/entries/${pageId}/versions/1/restore`, {
+      method: 'POST',
+      headers: editor,
+    });
+    expect(restorePage.status).toBe(403);
+
+    // Restoring a granted entry whose snapshot includes a denied field is rejected
+    // (it would otherwise resurrect internalNotes past the field rule).
+    const restorePost = await app.request(`${M}/entries/${postId}/versions/1/restore`, {
+      method: 'POST',
+      headers: editor,
+    });
+    expect(restorePost.status).toBe(403);
+  });
 });

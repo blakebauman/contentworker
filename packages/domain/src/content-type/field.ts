@@ -67,3 +67,34 @@ const API_ID_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 export function isValidApiId(apiId: string): boolean {
   return API_ID_RE.test(apiId) && apiId.length <= 64;
 }
+
+const ALLOWED_REGEX_FLAGS = 'gimsuy';
+const MAX_REGEX_PATTERN_LENGTH = 1000;
+// Heuristic for the classic catastrophic-backtracking shape: a quantifier
+// applied to a group that itself contains a quantifier (e.g. (a+)+, ([a-z]*)+).
+const NESTED_QUANTIFIER = /\([^()]*[+*][^()]*\)\s*[+*{]/;
+
+/**
+ * Rejects a user-authored validation regexp that is malformed or prone to ReDoS,
+ * so a content-type author can't stall the write path (which compiles and runs
+ * this pattern against every entry value). Returns `null` when safe, else a
+ * human-readable reason. Kept dependency-free (domain depends on nothing), so it
+ * is a conservative heuristic rather than a full static analysis.
+ */
+export function unsafeRegexReason(pattern: string, flags = ''): string | null {
+  if (pattern.length > MAX_REGEX_PATTERN_LENGTH) {
+    return `pattern must be at most ${MAX_REGEX_PATTERN_LENGTH} characters`;
+  }
+  for (const f of flags) {
+    if (!ALLOWED_REGEX_FLAGS.includes(f)) return `unsupported regex flag "${f}"`;
+  }
+  if (NESTED_QUANTIFIER.test(pattern)) {
+    return 'pattern rejected: nested quantifiers risk catastrophic backtracking';
+  }
+  try {
+    new RegExp(pattern, flags);
+  } catch {
+    return 'invalid regular expression';
+  }
+  return null;
+}

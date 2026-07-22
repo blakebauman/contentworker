@@ -8,6 +8,7 @@ export const DEV_TOKEN_DEFAULTS = new Set([
   'dev-cpa-key',
   'dev-admin-token',
   'dev-mcp-token',
+  'dev-session-secret-change-me-in-production',
 ]);
 
 const MIN_SECRET_LENGTH = 32;
@@ -41,6 +42,8 @@ export interface SecureSecretsInput {
   readonly cmaKey?: string;
   readonly cdaKey?: string;
   readonly cpaKey?: string;
+  /** HMAC secret for admin SSO session cookies; pass only when OIDC is enabled. */
+  readonly sessionSecret?: string;
 }
 
 /**
@@ -62,6 +65,7 @@ export function assertSecureSecrets(input: SecureSecretsInput): void {
     ['CMA_KEY', input.cmaKey],
     ['CDA_KEY', input.cdaKey],
     ['CPA_KEY', input.cpaKey],
+    ['SESSION_SECRET', input.sessionSecret],
   ] as const) {
     if (!value) continue;
     if (DEV_TOKEN_DEFAULTS.has(value)) {

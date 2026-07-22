@@ -23,6 +23,7 @@ import {
   environmentMiddleware,
   principalMiddleware,
   requireScope,
+  throttleAuth,
 } from '../auth.js';
 import { doc } from '../docs/openapi.js';
 import { publishedEntryList } from '../docs/schemas.js';
@@ -103,7 +104,11 @@ export function previewRoutes(deps: AuthDeps): Hono<AuthVars> {
     environmentMiddleware(deps),
     async (c) => {
       const entryId = c.req.param('id');
-      const principal = await resolvePreviewPrincipal(deps, c, entryId);
+      // Throttle credential resolution so preview-token / bearer guessing on this
+      // route is bounded by the same failed-auth budget as the bearer middleware.
+      const principal = await throttleAuth(deps, c, () =>
+        resolvePreviewPrincipal(deps, c, entryId),
+      );
       authorize(principal, SCOPES.previewRead, scopeOf(c).spaceId);
 
       const entry = await getPreviewEntry(ctx, scopeOf(c), entryId, {

@@ -22,6 +22,7 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `DATABASE_URL` | — | Postgres connection string; absent → in-memory store |
 | `REDIS_URL` | — | Redis connection string; absent → no cache (and the worker won't start) |
 | `MAX_BODY_BYTES` | `5242880` | Max accepted request body size (DoS guard); oversized → 413 |
+| `TRUSTED_PROXY_COUNT` | `1` | Reverse proxies in front; X-Forwarded-For is read this many hops from the right (spoof-resistant rate-limit keying). `0` ignores XFF |
 | `NODE_ENV` | `production` | Set in the Dockerfile |
 
 ## API keys (dev seeds)

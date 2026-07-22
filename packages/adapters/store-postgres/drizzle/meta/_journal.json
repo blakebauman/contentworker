@@ -148,6 +148,13 @@
       "when": 1783802179936,
       "tag": "0020_low_prima",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784677025418,
+      "tag": "0021_furry_bullseye",
+      "breakpoints": true
     }
   ]
 }

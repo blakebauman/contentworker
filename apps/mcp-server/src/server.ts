@@ -30,6 +30,7 @@ import {
   getContentType,
   getPreviewEntry,
   getRelease,
+  getVersion,
   hybridSearch,
   listAIActions,
   listAppExtensions,
@@ -133,6 +134,13 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     if (!principal.contentGrants) return;
     const entry = await getPreviewEntry(ctx, s, id);
     authorizeContent(principal, action, entry.contentType);
+  };
+  // Authorizes read on an entry and returns its content type, so version/history
+  // tools can mask denied fields — mirrors the HTTP API's authorizeEntryRead.
+  const authorizeEntryRead = async (s: Scope, id: string): Promise<string> => {
+    const entry = await getPreviewEntry(ctx, s, id);
+    authorizeContent(principal, 'read', entry.contentType);
+    return entry.contentType;
   };
 
   // --- read / query / search ---------------------------------------------
@@ -787,7 +795,12 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     { id: z.string(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.previewRead, scopeOf(args));
-      return ok(await listVersions(ctx, scopeOf(args), args.id));
+      const type = await authorizeEntryRead(scopeOf(args), args.id);
+      const items = (await listVersions(ctx, scopeOf(args), args.id)).map((v) => ({
+        ...v,
+        fields: maskDeniedFields(principal, type, v.fields),
+      }));
+      return ok(items);
     },
   );
 
@@ -797,7 +810,14 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     { id: z.string(), from: z.number(), to: z.number(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.previewRead, scopeOf(args));
-      return ok(await diffVersions(ctx, scopeOf(args), args.id, args.from, args.to));
+      const type = await authorizeEntryRead(scopeOf(args), args.id);
+      const diff = await diffVersions(ctx, scopeOf(args), args.id, args.from, args.to);
+      const allowed = maskDeniedFields(
+        principal,
+        type,
+        Object.fromEntries(diff.changes.map((ch) => [ch.field, ch])),
+      );
+      return ok({ ...diff, changes: Object.values(allowed) });
     },
   );
 
@@ -807,6 +827,10 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     { id: z.string(), version: z.number(), ...scopeArgs },
     async (args) => {
       guard(SCOPES.contentWrite, scopeOf(args));
+      const entry = await getPreviewEntry(ctx, scopeOf(args), args.id);
+      authorizeContent(principal, 'write', entry.contentType);
+      const target = await getVersion(ctx, scopeOf(args), args.id, args.version);
+      assertWritableFields(principal, entry.contentType, target.fields);
       return ok(await restoreVersion(ctx, scopeOf(args), args.id, args.version));
     },
   );

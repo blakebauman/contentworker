@@ -9,6 +9,7 @@ import {
 import type { AIProvider, ModelTier } from '@cw/ports';
 import { recordAgentRun } from './agent-audit.js';
 import { generateWithBudget } from './ai-budget.js';
+import { UNTRUSTED_CONTENT_GUARD, wrapUntrusted } from './ai-prompt.js';
 import type { AppContext } from './context.js';
 import { getEntry, updateEntry } from './entries.js';
 import { createTag, getEntryMetadata, listTags, setEntryMetadata } from './taxonomy.js';
@@ -106,8 +107,8 @@ export async function translateEntry(
   const properties: Record<string, Record<string, unknown>> = {};
   for (const apiId of fieldIds) properties[apiId] = { type: 'string' };
   const result = await generateWithBudget(ctx, ai, scope, {
-    system: `You are a professional translator. Translate each field value into ${input.targetLocale}, preserving meaning, tone, and any markup. Return only the translations.`,
-    prompt: `Translate these fields from ${source} to ${input.targetLocale}:\n${JSON.stringify(source_texts, null, 2)}`,
+    system: `You are a professional translator. Translate each field value into ${input.targetLocale}, preserving meaning, tone, and any markup. Return only the translations. ${UNTRUSTED_CONTENT_GUARD}`,
+    prompt: `Translate these fields from ${source} to ${input.targetLocale}:\n${wrapUntrusted(JSON.stringify(source_texts, null, 2))}`,
     tier: input.tier ?? 'balanced',
     maxTokens: 4096,
     outputSchema: {
@@ -177,8 +178,8 @@ export async function summarizeEntry(
   }
   const maxWords = input.maxWords ?? 60;
   const result = await generateWithBudget(ctx, ai, scope, {
-    system: `You summarize content. Write a single clear summary of at most ${maxWords} words.`,
-    prompt: `Summarize this ${ct.name}:\n${text}`,
+    system: `You summarize content. Write a single clear summary of at most ${maxWords} words. ${UNTRUSTED_CONTENT_GUARD}`,
+    prompt: `Summarize this ${ct.name}:\n${wrapUntrusted(text)}`,
     tier: input.tier ?? 'fast',
     maxTokens: 512,
     outputSchema: {
@@ -259,14 +260,12 @@ export async function autofillField(
 
   const context = collectText(ct, fields, locale, defaultLocale);
   const result = await generateWithBudget(ctx, ai, scope, {
-    system:
-      'You fill in a single missing field of a content entry based on its other fields. ' +
-      'Return only the value, matching the requested type.',
+    system: `You fill in a single missing field of a content entry based on its other fields. Return only the value, matching the requested type. ${UNTRUSTED_CONTENT_GUARD}`,
     prompt: [
       `Content type: ${ct.name}.`,
       `Field to fill: ${def.name} (${def.type}).`,
       input.instructions ? `Instructions: ${input.instructions}` : '',
-      `Other fields:\n${context || '(none)'}`,
+      `Other fields:\n${context ? wrapUntrusted(context) : '(none)'}`,
     ]
       .filter(Boolean)
       .join('\n'),
@@ -328,12 +327,10 @@ export async function suggestEntryTags(
   const text = collectText(ct, fields, defaultLocale, defaultLocale);
   const existing = await listTags(ctx, scope);
   const result = await generateWithBudget(ctx, ai, scope, {
-    system:
-      'You classify content with taxonomy tags. Prefer the existing vocabulary; ' +
-      'suggest new tag names only when nothing fits. Return tag NAMES, lowercase.',
+    system: `You classify content with taxonomy tags. Prefer the existing vocabulary; suggest new tag names only when nothing fits. Return tag NAMES, lowercase. ${UNTRUSTED_CONTENT_GUARD}`,
     prompt: [
       `Content type: ${ct.name}.`,
-      `Content:\n${text || '(no text)'}`,
+      `Content:\n${text ? wrapUntrusted(text) : '(no text)'}`,
       `Existing tags: ${existing.map((t) => t.name).join(', ') || '(none)'}`,
     ].join('\n'),
     tier: input.tier ?? 'fast',

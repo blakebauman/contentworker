@@ -1,5 +1,9 @@
 import type { ContentType } from '../content-type/content-type.js';
-import type { FieldDefinition, FieldValidations } from '../content-type/field.js';
+import {
+  type FieldDefinition,
+  type FieldValidations,
+  unsafeRegexReason,
+} from '../content-type/field.js';
 import { type FieldIssue, ValidationError } from '../errors.js';
 import { validateRichText } from '../rich-text/rich-text.js';
 import type { EntryFields, LocaleCode } from '../types.js';
@@ -95,8 +99,16 @@ function validateValue(
       }
       checkSize(value.length, v?.size, push, 'length');
       checkIn(value, v, push);
-      if (v?.regexp && !new RegExp(v.regexp.pattern, v.regexp.flags).test(value)) {
-        push(`Does not match pattern /${v.regexp.pattern}/`);
+      if (v?.regexp) {
+        // Defence in depth: patterns are screened at content-type authoring time
+        // (unsafeRegexReason), but a bad/unsafe pattern here must surface as a
+        // validation issue, never an uncaught 500.
+        const reason = unsafeRegexReason(v.regexp.pattern, v.regexp.flags);
+        if (reason) {
+          push(`Invalid pattern: ${reason}`);
+        } else if (!new RegExp(v.regexp.pattern, v.regexp.flags).test(value)) {
+          push(`Does not match pattern /${v.regexp.pattern}/`);
+        }
       }
       break;
     }

@@ -28,6 +28,28 @@ describe('token-crypto', () => {
     ).toThrow(/Insecure configuration/);
   });
 
+  it('rejects the dev session secret when required', () => {
+    expect(() =>
+      assertSecureSecrets({
+        requireSecureSecrets: true,
+        seedDev: false,
+        adminToken: 'a'.repeat(32),
+        sessionSecret: 'dev-session-secret-change-me-in-production',
+      }),
+    ).toThrow(/SESSION_SECRET/);
+  });
+
+  it('accepts a strong session secret', () => {
+    expect(() =>
+      assertSecureSecrets({
+        requireSecureSecrets: true,
+        seedDev: false,
+        adminToken: 'a'.repeat(32),
+        sessionSecret: 's'.repeat(40),
+      }),
+    ).not.toThrow();
+  });
+
   it('requireSecureSecretsFromEnv is true when NODE_ENV=production', () => {
     expect(requireSecureSecretsFromEnv({ NODE_ENV: 'production' })).toBe(true);
   });

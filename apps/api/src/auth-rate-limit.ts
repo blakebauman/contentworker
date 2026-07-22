@@ -52,8 +52,36 @@ export class AuthRateLimiter implements AuthRateLimit {
   }
 }
 
-/** Client key for rate limiting — prefers X-Forwarded-For first hop. */
-export function clientIp(forwardedFor: string | undefined, remoteAddr: string | undefined): string {
-  const forwarded = forwardedFor?.split(',')[0]?.trim();
-  return forwarded || remoteAddr || 'unknown';
+/**
+ * Derives the client key for rate limiting in a spoof-resistant way.
+ *
+ * `cf-connecting-ip` (set by Cloudflare, not client-forgeable) always wins. On a
+ * plain Node deployment behind reverse proxies, `X-Forwarded-For` is parsed from
+ * the RIGHT: with `trustedProxyCount` proxies in front, the genuine client is the
+ * entry `trustedProxyCount` from the end — anything an attacker prepends on the
+ * left is ignored. Taking the left-most hop (the old behaviour) let a client set
+ * a fresh key per request and defeat the failed-auth budget entirely.
+ */
+export function clientIp(opts: {
+  cfConnectingIp?: string;
+  forwardedFor?: string;
+  realIp?: string;
+  trustedProxyCount?: number;
+}): string {
+  const cf = opts.cfConnectingIp?.trim();
+  if (cf) return cf;
+  const trusted = Math.max(0, opts.trustedProxyCount ?? 1);
+  const hops = (opts.forwardedFor ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // With `trusted` proxies in front, each appends the address it received from,
+  // so the genuine client sits `trusted` entries from the end; anything further
+  // left is client-supplied and ignored. `trusted === 0` means X-Forwarded-For is
+  // wholly untrusted, so fall back to the socket-derived address.
+  if (trusted >= 1 && hops.length > 0) {
+    const idx = Math.max(0, hops.length - trusted);
+    return hops[idx] ?? hops[hops.length - 1] ?? 'unknown';
+  }
+  return opts.realIp?.trim() || 'unknown';
 }

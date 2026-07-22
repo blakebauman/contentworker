@@ -21,6 +21,8 @@ export interface CreateApiKeyInput {
    * content grants are resolved live on every request, superseding `scopes`.
    */
   readonly roleId?: string;
+  /** ISO timestamp after which the key stops authenticating (optional). */
+  readonly expiresAt?: string;
 }
 
 export interface CreatedApiKey {
@@ -56,6 +58,7 @@ export async function createApiKey(
     scopes: roleScopes ?? input.scopes ?? scopesForKind(input.kind),
     revoked: false,
     roleId: input.roleId,
+    expiresAt: input.expiresAt,
   };
   await ctx.store.auth.createApiKey(apiKey);
   return { apiKey, token };
@@ -70,6 +73,11 @@ export async function authenticate(
   if (!token) throw new UnauthorizedError();
   const key = await ctx.store.auth.findByHash(hasher.hash(token));
   if (!key) throw new UnauthorizedError();
+  // Expired keys fail closed (e.g. an orphaned OIDC-delegated key whose session
+  // lapsed). Checked here so both stores enforce it uniformly.
+  if (key.expiresAt && new Date(key.expiresAt).getTime() <= ctx.clock.now().getTime()) {
+    throw new UnauthorizedError('API key has expired');
+  }
   // Best-effort last-used tracking — must not block authentication.
   void ctx.store.auth.touchLastUsed(key.id, ctx.clock.now()).catch(() => {});
   if (key.roleId) {

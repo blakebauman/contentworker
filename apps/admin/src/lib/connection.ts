@@ -32,7 +32,10 @@ function readStored(mode: PersistMode): Partial<Connection> | null {
 function load(): Connection {
   const fromSession = readStored('session');
   const fromLocal = readStored('local');
-  const saved = { ...DEV_DEFAULT, ...(fromLocal ?? fromSession ?? {}) };
+  // Ignore any token that may be present in older stored payloads; the token is
+  // in-memory only (DEV seeds a convenience default).
+  const stored = fromLocal ?? fromSession ?? {};
+  const saved = { ...DEV_DEFAULT, ...stored, token: DEV_DEFAULT.token };
   if (saved.environment === 'master') {
     return { ...saved, environment: 'main' };
   }
@@ -41,7 +44,10 @@ function load(): Connection {
 
 function persist(conn: Connection): void {
   const mode = conn.persistMode ?? 'local';
-  const payload = JSON.stringify(conn);
+  // Never write the bearer token to web storage — any same-origin script (XSS,
+  // a third-party app-extension iframe) could read it. The token lives only in
+  // memory for the session; durable auth is the httpOnly SSO session cookie.
+  const payload = JSON.stringify({ ...conn, token: '' });
   try {
     if (mode === 'session') {
       sessionStorage.setItem(storageKey('session'), payload);

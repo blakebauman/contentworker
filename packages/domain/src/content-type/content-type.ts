@@ -1,6 +1,6 @@
 import { ConflictError, ValidationError } from '../errors.js';
 import type { ContentTypeStatus } from '../types.js';
-import { type FieldDefinition, isValidApiId } from './field.js';
+import { type FieldDefinition, isValidApiId, unsafeRegexReason } from './field.js';
 
 /**
  * A content type: the schema for a class of entries. Definitions are versioned
@@ -73,6 +73,11 @@ function assertFieldsValid(fields: readonly FieldDefinition[], displayField: str
       throw new ConflictError(`Duplicate field apiId "${f.apiId}"`);
     }
     seen.add(f.apiId);
+    const rx = f.validations?.regexp;
+    if (rx) {
+      const reason = unsafeRegexReason(rx.pattern, rx.flags);
+      if (reason) throw new ValidationError([{ field: f.apiId, message: reason }]);
+    }
   }
   if (fields.length > 0 && !seen.has(displayField)) {
     throw new ValidationError([

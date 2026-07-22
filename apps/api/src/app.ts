@@ -3,6 +3,7 @@ import type { AppContext, RagDeps } from '@cw/application';
 import type { AIProvider, BlobStore, EventBus } from '@cw/ports';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { secureHeaders } from 'hono/secure-headers';
 import type { AuthDeps, AuthRateLimit } from './auth.js';
 import { createApiHasher } from './auth.js';
 import type { ApiConfig } from './config.js';
@@ -36,6 +37,21 @@ export function createApp(
   const app = new Hono();
   app.onError(onError);
 
+  // Baseline security headers on every response: nosniff, clickjacking and
+  // MIME-sniffing protection, HSTS, and a strict referrer policy. No restrictive
+  // Content-Security-Policy is set here because this app also serves the admin
+  // SPA and third-party app-extension iframes in some deployments; the edge sets
+  // a CSP tuned for the admin bundle.
+  app.use(
+    '*',
+    secureHeaders({
+      xFrameOptions: 'DENY',
+      xContentTypeOptions: 'nosniff',
+      strictTransportSecurity: 'max-age=31536000; includeSubDomains',
+      referrerPolicy: 'no-referrer',
+    }),
+  );
+
   // Reject oversized request bodies before any handler reads them (DoS guard).
   app.use(
     '*',
@@ -68,6 +84,7 @@ export function createApp(
     // on-publish runs (AGENT_RUNTIME=temporal).
     agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),
     rateLimiter,
+    trustedProxyCount: config.trustedProxyCount,
   };
 
   const mountManagement = config.role === 'all' || config.role === 'management';

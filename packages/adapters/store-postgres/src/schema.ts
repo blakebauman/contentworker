@@ -194,6 +194,8 @@ export const apiKeys = pgTable(
     // Granular RBAC: when set, permissions resolve live from this role.
     roleId: text('role_id'),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    // When set, the key stops authenticating after this instant (e.g. OIDC keys).
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
