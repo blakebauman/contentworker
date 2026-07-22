@@ -9,6 +9,23 @@ data:
   EMBEDDINGS_PROVIDER: {{ .Values.config.embeddingsProvider | quote }}
   {{- end }}
   EMBEDDINGS_DIM: {{ .Values.config.embeddingsDim | quote }}
+  {{- with .Values.blob }}
+  {{- if .bucket }}
+  BLOB_BUCKET: {{ .bucket | quote }}
+  {{- with .endpoint }}
+  BLOB_ENDPOINT: {{ . | quote }}
+  {{- end }}
+  {{- with .region }}
+  AWS_REGION: {{ . | quote }}
+  {{- end }}
+  {{- if .forcePathStyle }}
+  BLOB_FORCE_PATH_STYLE: "true"
+  {{- end }}
+  {{- with .publicBaseUrl }}
+  BLOB_PUBLIC_BASE_URL: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
   {{- if .Values.migrator.skipPgvector }}
   SKIP_PGVECTOR: "true"
   {{- end }}

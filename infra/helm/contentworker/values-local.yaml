@@ -8,6 +8,11 @@ config:
   embeddingsProvider: local
   extraEnv:
     ADMIN_UI_URL: "http://cms.localtest.me/dashboard"
+    # The image sets NODE_ENV=production, which auto-enables the secure-secrets
+    # guard; this install ships dev tokens, so switch the guard off explicitly.
+    REQUIRE_SECURE_SECRETS: "false"
+    # Local runs have no Anthropic key or object store; accept those fakes.
+    ALLOW_FAKE_ADAPTERS: "ai,blob"
     # OIDC_* via extraEnv or External Secrets when wiring a real IdP.
 
 # Bundled datastores; the default secret URLs already point at these services.

@@ -16,6 +16,9 @@ x-app-env: &app-env
   REQUIRE_SECURE_SECRETS: "false"
   # Local deterministic embeddings + pgvector (matches Helm values-local.yaml).
   EMBEDDINGS_PROVIDER: local
+  # No Anthropic key / object store locally: accept the stub AI + fake blob
+  # (persistent installs refuse to boot on unallowed fakes otherwise).
+  ALLOW_FAKE_ADAPTERS: "ai,blob"
 
 services:
   postgres:

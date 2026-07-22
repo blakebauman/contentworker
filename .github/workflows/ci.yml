@@ -72,6 +72,17 @@ jobs:
           helm dependency update infra/helm/contentworker
           helm lint infra/helm/contentworker
 
+      # Render the chart with every committed values file so per-values
+      # regressions (a value referenced by no template, a broken conditional)
+      # fail CI, not an install.
+      - name: Template Helm chart (all values files)
+        run: |
+          helm template cw infra/helm/contentworker > /dev/null
+          for f in infra/helm/contentworker/values-*.yaml; do
+            echo "--- ${f}"
+            helm template cw infra/helm/contentworker -f "${f}" > /dev/null
+          done
+
       - name: Typecheck
         run: pnpm -r --filter '!@cw/migrator' run typecheck
 

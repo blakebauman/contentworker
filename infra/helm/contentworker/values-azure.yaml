@@ -34,6 +34,15 @@ secrets:
 postgres: { bundled: false } # Azure DB for PostgreSQL (Flexible Server)
 redis: { bundled: false }    # Azure Cache for Redis
 
+# Azure Blob Storage has no S3 API. Point the S3-compatible blob store at a
+# MinIO (or other S3-compatible) endpoint, with HMAC keys in the secret as
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY — or explicitly accept the fake
+# with config.extraEnv ALLOW_FAKE_ADAPTERS: "blob" (assets then don't persist).
+blob:
+  bucket: REPLACE-contentworker-assets
+  endpoint: "https://REPLACE-s3-compatible-endpoint"
+  forcePathStyle: true
+
 api:
   split:
     enabled: true
