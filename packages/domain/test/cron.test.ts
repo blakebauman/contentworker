@@ -56,7 +56,9 @@ describe('nextCronOccurrence (UTC)', () => {
       '* 24 * * *',
       'a * * * *',
       '*/0 * * * *',
-      '5-1 * * * *', '-5 * * * *', '5- * * * *',
+      '5-1 * * * *',
+      '-5 * * * *',
+      '5- * * * *',
       '1//2 * * * *',
     ]) {
       expect(() => assertValidCron(bad), bad).toThrow(ValidationError);
