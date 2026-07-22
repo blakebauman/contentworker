@@ -27,6 +27,20 @@ export { AgentWorkflow, LiveHubDO, RateLimiterDO };
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/** Minimal runtime shape check for a queued DomainEvent (defensive, not exhaustive). */
+function isDomainEvent(body: unknown): body is DomainEvent {
+  if (typeof body !== 'object' || body === null) return false;
+  const e = body as Record<string, unknown>;
+  const scope = e.scope as Record<string, unknown> | undefined;
+  return (
+    typeof e.id === 'string' &&
+    typeof e.type === 'string' &&
+    typeof e.occurredAt === 'string' &&
+    typeof scope?.spaceId === 'string' &&
+    typeof scope?.environmentId === 'string'
+  );
+}
+
 /** Idempotent dev bootstrap runs once per isolate (SEED_DEV + real database). */
 let devSeeded = false;
 
@@ -141,8 +155,15 @@ export default {
     };
     try {
       for (const msg of batch.messages) {
+        // Validate the message shape before treating it as a DomainEvent. A
+        // malformed/poison message is acked (dropped) rather than retried forever.
+        if (!isDomainEvent(msg.body)) {
+          console.error('dropping malformed queue message', { id: msg.id });
+          msg.ack();
+          continue;
+        }
         try {
-          const runs = await consumeEvent(wired.ctx, deps, msg.body as DomainEvent);
+          const runs = await consumeEvent(wired.ctx, deps, msg.body);
           for (const r of runs) {
             console.log(JSON.stringify({ msg: `${r.workflow} complete`, ...r }));
           }

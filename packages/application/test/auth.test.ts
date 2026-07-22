@@ -32,6 +32,17 @@ describe('RBAC: API keys + authorization', () => {
     expect(principal.scopes).toContain(SCOPES.contentWrite);
   });
 
+  it('mints a high-entropy token with no embedded structure', async () => {
+    const c = ctx();
+    const { token } = await createApiKey(c, hasher, { spaceId: 's1', kind: 'cma' });
+    const secret = token.replace('cw_cma_', '');
+    // base64url charset, long enough for a 32-byte CSPRNG secret, and NOT the old
+    // 64-hex-char (concatenated-UUID) shape.
+    expect(secret).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(secret.length).toBeGreaterThanOrEqual(40);
+    expect(secret).not.toMatch(/^[0-9a-f]{64}$/);
+  });
+
   it('mints a key without a name (name is optional)', async () => {
     const c = ctx();
     // The admin labels the field "Name (optional)"; omitting it must not fail.

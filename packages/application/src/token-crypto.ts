@@ -1,5 +1,14 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Hasher } from '@cw/ports';
+
+/**
+ * A high-entropy random secret for bearer tokens (API keys, preview tokens).
+ * Uses a CSPRNG rather than concatenated UUIDv7s, which embed a millisecond
+ * timestamp and only ~74 random bits each — a secret should carry no structure.
+ */
+export function randomSecret(bytes = 32): string {
+  return randomBytes(bytes).toString('base64url');
+}
 
 /** Known dev defaults that must not be used when secure secrets are required. */
 export const DEV_TOKEN_DEFAULTS = new Set([

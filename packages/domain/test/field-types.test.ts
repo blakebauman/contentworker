@@ -72,6 +72,11 @@ describe('field type validation across all types', () => {
         a: 1,
       }),
     ).toHaveLength(0);
+    // Oversized JSON is rejected (per-field serialized-size cap).
+    const huge = { blob: 'x'.repeat(300 * 1024) };
+    expect(
+      ok(typeWith({ apiId: 'j', name: 'J', type: 'JSON', localized: false, required: true }), huge),
+    ).not.toHaveLength(0);
   });
 
   it('RichText expects a document object', () => {

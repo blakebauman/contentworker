@@ -2,6 +2,7 @@ import { type Principal, SCOPES, type Scope, scopesForKind } from '@cw/domain';
 import type { Hasher } from '@cw/ports';
 import type { AppContext } from './context.js';
 import { getEntry } from './entries.js';
+import { randomSecret } from './token-crypto.js';
 
 const DEFAULT_TTL_HOURS = 72;
 
@@ -34,8 +35,7 @@ export async function createPreviewLink(
   const expiresAt = new Date(ctx.clock.now());
   expiresAt.setHours(expiresAt.getHours() + ttlHours);
 
-  const secret = (ctx.ids.newId() + ctx.ids.newId()).replace(/-/g, '');
-  const token = `pw_${secret}`;
+  const token = `pw_${randomSecret()}`;
   const id = ctx.ids.newId();
 
   await ctx.store.previewTokens.create({

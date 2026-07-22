@@ -104,7 +104,12 @@ export function oidcRoutes(deps: AuthDeps, config: ApiConfig): Hono {
 
     setCookie(c, sessionCookieName(), encodeSession(payload, settings.sessionSecret), {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      // Derive Secure from the request scheme (works on Cloudflare, where
+      // NODE_ENV is never "production") and force it on under REQUIRE_SECURE_SECRETS.
+      secure:
+        new URL(c.req.url).protocol === 'https:' ||
+        process.env.REQUIRE_SECURE_SECRETS === 'true' ||
+        process.env.NODE_ENV === 'production',
       sameSite: 'Lax',
       maxAge: settings.sessionTtlHours * 60 * 60,
       path: '/',
