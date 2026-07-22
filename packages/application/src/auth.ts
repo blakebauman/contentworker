@@ -8,6 +8,7 @@ import {
 } from '@cw/domain';
 import type { Hasher } from '@cw/ports';
 import type { AppContext } from './context.js';
+import { randomSecret } from './token-crypto.js';
 
 export interface CreateApiKeyInput {
   readonly spaceId: string;
@@ -46,8 +47,7 @@ export async function createApiKey(
     if (!role) throw new NotFoundError('Role', input.roleId);
     roleScopes = role.scopes;
   }
-  const secret = (ctx.ids.newId() + ctx.ids.newId()).replace(/-/g, '');
-  const token = `cw_${input.kind}_${secret}`;
+  const token = `cw_${input.kind}_${randomSecret()}`;
   const apiKey: ApiKey = {
     id: ctx.ids.newId(),
     spaceId: input.spaceId,

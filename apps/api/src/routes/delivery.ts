@@ -394,6 +394,15 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
       variableValues: (body as { variables?: Record<string, unknown> }).variables,
       operationName: (body as { operationName?: string }).operationName,
     });
+    // In production, redact resolver/library error messages so internal details
+    // (SQL, stack fragments) don't leak; keep the path so clients can still locate
+    // the failing field.
+    if (result.errors && process.env.NODE_ENV === 'production') {
+      return c.json({
+        ...result,
+        errors: result.errors.map((e) => ({ message: 'Internal error', path: e.path })),
+      });
+    }
     return c.json(result);
   });
 

@@ -65,6 +65,8 @@ export interface McpDeps {
   readonly hasher: Hasher;
   /** Root token granting all scopes across all spaces. */
   readonly adminToken: string;
+  /** When true, publish runs moderation first and blocks flagged content. */
+  readonly moderateBeforePublish?: boolean;
 }
 
 /**
@@ -105,6 +107,7 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
     // real deployment (DATABASE_URL set) without MCP_TOKEN fails closed instead of
     // exposing a world-known wildcard-admin bearer against the live database.
     adminToken: env.MCP_TOKEN ?? (env.DATABASE_URL ? '' : 'dev-mcp-token'),
+    moderateBeforePublish: env.AGENTS_MODERATE_BLOCKING === 'true',
   };
 }
 

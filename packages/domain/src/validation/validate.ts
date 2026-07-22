@@ -14,6 +14,9 @@ export interface ValidationContext {
   readonly locales: readonly LocaleCode[];
 }
 
+/** Max serialized size of a single JSON field value (per locale). */
+const MAX_JSON_FIELD_BYTES = 256 * 1024;
+
 /**
  * Validates a full set of entry field values against a content type. Returns
  * the issues found (empty when valid). This is the single source of truth used
@@ -138,9 +141,21 @@ function validateValue(
       }
       break;
     }
-    case 'JSON':
-      if (typeof value !== 'object' || value === null) push('Expected a JSON object');
+    case 'JSON': {
+      if (typeof value !== 'object' || value === null) {
+        push('Expected a JSON object');
+        break;
+      }
+      // Cap the serialized size so a single field can't store an unbounded blob.
+      try {
+        if (JSON.stringify(value).length > MAX_JSON_FIELD_BYTES) {
+          push(`JSON value exceeds ${MAX_JSON_FIELD_BYTES} bytes`);
+        }
+      } catch {
+        push('JSON value is not serializable');
+      }
       break;
+    }
     case 'RichText': {
       for (const issue of validateRichText(value)) push(issue);
       break;

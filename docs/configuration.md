@@ -156,7 +156,8 @@ publish-time indexing. The API can still serve search with local embeddings when
 | --- | --- | --- |
 | `RELAY_INTERVAL_MS` | `1000` | Outbox poll interval |
 | `AGENTS_ENRICH` | `false` | Run the enrich agent on `entry.published` (needs an AI provider) |
-| `AGENTS_MODERATE` | `false` | Run the moderation agent on `entry.published` (classify + hold) |
+| `AGENTS_MODERATE` | `false` | Run the moderation agent on `entry.published` (classify; flagged content is retracted from delivery) |
+| `AGENTS_MODERATE_BLOCKING` | `false` | Synchronous pre-publish gate: run moderation **before** publishing and reject (422) flagged content instead of retracting it after |
 | `AGENTS_AUTO_APPLY` | `false` | Auto-apply enrichment vs. route to human review |
 | `AGENT_RUNTIME` | — | `temporal` → durable workflows via Temporal; `cloudflare-workflows` → Cloudflare Workflows (edge target only); unset → in-process |
 | `SCHEDULE_INTERVAL_MS` | `5000` | Poll interval for due scheduled publish/unpublish actions |

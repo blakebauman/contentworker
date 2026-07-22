@@ -1,3 +1,4 @@
+import type { CostGuardDO } from './do/cost-guard.js';
 import type { LiveHubDO } from './do/live-hub.js';
 import type { RateLimiterDO } from './do/rate-limiter.js';
 
@@ -22,6 +23,8 @@ export interface EdgeEnv {
   readonly LIVE_HUB?: DurableObjectNamespace<LiveHubDO>;
   /** Distributed failed-auth rate limiter (one object per client IP). */
   readonly AUTH_LIMITER?: DurableObjectNamespace<RateLimiterDO>;
+  /** Per-tenant AI budget governor (one object per space). */
+  readonly AI_BUDGET?: DurableObjectNamespace<CostGuardDO>;
   /** Agent workflows (enrich/moderate/curate/repurpose) on Cloudflare Workflows. */
   readonly AGENT_WF?: Workflow;
   /** Static admin SPA assets (configured via wrangler `assets`). */
@@ -57,4 +60,7 @@ export interface EdgeEnv {
   readonly REQUIRE_SECURE_SECRETS?: string;
   readonly AUTH_RATE_LIMIT_MAX?: string;
   readonly AUTH_RATE_LIMIT_WINDOW_MS?: string;
+  readonly AI_MAX_REQUESTS_PER_WINDOW?: string;
+  readonly AI_MAX_TOKENS_PER_WINDOW?: string;
+  readonly AI_BUDGET_WINDOW_SECONDS?: string;
 }

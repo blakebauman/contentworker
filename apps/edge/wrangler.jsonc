@@ -84,12 +84,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "LIVE_HUB", "class_name": "LiveHubDO" },
-      { "name": "AUTH_LIMITER", "class_name": "RateLimiterDO" }
+      { "name": "AUTH_LIMITER", "class_name": "RateLimiterDO" },
+      { "name": "AI_BUDGET", "class_name": "CostGuardDO" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["LiveHubDO"] },
-    { "tag": "v2", "new_sqlite_classes": ["RateLimiterDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["RateLimiterDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["CostGuardDO"] }
   ],
   "workflows": [
     {
@@ -117,7 +119,11 @@
     "BLOB_BUCKET": "",
     "BLOB_ENDPOINT": "",
     "BLOB_FORCE_PATH_STYLE": "true",
-    "AWS_REGION": "auto"
+    "AWS_REGION": "auto",
+    // Per-space AI budget (enforced by the CostGuardDO); 0 on either disables.
+    "AI_MAX_REQUESTS_PER_WINDOW": "60",
+    "AI_MAX_TOKENS_PER_WINDOW": "200000",
+    "AI_BUDGET_WINDOW_SECONDS": "60"
   },
 
   // Enterprise scale-out: deploy the same script per role with wrangler

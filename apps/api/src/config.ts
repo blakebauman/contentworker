@@ -56,6 +56,12 @@ export interface ApiConfig {
   /** Trusted reverse proxies in front (spoof-resistant X-Forwarded-For parsing). */
   readonly trustedProxyCount?: number;
   /**
+   * When true, publishing an entry runs the moderation classifier first and
+   * blocks the publish if the content is flagged (a synchronous pre-publish
+   * gate). Off by default — moderation otherwise runs post-publish and retracts.
+   */
+  readonly moderateBeforePublish?: boolean;
+  /**
    * Per-space AI usage ceilings over a rolling window. Guards against a single
    * tenant driving unbounded LLM spend. Set `maxRequests` or `maxTokens` to 0 to
    * disable metering entirely.
@@ -105,6 +111,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     oidcDefaultRole: env.OIDC_DEFAULT_ROLE,
     maxBodyBytes: Number(env.MAX_BODY_BYTES ?? 5 * 1024 * 1024),
     trustedProxyCount: Number(env.TRUSTED_PROXY_COUNT ?? 1),
+    moderateBeforePublish: env.AGENTS_MODERATE_BLOCKING === 'true',
     aiBudget: {
       maxRequests: Number(env.AI_MAX_REQUESTS_PER_WINDOW ?? 60),
       maxTokens: Number(env.AI_MAX_TOKENS_PER_WINDOW ?? 200_000),

@@ -15,6 +15,7 @@ import type { DomainEvent } from '@cw/domain';
 import type { McpDeps } from '@cw/mcp-server/wire';
 import { Hono } from 'hono';
 import { AgentWorkflow } from './agents/workflow.js';
+import { CostGuardDO } from './do/cost-guard.js';
 import { LiveHubDO, createDoEventBus } from './do/live-hub.js';
 import { RateLimiterDO, createDoRateLimiter } from './do/rate-limiter.js';
 import type { EdgeEnv } from './env.js';
@@ -23,9 +24,23 @@ import { liveRoutes } from './routes/live.js';
 import { type EdgeWired, agentConfigFromEnv, makeAgents, wireEdge } from './wire.js';
 
 // Worker-entrypoint classes must be exported from the deployed script.
-export { AgentWorkflow, LiveHubDO, RateLimiterDO };
+export { AgentWorkflow, CostGuardDO, LiveHubDO, RateLimiterDO };
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** Minimal runtime shape check for a queued DomainEvent (defensive, not exhaustive). */
+function isDomainEvent(body: unknown): body is DomainEvent {
+  if (typeof body !== 'object' || body === null) return false;
+  const e = body as Record<string, unknown>;
+  const scope = e.scope as Record<string, unknown> | undefined;
+  return (
+    typeof e.id === 'string' &&
+    typeof e.type === 'string' &&
+    typeof e.occurredAt === 'string' &&
+    typeof scope?.spaceId === 'string' &&
+    typeof scope?.environmentId === 'string'
+  );
+}
 
 /** Idempotent dev bootstrap runs once per isolate (SEED_DEV + real database). */
 let devSeeded = false;
@@ -70,6 +85,7 @@ function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
       agents: new InProcessAgentRuntime(makeActivities({ ctx: wired.ctx, ai: wired.ai })),
       hasher: createHasher(env.TOKEN_PEPPER),
       adminToken: mcpToken,
+      moderateBeforePublish: wired.config.moderateBeforePublish,
     };
     app.route('/', mcpRoutes(mcpDeps));
   }
@@ -141,8 +157,15 @@ export default {
     };
     try {
       for (const msg of batch.messages) {
+        // Validate the message shape before treating it as a DomainEvent. A
+        // malformed/poison message is acked (dropped) rather than retried forever.
+        if (!isDomainEvent(msg.body)) {
+          console.error('dropping malformed queue message', { id: msg.id });
+          msg.ack();
+          continue;
+        }
         try {
-          const runs = await consumeEvent(wired.ctx, deps, msg.body as DomainEvent);
+          const runs = await consumeEvent(wired.ctx, deps, msg.body);
           for (const r of runs) {
             console.log(JSON.stringify({ msg: `${r.workflow} complete`, ...r }));
           }

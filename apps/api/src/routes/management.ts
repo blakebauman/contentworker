@@ -639,8 +639,22 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     }),
     requireScope(SCOPES.contentPublish),
     async (c) => {
-      await guardEntry(c, c.req.param('id'), 'publish');
-      return c.json(await publishEntry(ctx, scopeOf(c), c.req.param('id')));
+      const id = c.req.param('id');
+      await guardEntry(c, id, 'publish');
+      // Optional synchronous pre-publish moderation gate: reject flagged content
+      // before it ever reaches the delivery read model.
+      if (deps.moderateBeforePublish) {
+        const verdict = await moderateEntry(ctx, agents, scopeOf(c), id);
+        if (verdict.flagged) {
+          throw new ValidationError([
+            {
+              field: 'moderation',
+              message: `Publish blocked by moderation: ${verdict.decisions.join('; ') || 'policy violation'}`,
+            },
+          ]);
+        }
+      }
+      return c.json(await publishEntry(ctx, scopeOf(c), id));
     },
   );
   app.delete(

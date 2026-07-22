@@ -1,0 +1,10 @@
+# Security headers for the admin SPA, applied by Cloudflare Workers static assets.
+# script-src 'self' blocks inline-script XSS (the bundle loads external module
+# scripts only). connect-src/frame-src allow https so a configurable API origin
+# and third-party app-extension iframes still work; frame-ancestors 'none' stops
+# the admin itself being framed.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https:; frame-src https:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
