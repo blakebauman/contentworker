@@ -12,7 +12,7 @@ import {
   createRedisEventBus,
 } from '@cw/adapter-redis';
 import { createOpenSearchIndex } from '@cw/adapter-search-opensearch';
-import { createPostgresStore } from '@cw/adapter-store-postgres';
+import { type PostgresClient, createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { createQdrantStore } from '@cw/adapter-vector-qdrant';
 import { REVIEW_DECISION_SIGNAL, reviewWorkflowId } from '@cw/agent-runtime';
@@ -116,7 +116,11 @@ function makeBlob(fakes: FakeAdapterBinding[]): BlobStore {
 }
 
 /** Builds RAG deps (embeddings + vector store) for the Delivery search endpoint. */
-function makeRag(databaseUrl: string | undefined, fakes: FakeAdapterBinding[]): RagDeps {
+function makeRag(
+  databaseUrl: string | undefined,
+  fakes: FakeAdapterBinding[],
+  pgClient?: PostgresClient,
+): RagDeps {
   const provider = process.env.EMBEDDINGS_PROVIDER;
   const dim = Number(process.env.EMBEDDINGS_DIM ?? 1536);
   // An explicit EMBEDDINGS_PROVIDER=local is informed consent to hash-based
@@ -138,7 +142,8 @@ function makeRag(databaseUrl: string | undefined, fakes: FakeAdapterBinding[]): 
     process.env.VECTOR_PROVIDER === 'qdrant'
       ? createQdrantStore({ dimensions: embeddings.dimensions, modelId: embeddings.modelId })
       : databaseUrl
-        ? createPgVectorStore(databaseUrl, {
+        ? // Share the content store's pool — one pool per process, not two.
+          createPgVectorStore(pgClient ?? databaseUrl, {
             dimensions: embeddings.dimensions,
             modelId: embeddings.modelId,
           })
@@ -226,10 +231,16 @@ export function wire(config: ApiConfig): Wired {
       )
     : undefined;
 
+  // The store comes first so RAG can share its connection pool (postgres.js
+  // connects lazily — nothing dials the database until a query runs, so the
+  // fail-fast fake-adapter guard below still fires before any I/O).
+  const pgStore = config.databaseUrl ? createPostgresStore(config.databaseUrl) : undefined;
+  if (pgStore) closers.push(() => pgStore.close());
+
   // Fail fast when a real database would run behind dev fakes: build the
   // AI/blob/RAG bindings first, then refuse to boot on any unallowed fake.
   const fakes: FakeAdapterBinding[] = [];
-  const rag = makeRag(config.databaseUrl, fakes);
+  const rag = makeRag(config.databaseUrl, fakes, pgStore?.sql);
   const blob = makeBlob(fakes);
   const ai = makeAI(fakes);
   assertNoFakeAdapters({
@@ -238,9 +249,8 @@ export function wire(config: ApiConfig): Wired {
     fakes,
   });
 
-  if (config.databaseUrl) {
-    const store = createPostgresStore(config.databaseUrl);
-    closers.push(() => store.close());
+  if (pgStore) {
+    const store = pgStore;
     return {
       ctx: { store, clock: systemClock, ids: uuidIds, cache, costGuard },
       rag,

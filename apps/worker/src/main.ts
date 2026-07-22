@@ -13,7 +13,7 @@ import {
   createRedisQueue,
 } from '@cw/adapter-redis';
 import { createOpenSearchIndex } from '@cw/adapter-search-opensearch';
-import { createPostgresStore } from '@cw/adapter-store-postgres';
+import { type PostgresClient, createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { createQdrantStore } from '@cw/adapter-vector-qdrant';
 import { type AgentRuntime, InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
@@ -76,7 +76,7 @@ const clock: Clock = { now: () => new Date() };
 const ids: IdGenerator = { newId: () => uuidv7() };
 
 /** Builds the RAG deps when EMBEDDINGS_PROVIDER is configured (else undefined). */
-function makeRag(connectionString: string): RagDeps | undefined {
+function makeRag(connectionString: string, pgClient?: PostgresClient): RagDeps | undefined {
   const provider = process.env.EMBEDDINGS_PROVIDER;
   if (!provider) return undefined;
   // Explicit 'local' is informed consent to hash embeddings; an unknown value
@@ -103,7 +103,8 @@ function makeRag(connectionString: string): RagDeps | undefined {
   const vectors =
     process.env.VECTOR_PROVIDER === 'qdrant'
       ? createQdrantStore({ dimensions: embeddings.dimensions, modelId: embeddings.modelId })
-      : createPgVectorStore(connectionString, {
+      : // Share the content store's pool — one pool per process, not two.
+        createPgVectorStore(pgClient ?? connectionString, {
           dimensions: embeddings.dimensions,
           modelId: embeddings.modelId,
         });
@@ -164,7 +165,7 @@ async function main() {
   const bus = createRedisEventBus(new Redis(redisUrl as string, { maxRetriesPerRequest: null }));
   const sender = createWebhookSender();
   const invoker = createHttpFunctionInvoker();
-  const rag = makeRag(databaseUrl as string);
+  const rag = makeRag(databaseUrl as string, store.sql);
   // Independent of rag: lexical indexing works without embeddings. Built once
   // (the adapter memoizes its ensure-index round-trip per instance).
   const searchIndex = rag?.searchIndex ?? makeSearchIndex();

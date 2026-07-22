@@ -122,9 +122,8 @@ function makeSignalReview(env: NodeJS.ProcessEnv): McpDeps['signalReview'] {
  * same ports the rest of the platform uses, so MCP tools are just another caller.
  */
 export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
-  const store: ContentStore = env.DATABASE_URL
-    ? createPostgresStore(env.DATABASE_URL)
-    : seededInMemory(env);
+  const pgStore = env.DATABASE_URL ? createPostgresStore(env.DATABASE_URL) : undefined;
+  const store: ContentStore = pgStore ?? seededInMemory(env);
 
   const fakes: FakeAdapterBinding[] = [];
   const ai = makeAI(env, fakes);
@@ -149,8 +148,9 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
   const vectors =
     env.VECTOR_PROVIDER === 'qdrant'
       ? createQdrantStore({ dimensions: embeddings.dimensions, modelId: embeddings.modelId })
-      : env.DATABASE_URL
-        ? createPgVectorStore(env.DATABASE_URL, {
+      : pgStore
+        ? // Share the content store's pool — one pool per process, not two.
+          createPgVectorStore(pgStore.sql, {
             dimensions: embeddings.dimensions,
             modelId: embeddings.modelId,
           })
