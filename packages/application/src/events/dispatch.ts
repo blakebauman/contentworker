@@ -1,9 +1,10 @@
 import type { DomainEvent } from '@cw/domain';
-import type { Cache, FunctionInvoker, WebhookSender } from '@cw/ports';
+import type { Cache, FunctionInvoker, SearchIndex, WebhookSender } from '@cw/ports';
 import type { AppContext } from '../context.js';
 import { invokeFunctionsForEvent } from '../functions.js';
 import {
   type RagDeps,
+  extractTextByLocale,
   indexEntryEmbeddings,
   removeEntryEmbeddings,
   runReindexJob,
@@ -25,6 +26,12 @@ export interface DispatchDeps {
   readonly invoker?: FunctionInvoker;
   /** Optional observer for webhook delivery outcomes (host-side metrics). */
   readonly onWebhookDelivery?: (result: { delivered: boolean }) => void;
+  /**
+   * Optional external lexical index (e.g. OpenSearch), kept fresh on
+   * publish/unpublish. Independent of `rag` so lexical-at-scale works without
+   * embeddings configured.
+   */
+  readonly searchIndex?: SearchIndex;
 }
 
 /**
@@ -42,10 +49,12 @@ export async function dispatchEvent(
 
   // Background reindex job: run one bounded slice here on the consumer; the
   // remainder (if any) is re-enqueued as a continuation event via the outbox.
-  // Nothing else applies to this event type.
+  // Runs lexical-only when a SearchIndex is bound without embeddings, so a
+  // reindex request never silently no-ops. Nothing else applies to this event.
   if (event.type === 'search.reindex_requested') {
-    if (deps.rag) {
-      await runReindexJob(deps.rag, ctx, event);
+    const searchIndex = deps.searchIndex ?? deps.rag?.searchIndex;
+    if (deps.rag || searchIndex) {
+      await runReindexJob(deps.rag, ctx, event, { searchIndex });
     }
     return;
   }
@@ -99,6 +108,21 @@ export async function dispatchEvent(
       });
     } else if (event.type === 'entry.unpublished') {
       await removeEntryEmbeddings(deps.rag, scope, event.entryId);
+    }
+  }
+
+  // 3b. External lexical index (when bound): mirror the publish lifecycle.
+  const searchIndex = deps.searchIndex ?? deps.rag?.searchIndex;
+  if (searchIndex) {
+    if (event.type === 'entry.published') {
+      await searchIndex.index(scope, {
+        entryId: event.entryId,
+        contentTypeApiId: event.contentTypeApiId,
+        textByLocale: extractTextByLocale(event.fields),
+        entryVersion: event.version,
+      });
+    } else if (event.type === 'entry.unpublished') {
+      await searchIndex.remove(scope, event.entryId);
     }
   }
 

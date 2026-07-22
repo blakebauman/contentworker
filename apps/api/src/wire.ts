@@ -11,8 +11,10 @@ import {
   createRedisCostGuard,
   createRedisEventBus,
 } from '@cw/adapter-redis';
+import { createOpenSearchIndex } from '@cw/adapter-search-opensearch';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
+import { createQdrantStore } from '@cw/adapter-vector-qdrant';
 import { assertNoFakeAdapters } from '@cw/application';
 import type { AppContext, FakeAdapterBinding, RagDeps } from '@cw/application';
 import { type ApiKeyKind, scopesForKind } from '@cw/domain';
@@ -126,13 +128,19 @@ function makeRag(databaseUrl: string | undefined, fakes: FakeAdapterBinding[]): 
       : provider === 'openai'
         ? createOpenAIEmbeddings({ dimensions: dim })
         : new LocalEmbeddingsProvider(dim);
-  const vectors = databaseUrl
-    ? createPgVectorStore(databaseUrl, {
-        dimensions: embeddings.dimensions,
-        modelId: embeddings.modelId,
-      })
-    : new InMemoryVectorStore();
-  return { embeddings, vectors };
+  const vectors =
+    process.env.VECTOR_PROVIDER === 'qdrant'
+      ? createQdrantStore({ dimensions: embeddings.dimensions, modelId: embeddings.modelId })
+      : databaseUrl
+        ? createPgVectorStore(databaseUrl, {
+            dimensions: embeddings.dimensions,
+            modelId: embeddings.modelId,
+          })
+        : new InMemoryVectorStore();
+  // External lexical leg (BM25 at scale); absent → Postgres FTS, still real.
+  const searchIndex =
+    process.env.SEARCH_PROVIDER === 'opensearch' ? createOpenSearchIndex() : undefined;
+  return { embeddings, vectors, searchIndex };
 }
 
 /**

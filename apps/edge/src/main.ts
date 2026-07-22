@@ -134,6 +134,8 @@ async function consumeEvents(batch: MessageBatch, env: EdgeEnv, wired: EdgeWired
     // Parity with the Node worker: RAG indexing only when embeddings are
     // explicitly configured (EMBEDDINGS_PROVIDER), never with the dev fallback.
     rag: env.EMBEDDINGS_PROVIDER ? wired.rag : undefined,
+    // Independent of rag: lexical indexing works without embeddings.
+    searchIndex: wired.rag.searchIndex,
     bus: env.LIVE_HUB ? createDoEventBus(env.LIVE_HUB) : undefined,
     onLiveError: (err) => console.error('live publish error', err),
     // Inline agents only when no cw-agents queue is bound (dev/demo parity).

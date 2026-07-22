@@ -24,6 +24,9 @@ x-app-env: &app-env
   # No Anthropic key / object store locally: accept the stub AI + fake blob
   # (persistent installs refuse to boot on unallowed fakes otherwise).
   ALLOW_FAKE_ADAPTERS: "ai,blob"
+  # Optional search-backend swaps (see docs/configuration.md):
+  #   VECTOR_PROVIDER: qdrant        QDRANT_URL: http://host.docker.internal:6333
+  #   SEARCH_PROVIDER: opensearch    OPENSEARCH_URL: http://host.docker.internal:9200
 
 services:
   postgres:

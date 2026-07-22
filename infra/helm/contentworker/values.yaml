@@ -28,6 +28,16 @@ config:
   # Only for embeddingsProvider=openai:
   embeddingsBaseUrl: ""
   embeddingsModel: ""
+  # VectorStore swap: "" (pgvector via DATABASE_URL) | qdrant
+  vectorProvider: ""
+  qdrantUrl: ""
+  qdrantCollection: ""
+  # Lexical search swap: "" (Postgres FTS) | opensearch (BM25 at scale;
+  # password goes in the secret as OPENSEARCH_PASSWORD)
+  searchProvider: ""
+  opensearchUrl: ""
+  opensearchUsername: ""
+  opensearchIndex: ""
   seedSpaceId: space-1
   seedEnvId: main
   seedDefaultLocale: en-US
@@ -67,6 +77,9 @@ secrets:
     AZURE_OPENAI_API_KEY: ""
     # Bearer token for embeddingsProvider=openai endpoints that authenticate.
     EMBEDDINGS_API_KEY: ""
+    # For config.vectorProvider=qdrant / config.searchProvider=opensearch.
+    QDRANT_API_KEY: ""
+    OPENSEARCH_PASSWORD: ""
     # Static S3-compatible credentials (MinIO etc.); leave empty with workload identity.
     AWS_ACCESS_KEY_ID: ""
     AWS_SECRET_ACCESS_KEY: ""

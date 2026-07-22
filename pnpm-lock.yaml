@@ -200,12 +200,18 @@ importers:
       '@cw/adapter-redis':
         specifier: workspace:*
         version: link:../../packages/adapters/redis
+      '@cw/adapter-search-opensearch':
+        specifier: workspace:*
+        version: link:../../packages/adapters/search-opensearch
       '@cw/adapter-store-postgres':
         specifier: workspace:*
         version: link:../../packages/adapters/store-postgres
       '@cw/adapter-vector-pgvector':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-pgvector
+      '@cw/adapter-vector-qdrant':
+        specifier: workspace:*
+        version: link:../../packages/adapters/vector-qdrant
       '@cw/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
@@ -300,12 +306,18 @@ importers:
       '@cw/adapter-queue-cf':
         specifier: workspace:*
         version: link:../../packages/adapters/queue-cf
+      '@cw/adapter-search-opensearch':
+        specifier: workspace:*
+        version: link:../../packages/adapters/search-opensearch
       '@cw/adapter-store-postgres':
         specifier: workspace:*
         version: link:../../packages/adapters/store-postgres
       '@cw/adapter-vector-pgvector':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-pgvector
+      '@cw/adapter-vector-qdrant':
+        specifier: workspace:*
+        version: link:../../packages/adapters/vector-qdrant
       '@cw/adapter-vector-vectorize':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-vectorize
@@ -373,12 +385,18 @@ importers:
       '@cw/adapter-redis':
         specifier: workspace:*
         version: link:../../packages/adapters/redis
+      '@cw/adapter-search-opensearch':
+        specifier: workspace:*
+        version: link:../../packages/adapters/search-opensearch
       '@cw/adapter-store-postgres':
         specifier: workspace:*
         version: link:../../packages/adapters/store-postgres
       '@cw/adapter-vector-pgvector':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-pgvector
+      '@cw/adapter-vector-qdrant':
+        specifier: workspace:*
+        version: link:../../packages/adapters/vector-qdrant
       '@cw/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
@@ -468,12 +486,18 @@ importers:
       '@cw/adapter-redis':
         specifier: workspace:*
         version: link:../../packages/adapters/redis
+      '@cw/adapter-search-opensearch':
+        specifier: workspace:*
+        version: link:../../packages/adapters/search-opensearch
       '@cw/adapter-store-postgres':
         specifier: workspace:*
         version: link:../../packages/adapters/store-postgres
       '@cw/adapter-vector-pgvector':
         specifier: workspace:*
         version: link:../../packages/adapters/vector-pgvector
+      '@cw/adapter-vector-qdrant':
+        specifier: workspace:*
+        version: link:../../packages/adapters/vector-qdrant
       '@cw/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
@@ -691,6 +715,28 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(lightningcss@1.32.0)(terser@5.48.0)
 
+  packages/adapters/search-opensearch:
+    dependencies:
+      '@cw/domain':
+        specifier: workspace:*
+        version: link:../../domain
+      '@cw/ports':
+        specifier: workspace:*
+        version: link:../../ports
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.0
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(@swc/core@1.15.43)(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(lightningcss@1.32.0)(terser@5.48.0)
+
   packages/adapters/store-postgres:
     dependencies:
       '@cw/domain':
@@ -737,6 +783,28 @@ importers:
         specifier: ^3.4.5
         version: 3.4.9
     devDependencies:
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(@swc/core@1.15.43)(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(lightningcss@1.32.0)(terser@5.48.0)
+
+  packages/adapters/vector-qdrant:
+    dependencies:
+      '@cw/domain':
+        specifier: workspace:*
+        version: link:../../domain
+      '@cw/ports':
+        specifier: workspace:*
+        version: link:../../ports
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.0
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(@swc/core@1.15.43)(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)

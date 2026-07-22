@@ -7,7 +7,9 @@ import { createS3BlobStore } from '@cw/adapter-blob-s3';
 import { createKvCache } from '@cw/adapter-cache-kv';
 import { createOpenAIEmbeddings } from '@cw/adapter-embeddings-openai';
 import { createCfQueueProducer } from '@cw/adapter-queue-cf';
+import { createOpenSearchIndex } from '@cw/adapter-search-opensearch';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
+import { createQdrantStore } from '@cw/adapter-vector-qdrant';
 import { createVectorizeStore } from '@cw/adapter-vector-vectorize';
 import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
 import { createApiHasher } from '@cw/api/auth';
@@ -32,6 +34,7 @@ import type {
   GenerateRequest,
   IdGenerator,
   Queue as QueuePort,
+  SearchIndex,
   VectorStore,
 } from '@cw/ports';
 import {
@@ -244,19 +247,51 @@ function makeRag(env: EdgeEnv, fakes: FakeAdapterBinding[]): RagDeps {
             dimensions: dim,
           })
         : new LocalEmbeddingsProvider(dim);
-  if (!env.VECTORIZE) {
+  const useQdrant = env.VECTOR_PROVIDER === 'qdrant';
+  if (!env.VECTORIZE && !useQdrant) {
     fakes.push({
       key: 'vectors',
-      detail: 'in-memory vector store (per-isolate, non-durable) — bind VECTORIZE',
+      detail:
+        'in-memory vector store (per-isolate, non-durable) — bind VECTORIZE or set VECTOR_PROVIDER=qdrant',
     });
   }
-  const vectors: VectorStore = env.VECTORIZE
-    ? createVectorizeStore(env.VECTORIZE, {
-        dimensions: embeddings.dimensions,
-        modelId: embeddings.modelId,
-      })
-    : memoInMemoryVectors();
-  return { embeddings, vectors };
+  // Qdrant/OpenSearch adapters are memoized at module scope: wireEdge runs per
+  // request, and their lazy ensure-collection/index round-trips should happen
+  // once per isolate, not once per request (env vars are stable per isolate).
+  const vectors: VectorStore = useQdrant
+    ? memoQdrantStore(env, embeddings.dimensions, embeddings.modelId)
+    : env.VECTORIZE
+      ? createVectorizeStore(env.VECTORIZE, {
+          dimensions: embeddings.dimensions,
+          modelId: embeddings.modelId,
+        })
+      : memoInMemoryVectors();
+  const searchIndex = env.SEARCH_PROVIDER === 'opensearch' ? memoOpenSearchIndex(env) : undefined;
+  return { embeddings, vectors, searchIndex };
+}
+
+let memoQdrant: VectorStore | undefined;
+let memoOpenSearch: SearchIndex | undefined;
+
+function memoQdrantStore(env: EdgeEnv, dimensions: number, modelId?: string): VectorStore {
+  memoQdrant ??= createQdrantStore({
+    url: env.QDRANT_URL,
+    apiKey: env.QDRANT_API_KEY,
+    collection: env.QDRANT_COLLECTION,
+    dimensions,
+    modelId,
+  });
+  return memoQdrant;
+}
+
+function memoOpenSearchIndex(env: EdgeEnv): SearchIndex {
+  memoOpenSearch ??= createOpenSearchIndex({
+    url: env.OPENSEARCH_URL,
+    username: env.OPENSEARCH_USERNAME,
+    password: env.OPENSEARCH_PASSWORD,
+    index: env.OPENSEARCH_INDEX,
+  });
+  return memoOpenSearch;
 }
 
 // ---- module-scope memoization for demo mode --------------------------------

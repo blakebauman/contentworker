@@ -5,8 +5,10 @@ import {
 } from '@cw/adapter-ai-azure-openai';
 import { createOpenAIEmbeddings } from '@cw/adapter-embeddings-openai';
 import { createRedisCostGuard } from '@cw/adapter-redis';
+import { createOpenSearchIndex } from '@cw/adapter-search-opensearch';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
+import { createQdrantStore } from '@cw/adapter-vector-qdrant';
 import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
 import { aiBudgetLimits, assertNoFakeAdapters, createHasher } from '@cw/application';
 import type { AgentRunner, AppContext, FakeAdapterBinding, RagDeps } from '@cw/application';
@@ -106,12 +108,16 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
       : embedProvider === 'openai'
         ? createOpenAIEmbeddings({ dimensions: embedDim })
         : new LocalEmbeddingsProvider(embedDim);
-  const vectors = env.DATABASE_URL
-    ? createPgVectorStore(env.DATABASE_URL, {
-        dimensions: embeddings.dimensions,
-        modelId: embeddings.modelId,
-      })
-    : new InMemoryVectorStore();
+  const vectors =
+    env.VECTOR_PROVIDER === 'qdrant'
+      ? createQdrantStore({ dimensions: embeddings.dimensions, modelId: embeddings.modelId })
+      : env.DATABASE_URL
+        ? createPgVectorStore(env.DATABASE_URL, {
+            dimensions: embeddings.dimensions,
+            modelId: embeddings.modelId,
+          })
+        : new InMemoryVectorStore();
+  const searchIndex = env.SEARCH_PROVIDER === 'opensearch' ? createOpenSearchIndex() : undefined;
 
   assertNoFakeAdapters({
     persistent: Boolean(env.DATABASE_URL),
@@ -132,7 +138,7 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
   return {
     ctx,
     ai,
-    rag: { embeddings, vectors },
+    rag: { embeddings, vectors, searchIndex },
     // On-demand agent actions run in-process (synchronous request/response);
     // the durable Temporal path serves the worker's on-publish runs.
     agents: new InProcessAgentRuntime(makeActivities({ ctx, ai })),

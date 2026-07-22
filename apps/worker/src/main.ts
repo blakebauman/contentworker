@@ -12,8 +12,10 @@ import {
   createRedisEventBus,
   createRedisQueue,
 } from '@cw/adapter-redis';
+import { createOpenSearchIndex } from '@cw/adapter-search-opensearch';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
+import { createQdrantStore } from '@cw/adapter-vector-qdrant';
 import { type AgentRuntime, InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
 import { AGENT_TASK_QUEUE, TemporalAgentRuntime } from '@cw/agent-runtime/temporal';
 import {
@@ -27,7 +29,7 @@ import {
   runDueScheduledActions,
 } from '@cw/application';
 import type { DomainEvent } from '@cw/domain';
-import type { AIProvider, Clock, EmbeddingsProvider, IdGenerator } from '@cw/ports';
+import type { AIProvider, Clock, EmbeddingsProvider, IdGenerator, SearchIndex } from '@cw/ports';
 import {
   eventDispatchSeconds,
   eventsConsumedTotal,
@@ -93,11 +95,19 @@ function makeRag(connectionString: string): RagDeps | undefined {
       : provider === 'openai'
         ? createOpenAIEmbeddings({ dimensions: dim })
         : new LocalEmbeddingsProvider(dim);
-  const vectors = createPgVectorStore(connectionString, {
-    dimensions: embeddings.dimensions,
-    modelId: embeddings.modelId,
-  });
-  return { embeddings, vectors };
+  const vectors =
+    process.env.VECTOR_PROVIDER === 'qdrant'
+      ? createQdrantStore({ dimensions: embeddings.dimensions, modelId: embeddings.modelId })
+      : createPgVectorStore(connectionString, {
+          dimensions: embeddings.dimensions,
+          modelId: embeddings.modelId,
+        });
+  return { embeddings, vectors, searchIndex: makeSearchIndex() };
+}
+
+/** External lexical index (kept fresh on publish even when RAG is off). */
+function makeSearchIndex(): SearchIndex | undefined {
+  return process.env.SEARCH_PROVIDER === 'opensearch' ? createOpenSearchIndex() : undefined;
 }
 
 // Which agents run on entry.published, and with what autonomy.
@@ -147,6 +157,9 @@ async function main() {
   const sender = createWebhookSender();
   const invoker = createHttpFunctionInvoker();
   const rag = makeRag(databaseUrl as string);
+  // Independent of rag: lexical indexing works without embeddings. Built once
+  // (the adapter memoizes its ensure-index round-trip per instance).
+  const searchIndex = rag?.searchIndex ?? makeSearchIndex();
   // Meter agent AI spend per space (shared window via Redis) so on-publish
   // enrich/moderate runs count against the same budget as the HTTP API.
   const limits = aiBudgetLimits(process.env);
@@ -170,6 +183,7 @@ async function main() {
               sender,
               cache,
               rag,
+              searchIndex,
               invoker,
               bus,
               onLiveError: (err) => logger.error({ err }, 'live publish error'),

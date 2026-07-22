@@ -144,6 +144,38 @@ export interface VectorMatch {
   readonly score: number;
 }
 
+/** One indexed lexical document per published entry. */
+export interface SearchDoc {
+  readonly entryId: string;
+  readonly contentTypeApiId: string;
+  /** Human-readable text per locale (extracted from the entry's fields). */
+  readonly textByLocale: Record<string, string>;
+  readonly entryVersion: number;
+}
+
+/** One ranked lexical match (engine-relative score, ordering-only). */
+export interface LexicalSearchHit {
+  readonly entryId: string;
+  readonly score: number;
+}
+
+/**
+ * External lexical full-text index over published entries — the at-scale
+ * alternative to the store's built-in Postgres FTS. When bound, publishes
+ * (and the reindex job) write into it and hybrid search reads its ranking;
+ * absent, the lexical leg stays on `EntryRepo.searchPublished`.
+ */
+export interface SearchIndex {
+  /**
+   * `refresh: false` defers making the doc searchable until the engine's own
+   * refresh cycle — bulk callers (reindex) set it; publish-time indexing
+   * defaults to immediate visibility.
+   */
+  index(scope: Scope, doc: SearchDoc, opts?: { refresh?: boolean }): Promise<void>;
+  remove(scope: Scope, entryId: string): Promise<void>;
+  search(scope: Scope, query: string, opts: { topK: number }): Promise<LexicalSearchHit[]>;
+}
+
 /** Vector store for semantic search / RAG (pgvector by default). */
 export interface VectorStore {
   /**

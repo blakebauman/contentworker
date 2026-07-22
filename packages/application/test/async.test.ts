@@ -3,6 +3,7 @@ import {
   InMemoryCache,
   InMemoryContentStore,
   InMemoryQueue,
+  InMemorySearchIndex,
   RecordingWebhookSender,
   SequenceIdGenerator,
 } from '@cw/test-kit';
@@ -163,6 +164,36 @@ describe('P4: outbox relay, webhook fan-out, cache invalidation', () => {
     expect(await h.cache.get('render:entry-b')).toBeNull(); // direct referrer
     expect(await h.cache.get('render:entry-a')).toBeNull(); // transitive (2 hops)
     expect(await h.cache.get('render:other')).toBe('cached');
+  });
+
+  it('keeps the external lexical index fresh on publish and unpublish', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const id = await seedAndPublish(h.ctx);
+    const base = {
+      scope,
+      occurredAt: '2026-01-01T00:00:00.000Z',
+      entryId: id,
+      contentTypeApiId: 'article',
+    };
+    await dispatchEvent(
+      h.ctx,
+      { sender: h.sender, searchIndex },
+      {
+        ...base,
+        id: 'evt-p',
+        type: 'entry.published',
+        version: 1,
+        fields: { title: { 'en-US': 'Findable title' } },
+      },
+    );
+    expect(await searchIndex.search(scope, 'findable', { topK: 5 })).toHaveLength(1);
+
+    await dispatchEvent(
+      h.ctx,
+      { sender: h.sender, searchIndex },
+      { ...base, id: 'evt-u', type: 'entry.unpublished' },
+    );
+    expect(await searchIndex.search(scope, 'findable', { topK: 5 })).toHaveLength(0);
   });
 
   it('relays with the event id as the dedupe key', async () => {

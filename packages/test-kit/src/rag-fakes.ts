@@ -1,5 +1,13 @@
 import type { Scope } from '@cw/domain';
-import type { EmbeddingsProvider, VectorMatch, VectorRow, VectorStore } from '@cw/ports';
+import type {
+  EmbeddingsProvider,
+  LexicalSearchHit,
+  SearchDoc,
+  SearchIndex,
+  VectorMatch,
+  VectorRow,
+  VectorStore,
+} from '@cw/ports';
 
 /**
  * A deterministic, dependency-free embeddings provider for dev and tests. It
@@ -44,6 +52,39 @@ const cosine = (a: number[], b: number[]): number => {
   for (let i = 0; i < a.length; i++) dot += (a[i] ?? 0) * (b[i] ?? 0);
   return dot; // inputs are already normalized
 };
+
+/**
+ * In-memory SearchIndex fake: naive term matching (score = matched query
+ * terms; every term must match, mirroring the real adapters' AND semantics).
+ */
+export class InMemorySearchIndex implements SearchIndex {
+  private docs = new Map<string, { doc: SearchDoc; text: string }>();
+
+  async index(scope: Scope, doc: SearchDoc): Promise<void> {
+    this.docs.set(`${key(scope)}::${doc.entryId}`, {
+      doc,
+      text: Object.values(doc.textByLocale).join('\n\n').toLowerCase(),
+    });
+  }
+
+  async remove(scope: Scope, entryId: string): Promise<void> {
+    this.docs.delete(`${key(scope)}::${entryId}`);
+  }
+
+  async search(scope: Scope, query: string, opts: { topK: number }): Promise<LexicalSearchHit[]> {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return [];
+    const prefix = `${key(scope)}::`;
+    const hits: LexicalSearchHit[] = [];
+    for (const [k, { doc, text }] of this.docs) {
+      if (!k.startsWith(prefix)) continue;
+      if (terms.every((t) => text.includes(t))) {
+        hits.push({ entryId: doc.entryId, score: terms.length });
+      }
+    }
+    return hits.sort((a, b) => b.score - a.score).slice(0, opts.topK);
+  }
+}
 
 /** In-memory VectorStore mirroring the pgvector adapter's behavior for tests. */
 export class InMemoryVectorStore implements VectorStore {
