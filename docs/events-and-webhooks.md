@@ -28,6 +28,8 @@ only when) their state change commits. A background worker relays those events a
         runPublishAgents (optional) on entry.published
                                    │
         runDueScheduledActions every SCHEDULE_INTERVAL_MS
+                                   │
+        runDueAgentSchedules every AGENT_SCHEDULE_INTERVAL_MS   (AGENTS_SCHEDULES=true)
 ```
 
 `EVENTS_TOPIC` is `cw.events`.
@@ -65,8 +67,12 @@ idempotent (keyed on `event.id`).
 3. **Cache invalidation** (on `entry.published` / `entry.unpublished`) — tag set includes reverse
    references; `cache.invalidateTag` per tag.
 4. **RAG indexing** — `indexEntryEmbeddings` on publish, `removeEntryEmbeddings` on unpublish.
+5. **Lexical search index** (when `SEARCH_PROVIDER=opensearch` binds a `SearchIndex`) — the
+   published entry's text is indexed on publish and removed on unpublish, keeping the external
+   BM25 leg of hybrid search fresh.
 
-`DispatchDeps` is `{ sender, cache?, rag?, invoker? }` — optional deps degrade gracefully.
+`DispatchDeps` is `{ sender, cache?, rag?, invoker?, searchIndex? }` — optional deps degrade
+gracefully.
 
 After dispatch, the worker publishes the event on the Redis **`EventBus`** for Live Content SSE
 (`GET /delivery/:space/:env/live`). On `entry.published`, optional on-publish agents run via
@@ -74,6 +80,12 @@ After dispatch, the worker publishes the event on the Redis **`EventBus`** for L
 
 A separate loop calls `runDueScheduledActions` every `SCHEDULE_INTERVAL_MS` (default 5000 ms) to
 execute deferred publish/unpublish actions.
+
+When `AGENTS_SCHEDULES=true`, a third loop calls `runDueAgentSchedules` every
+`AGENT_SCHEDULE_INTERVAL_MS` (default 60 000 ms) to execute recurring agent jobs over entries
+published since each schedule's previous run. Firings are claimed via compare-and-swap on the
+schedule's `nextRunAt`, so worker replicas (or the edge cron) never double-run one. See
+[AI, agents & search](./ai-agents-and-search.md#agent-schedules).
 
 ## Webhooks
 
