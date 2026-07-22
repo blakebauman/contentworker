@@ -15,7 +15,9 @@ spec:
       labels: {{- include "cw.selectorLabels" (dict "ctx" . "component" "agent-worker") | nindent 8 }}
     spec:
       serviceAccountName: {{ include "cw.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.agentWorker.terminationGracePeriodSeconds }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- include "cw.scheduling" . | nindent 6 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -24,10 +26,25 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["pnpm", "--filter", "@cw/agent-worker", "start"]
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: HEALTH_PORT
+              value: {{ .Values.agentWorker.healthPort | quote }}
           envFrom:
             - configMapRef:
                 name: {{ include "cw.fullname" . }}-config
             - secretRef:
                 name: {{ include "cw.secretName" . }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.agentWorker.healthPort }}
+          # Healthy while the Temporal worker is polling its task queue.
+          readinessProbe:
+            httpGet: { path: /readyz, port: health }
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+            initialDelaySeconds: 20
+            periodSeconds: 20
           resources: {{- toYaml .Values.agentWorker.resources | nindent 12 }}
 {{- end }}

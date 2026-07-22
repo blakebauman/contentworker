@@ -1,0 +1,37 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- $root := . -}}
+{{- /* Effective replica count per workload: HPA minReplicas when autoscaled,
+       static replicas otherwise. Single-replica workloads get no PDB — with
+       minAvailable 1 it would block node drains outright. */ -}}
+{{- $apiReplicas := ternary (int .Values.api.autoscaling.minReplicas) (int .Values.api.replicas) .Values.api.autoscaling.enabled -}}
+{{- $workloads := list -}}
+{{- if .Values.api.split.enabled -}}
+{{- $workloads = append $workloads (dict "name" "api-management" "replicas" (ternary $apiReplicas (int .Values.api.split.management.replicas) .Values.api.autoscaling.enabled)) -}}
+{{- $workloads = append $workloads (dict "name" "api-delivery" "replicas" (ternary $apiReplicas (int .Values.api.split.delivery.replicas) .Values.api.autoscaling.enabled)) -}}
+{{- $workloads = append $workloads (dict "name" "api-preview" "replicas" (ternary $apiReplicas (int .Values.api.split.preview.replicas) .Values.api.autoscaling.enabled)) -}}
+{{- else -}}
+{{- $workloads = append $workloads (dict "name" "api" "replicas" $apiReplicas) -}}
+{{- end -}}
+{{- $workerReplicas := ternary (int .Values.worker.autoscaling.minReplicas) (int .Values.worker.replicas) .Values.worker.autoscaling.enabled -}}
+{{- $workloads = append $workloads (dict "name" "worker" "replicas" $workerReplicas) -}}
+{{- if .Values.mcpServer.enabled -}}
+{{- $workloads = append $workloads (dict "name" "mcp" "replicas" (int .Values.mcpServer.replicas)) -}}
+{{- end -}}
+{{- if eq .Values.agents.runtime "temporal" -}}
+{{- $workloads = append $workloads (dict "name" "agent-worker" "replicas" (int .Values.agentWorker.replicas)) -}}
+{{- end -}}
+{{- range $w := $workloads }}
+{{- if gt (int $w.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cw.fullname" $root }}-{{ $w.name }}
+  labels: {{- include "cw.labels" $root | nindent 4 }}
+spec:
+  minAvailable: {{ $root.Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels: {{- include "cw.selectorLabels" (dict "ctx" $root "component" $w.name) | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

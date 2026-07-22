@@ -48,3 +48,31 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s-secrets" (include "cw.fullname" .) -}}
 {{- end -}}
 {{- end -}}
+
+{{/* Pod-level scheduling knobs, applied to every app workload. */}}
+{{- define "cw.scheduling" -}}
+{{- with .Values.scheduling }}
+{{- with .nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .tolerations }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .affinity }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .topologySpreadConstraints }}
+topologySpreadConstraints:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* Chart-wide pod selector (all components of this release). */}}
+{{- define "cw.releaseSelector" -}}
+app.kubernetes.io/name: {{ include "cw.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}

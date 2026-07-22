@@ -1,0 +1,83 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $root := . -}}
+# Default-deny ingress across every pod of this release, then explicit
+# allowances per surface. Requires a NetworkPolicy-enforcing CNI. Egress is
+# left open: the platform calls out to webhooks, AI providers, blob storage,
+# and user functions by design.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cw.fullname" . }}-default-deny-ingress
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "cw.releaseSelector" . | nindent 6 }}
+  policyTypes: [Ingress]
+---
+# API + MCP service traffic (from the ingress controller / in-cluster clients).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cw.fullname" . }}-allow-http
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "cw.releaseSelector" . | nindent 6 }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [api, api-management, api-delivery, api-preview, mcp]
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: {{ .Values.api.port }}
+        - port: {{ .Values.mcpServer.port }}
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+# Prometheus scrape of the metrics ports (api sidecar listener + worker and
+# agent-worker health ports).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cw.fullname" . }}-allow-metrics
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "cw.releaseSelector" . | nindent 6 }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [api, api-management, api-delivery, api-preview, worker, agent-worker]
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        {{- range $p := list (int .Values.api.metricsPort) (int .Values.worker.healthPort) (int .Values.agentWorker.healthPort) | uniq }}
+        - port: {{ $p }}
+        {{- end }}
+{{- if or .Values.postgres.bundled .Values.redis.bundled }}
+---
+# Bundled dev datastores accept connections from this release's pods only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cw.fullname" . }}-allow-datastores
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "cw.releaseSelector" . | nindent 6 }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [postgres, redis]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "cw.releaseSelector" . | nindent 14 }}
+      ports:
+        - port: 5432
+        - port: 6379
+{{- end }}
+{{- end }}

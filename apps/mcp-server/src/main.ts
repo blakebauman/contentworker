@@ -6,7 +6,13 @@ import {
 } from '@cw/application';
 import { authenticate } from '@cw/application';
 import { type Principal, scopesForKind } from '@cw/domain';
-import { logger, startTelemetry } from '@cw/telemetry';
+import {
+  logger,
+  metricsText,
+  startDefaultMetrics,
+  startTelemetry,
+  stopTelemetry,
+} from '@cw/telemetry';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { buildServer } from './server.js';
 import { wire } from './wire.js';
@@ -77,6 +83,11 @@ const httpServer = createServer(async (req, res) => {
     res.end(JSON.stringify({ status: 'ok' }));
     return;
   }
+  if (req.method === 'GET' && req.url === '/metrics') {
+    res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' });
+    res.end(await metricsText());
+    return;
+  }
   if (req.method !== 'POST' || !req.url?.startsWith('/mcp')) {
     res.writeHead(404).end();
     return;
@@ -116,8 +127,24 @@ const httpServer = createServer(async (req, res) => {
   }
 });
 
+startDefaultMetrics('cw-mcp');
 httpServer.listen(port, () => {
   const mode = process.env.DATABASE_URL ? 'postgres' : 'in-memory';
   const provider = process.env.AI_PROVIDER ?? 'anthropic';
   logger.info({ port, mode, ai: provider }, 'contentworker mcp-server listening');
 });
+
+// Graceful shutdown: stop accepting, let in-flight MCP requests finish.
+let shuttingDown = false;
+const shutdown = (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ signal }, 'mcp-server shutting down');
+  httpServer.close(async () => {
+    await stopTelemetry().catch(() => {});
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(0), 15_000).unref();
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

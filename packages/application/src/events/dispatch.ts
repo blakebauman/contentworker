@@ -17,6 +17,8 @@ export interface DispatchDeps {
   readonly rag?: RagDeps;
   /** Optional — when present, matching user functions are invoked on each event. */
   readonly invoker?: FunctionInvoker;
+  /** Optional observer for webhook delivery outcomes (host-side metrics). */
+  readonly onWebhookDelivery?: (result: { delivered: boolean }) => void;
 }
 
 /**
@@ -46,6 +48,7 @@ export async function dispatchEvent(
   const webhooks = await ctx.store.webhooks.listByTopic(scope, event.type);
   for (const webhook of webhooks) {
     const result = await deps.sender.send(webhook, event);
+    deps.onWebhookDelivery?.({ delivered: result.delivered });
     await ctx.store.webhooks.recordDelivery(scope, {
       webhookId: webhook.id,
       eventId: event.id,

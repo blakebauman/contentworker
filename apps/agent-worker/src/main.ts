@@ -1,10 +1,14 @@
+import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { AGENT_TASK_QUEUE } from '@cw/agent-runtime/temporal';
-import { logger, startTelemetry } from '@cw/telemetry';
+import { logger, metricsText, startDefaultMetrics, startTelemetry } from '@cw/telemetry';
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { wireActivities } from './wire.js';
 
 startTelemetry('cw-agent-worker');
+startDefaultMetrics('cw-agent-worker');
+
+const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? 9464);
 
 /**
  * Temporal worker: hosts the agent workflows + activities on the agent task
@@ -24,8 +28,47 @@ async function main() {
     activities,
   });
 
+  // Health (K8s liveness) + metrics: healthy while the worker polls Temporal.
+  const health = createServer(async (req, res) => {
+    if (req.url === '/healthz' || req.url === '/readyz') {
+      const state = worker.getState();
+      const ok = state === 'RUNNING' || state === 'INITIALIZED';
+      res.writeHead(ok ? 200 : 500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: state }));
+      return;
+    }
+    if (req.url === '/metrics') {
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' });
+      res.end(await metricsText());
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  health.listen(HEALTH_PORT, () =>
+    logger.info({ port: HEALTH_PORT }, 'agent-worker health listening'),
+  );
+
+  // Graceful shutdown: worker.shutdown() drains in-flight activities, then
+  // run() resolves. (The Temporal Runtime also installs default signal
+  // handlers; ours makes the drain explicit and closes the health server.)
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({ signal }, 'agent-worker shutting down');
+    health.close();
+    try {
+      worker.shutdown();
+    } catch {
+      // already shutting down
+    }
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   logger.info({ taskQueue: AGENT_TASK_QUEUE, temporal: address }, 'agent-worker running');
   await worker.run();
+  health.close();
 }
 
 main().catch((err) => {

@@ -85,6 +85,12 @@ services:
       OIDC_GROUP_ROLE_MAP: ${OIDC_GROUP_ROLE_MAP:-{}}
     ports:
       - "8787:8787"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8787/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -105,14 +111,23 @@ services:
       VITE_SSO_LOGIN_URL: ${VITE_SSO_LOGIN_URL:-}
     ports:
       - "5173:5173"
+    restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   worker:
     build: .
     command: ["pnpm", "--filter", "@cw/worker", "start"]
     environment:
       <<: *app-env
+      HEALTH_PORT: "9464"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9464/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
     depends_on:
       migrator:
         condition: service_completed_successfully

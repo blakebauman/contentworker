@@ -64,6 +64,9 @@ export function createApp(
   app.get('/healthz', doc('System', 'Liveness probe', { ok: healthz }), (c) =>
     c.json({ status: 'ok' }),
   );
+  // Bare-path alias on the externally-reachable surface only, for uptime
+  // monitors/LBs that default to /health. K8s probes use /healthz + /readyz.
+  app.get('/health', (c) => c.json({ status: 'ok' }));
   app.get(
     '/readyz',
     doc('System', 'Readiness probe (reports the mounted role)', { ok: readyz }),

@@ -143,8 +143,9 @@ ceiling to `0` to disable metering.
 | `AI_MAX_TOKENS_PER_WINDOW` | `200000` | Max input+output tokens per space per window (`0` disables) |
 | `AI_BUDGET_WINDOW_SECONDS` | `60` | Rolling window length |
 
-> On Cloudflare (`apps/edge`) AI calls are not yet metered — shared counters
-> there need a Durable Object (follow-up); the Node stack is covered.
+> On Cloudflare (`apps/edge`) the budget is enforced by the `CostGuardDO`
+> Durable Object (the `AI_BUDGET` binding) — shared across isolates and colos.
+> Without the binding, edge AI calls are unmetered.
 
 ### API vs worker embeddings
 
@@ -161,6 +162,7 @@ publish-time indexing. The API can still serve search with local embeddings when
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `RELAY_INTERVAL_MS` | `1000` | Outbox poll interval |
+| `HEALTH_PORT` | `9464` | Health (`/healthz`, `/readyz`) + Prometheus `/metrics` port on the worker and agent-worker; on the API it serves `/metrics` only (health stays on the API port). Worker liveness fails only when the relay loop *hangs* (a tick that never returns); erroring ticks surface via `cw_relay_errors_total` instead of restart-looping |
 | `AGENTS_ENRICH` | `false` | Run the enrich agent on `entry.published` (needs an AI provider) |
 | `AGENTS_MODERATE` | `false` | Run the moderation agent on `entry.published` (classify; flagged content is retracted from delivery) |
 | `AGENTS_MODERATE_BLOCKING` | `false` | Synchronous pre-publish gate: run moderation **before** publishing and reject (422) flagged content instead of retracting it after |
@@ -197,6 +199,19 @@ See [Admin UI](./admin-ui.md).
 | --- | --- | --- |
 | `LOG_LEVEL` | `info` | Pino log level (`@cw/telemetry`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OpenTelemetry OTLP exporter endpoint |
+
+Prometheus metrics (`prom-client`, Node services only — the edge Worker uses
+Cloudflare observability): the API, worker, and agent-worker expose
+`GET /metrics` on `HEALTH_PORT` (never on the ingress-exposed API port); the
+MCP server serves it on its cluster-internal HTTP port. Counters cover outbox
+relay volume and errors, consumed events by type/outcome, dispatch duration,
+webhook delivery outcomes, and scheduled-action runs, plus process defaults.
+In Helm, `metrics.serviceMonitor.enabled` renders Prometheus Operator
+ServiceMonitors (`metrics.serviceMonitor.labels` for stack discovery). All
+four Node services handle SIGTERM/SIGINT gracefully: in-flight work drains
+(bounded by `terminationGracePeriodSeconds` in Helm) before connections close.
+The API additionally serves `GET /health` as a bare-path alias for external
+uptime monitors; Kubernetes probes use `/healthz` + `/readyz`.
 
 ## MCP server
 
