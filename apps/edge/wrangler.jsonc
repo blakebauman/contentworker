@@ -116,6 +116,11 @@
     "AGENTS_AUTO_APPLY": "false",
     "EMBEDDINGS_PROVIDER": "",
     "EMBEDDINGS_DIM": "1536",
+    // Staging runs persistent (Hyperdrive) but without R2/embeddings/Anthropic
+    // configured; name those fakes explicitly so the boot guard accepts them.
+    // PRODUCTION: set to "" (and configure the real adapters) — a persistent
+    // deployment refuses to start on any fake not listed here.
+    "ALLOW_FAKE_ADAPTERS": "ai,blob,embeddings",
     "BLOB_BUCKET": "",
     "BLOB_ENDPOINT": "",
     "BLOB_FORCE_PATH_STYLE": "true",

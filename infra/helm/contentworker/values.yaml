@@ -30,6 +30,21 @@ config:
   # Extra non-secret env (e.g. AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_VERSION).
   extraEnv: {}
 
+# Blob/asset storage — any S3-compatible endpoint (S3, R2, MinIO, GCS interop).
+# Empty bucket → in-memory fake blob store; a persistent install then refuses to
+# boot unless ALLOW_FAKE_ADAPTERS accepts it (see docs/configuration.md).
+# Credentials: prefer workload identity (IRSA / GCP WI / Azure WI) on the
+# ServiceAccount; static keys go in the secret as AWS_ACCESS_KEY_ID/-SECRET.
+blob:
+  bucket: ""
+  # Custom endpoint for MinIO / R2 / GCS interop; empty for native S3.
+  endpoint: ""
+  region: ""
+  # true for MinIO and most S3-compatibles.
+  forcePathStyle: false
+  # When set, download URLs are unsigned public URLs under this base.
+  publicBaseUrl: ""
+
 # Secrets. In cloud, set create=false and point existingSecret at one populated
 # by External Secrets Operator from the cloud's secret manager. For local dev,
 # create=true writes the values below into a Secret (NOT for production).
@@ -45,6 +60,9 @@ secrets:
     MCP_TOKEN: ""
     ANTHROPIC_API_KEY: ""
     AZURE_OPENAI_API_KEY: ""
+    # Static S3-compatible credentials (MinIO etc.); leave empty with workload identity.
+    AWS_ACCESS_KEY_ID: ""
+    AWS_SECRET_ACCESS_KEY: ""
 
 # --- API (Management + Delivery + Preview) -------------------------------------
 # Run as one combined Deployment (role=all) or split into independently-scaled

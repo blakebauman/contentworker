@@ -6,8 +6,8 @@ import {
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
-import { aiBudgetLimits, createHasher } from '@cw/application';
-import type { AgentRunner, AppContext, RagDeps } from '@cw/application';
+import { aiBudgetLimits, assertNoFakeAdapters, createHasher } from '@cw/application';
+import type { AgentRunner, AppContext, FakeAdapterBinding, RagDeps } from '@cw/application';
 import type {
   AIProvider,
   Clock,
@@ -35,9 +35,13 @@ const ids: IdGenerator = { newId: () => uuidv7() };
  * Anthropic when configured, otherwise a dev stub returning schema-shaped
  * placeholders so the tool works offline (no key, no network).
  */
-function makeAI(env: NodeJS.ProcessEnv): AIProvider {
+function makeAI(env: NodeJS.ProcessEnv, fakes: FakeAdapterBinding[]): AIProvider {
   if (env.AI_PROVIDER === 'azure-openai') return createAzureOpenAIProvider();
   if (env.ANTHROPIC_API_KEY) return createAnthropicProvider();
+  fakes.push({
+    key: 'ai',
+    detail: 'StubAIProvider (placeholder generations) — set ANTHROPIC_API_KEY or AI_PROVIDER',
+  });
   return new StubAIProvider(devGenerate);
 }
 
@@ -79,8 +83,18 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
     ? createPostgresStore(env.DATABASE_URL)
     : seededInMemory(env);
 
-  const ai = makeAI(env);
+  const fakes: FakeAdapterBinding[] = [];
+  const ai = makeAI(env, fakes);
 
+  // Explicit EMBEDDINGS_PROVIDER=local is informed consent to hash embeddings;
+  // only the silent default (unset/unknown) counts as a fake.
+  if (env.EMBEDDINGS_PROVIDER !== 'azure-openai' && env.EMBEDDINGS_PROVIDER !== 'local') {
+    fakes.push({
+      key: 'embeddings',
+      detail:
+        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai, or =local to accept explicitly',
+    });
+  }
   const embeddings: EmbeddingsProvider =
     env.EMBEDDINGS_PROVIDER === 'azure-openai'
       ? createAzureOpenAIEmbeddings()
@@ -91,6 +105,12 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
         modelId: embeddings.modelId,
       })
     : new InMemoryVectorStore();
+
+  assertNoFakeAdapters({
+    persistent: Boolean(env.DATABASE_URL),
+    allowFakeAdapters: env.ALLOW_FAKE_ADAPTERS,
+    fakes,
+  });
 
   const limits = aiBudgetLimits(process.env);
   const costGuard = limits ? new InMemoryCostGuard(limits) : undefined;

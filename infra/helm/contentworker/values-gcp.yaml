@@ -14,6 +14,18 @@ serviceAccount:
 config:
   aiProvider: anthropic
   embeddingsProvider: azure-openai
+  # Azure OpenAI embeddings need their non-secret endpoint config too (the API
+  # key comes from the secret as AZURE_OPENAI_API_KEY).
+  extraEnv:
+    AZURE_OPENAI_ENDPOINT: "https://REPLACE.openai.azure.com"
+    AZURE_OPENAI_API_VERSION: "2024-10-21"
+    AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT: "text-embedding-3-small"
+
+# Assets on GCS via the S3-interop XML API (HMAC keys in the secret as
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
+blob:
+  bucket: REPLACE-contentworker-assets
+  endpoint: "https://storage.googleapis.com"
 
 secrets:
   create: false

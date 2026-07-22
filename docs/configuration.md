@@ -39,6 +39,7 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `REQUIRE_SECURE_SECRETS` | off (auto when `NODE_ENV=production`) | Fail startup on dev default tokens, short secrets, or `SEED_DEV=true`. Set `false` in local docker-compose to allow dev tokens despite `NODE_ENV=production` in the image. |
+| `ALLOW_FAKE_ADAPTERS` | — | A persistent deployment (`DATABASE_URL`/Hyperdrive set) refuses to boot when a dev fake is silently bound (stub AI, fake blob store, hash embeddings, in-memory vectors). This names the fakes a deployment accepts deliberately: a comma-separated list of `ai`, `blob`, `embeddings`, `vectors` — or `all`. An explicit `EMBEDDINGS_PROVIDER=local` already counts as consent and needs no entry here. |
 | `TOKEN_PEPPER` | — | Server-side pepper mixed into API key hashes at rest |
 | `AUTH_RATE_LIMIT_MAX` | `10` | Failed auth attempts per IP before HTTP 429 |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit sliding window (ms) |

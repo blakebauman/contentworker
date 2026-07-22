@@ -1,6 +1,7 @@
 export * from './context.js';
 export * from './auth.js';
 export * from './token-crypto.js';
+export * from './adapter-guard.js';
 export * from './preview-tokens.js';
 export * from './spaces.js';
 export * from './content-types.js';

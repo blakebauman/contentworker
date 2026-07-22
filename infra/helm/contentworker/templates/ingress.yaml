@@ -21,12 +21,16 @@ spec:
       http:
         paths:
           {{- if .Values.api.split.enabled }}
-          - path: /spaces
+          {{- /* Management also serves auth (OIDC SSO), health, and API docs —
+                 everything that isn't Delivery/Preview read traffic. */}}
+          {{- range $p := list "/spaces" "/auth" "/healthz" "/readyz" "/openapi.json" "/docs" }}
+          - path: {{ $p }}
             pathType: Prefix
             backend:
               service:
                 name: {{ $fullname }}-api-management
                 port: { number: {{ $svcPort }} }
+          {{- end }}
           - path: /delivery
             pathType: Prefix
             backend:

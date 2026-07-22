@@ -12,7 +12,8 @@ import {
 } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
-import type { AppContext, RagDeps } from '@cw/application';
+import { assertNoFakeAdapters } from '@cw/application';
+import type { AppContext, FakeAdapterBinding, RagDeps } from '@cw/application';
 import { type ApiKeyKind, scopesForKind } from '@cw/domain';
 import type {
   AIProvider,
@@ -62,9 +63,13 @@ export interface Wired {
  * otherwise a dev stub that returns schema-shaped placeholder values so the
  * generate flow is demoable offline (no key, no network).
  */
-function makeAI(): AIProvider {
+function makeAI(fakes: FakeAdapterBinding[]): AIProvider {
   if (process.env.AI_PROVIDER === 'azure-openai') return createAzureOpenAIProvider();
   if (process.env.ANTHROPIC_API_KEY) return createAnthropicProvider();
+  fakes.push({
+    key: 'ai',
+    detail: 'StubAIProvider (placeholder generations) — set ANTHROPIC_API_KEY or AI_PROVIDER',
+  });
   return new StubAIProvider(devGenerate);
 }
 
@@ -84,7 +89,7 @@ function devGenerate(req: GenerateRequest): unknown {
 }
 
 /** S3 BlobStore when BLOB_BUCKET is set; otherwise a fake (dev/tests). */
-function makeBlob(): BlobStore {
+function makeBlob(fakes: FakeAdapterBinding[]): BlobStore {
   if (process.env.BLOB_BUCKET) {
     return createS3BlobStore({
       bucket: process.env.BLOB_BUCKET,
@@ -94,13 +99,27 @@ function makeBlob(): BlobStore {
       publicBaseUrl: process.env.BLOB_PUBLIC_BASE_URL,
     });
   }
+  fakes.push({
+    key: 'blob',
+    detail: 'FakeBlobStore (uploads are lost on restart) — set BLOB_BUCKET',
+  });
   return new FakeBlobStore();
 }
 
 /** Builds RAG deps (embeddings + vector store) for the Delivery search endpoint. */
-function makeRag(databaseUrl?: string): RagDeps {
+function makeRag(databaseUrl: string | undefined, fakes: FakeAdapterBinding[]): RagDeps {
+  const provider = process.env.EMBEDDINGS_PROVIDER;
+  // An explicit EMBEDDINGS_PROVIDER=local is informed consent to hash-based
+  // embeddings; only the silent default (unset/unknown) is flagged as a fake.
+  if (provider !== 'azure-openai' && provider !== 'local') {
+    fakes.push({
+      key: 'embeddings',
+      detail:
+        'hash-based embeddings (semantic search returns noise) — set EMBEDDINGS_PROVIDER=azure-openai, or =local to accept explicitly',
+    });
+  }
   const embeddings: EmbeddingsProvider =
-    process.env.EMBEDDINGS_PROVIDER === 'azure-openai'
+    provider === 'azure-openai'
       ? createAzureOpenAIEmbeddings()
       : new LocalEmbeddingsProvider(Number(process.env.EMBEDDINGS_DIM ?? 1536));
   const vectors = databaseUrl
@@ -159,14 +178,26 @@ export function wire(config: ApiConfig): Wired {
       )
     : undefined;
 
+  // Fail fast when a real database would run behind dev fakes: build the
+  // AI/blob/RAG bindings first, then refuse to boot on any unallowed fake.
+  const fakes: FakeAdapterBinding[] = [];
+  const rag = makeRag(config.databaseUrl, fakes);
+  const blob = makeBlob(fakes);
+  const ai = makeAI(fakes);
+  assertNoFakeAdapters({
+    persistent: Boolean(config.databaseUrl),
+    allowFakeAdapters: process.env.ALLOW_FAKE_ADAPTERS,
+    fakes,
+  });
+
   if (config.databaseUrl) {
     const store = createPostgresStore(config.databaseUrl);
     closers.push(() => store.close());
     return {
       ctx: { store, clock: systemClock, ids: uuidIds, cache, costGuard },
-      rag: makeRag(config.databaseUrl),
-      blob: makeBlob(),
-      ai: makeAI(),
+      rag,
+      blob,
+      ai,
       bus,
       rateLimiter,
       close: async () => {
@@ -208,9 +239,9 @@ export function wire(config: ApiConfig): Wired {
   }
   return {
     ctx,
-    rag: makeRag(config.databaseUrl),
-    blob: makeBlob(),
-    ai: makeAI(),
+    rag,
+    blob,
+    ai,
     bus,
     rateLimiter,
     close: async () => {

@@ -58,6 +58,8 @@ export interface EdgeEnv {
   readonly AGENTS_AUTO_APPLY?: string;
   readonly AGENT_RUNTIME?: string;
   readonly REQUIRE_SECURE_SECRETS?: string;
+  /** Comma-separated fake-adapter allow list (ai,blob,embeddings,vectors | all). */
+  readonly ALLOW_FAKE_ADAPTERS?: string;
   readonly AUTH_RATE_LIMIT_MAX?: string;
   readonly AUTH_RATE_LIMIT_WINDOW_MS?: string;
   readonly AI_MAX_REQUESTS_PER_WINDOW?: string;

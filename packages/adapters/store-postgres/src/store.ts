@@ -55,7 +55,7 @@ import type {
   WebhookRepo,
   WorkflowRepo,
 } from '@cw/ports';
-import { and, asc, count, desc, eq, gt, gte, isNull, lte, sql, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lte, sql, sum } from 'drizzle-orm';
 import { type PostgresJsDatabase, drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema.js';
@@ -530,10 +530,11 @@ function makeOutboxRepo(db: Db): OutboxRepo {
       return rows.map((r) => r.payload as DomainEvent);
     },
     async markRelayed(eventIds) {
-      const now = new Date();
-      for (const id of eventIds) {
-        await db.update(schema.outbox).set({ relayedAt: now }).where(eq(schema.outbox.id, id));
-      }
+      if (eventIds.length === 0) return;
+      await db
+        .update(schema.outbox)
+        .set({ relayedAt: new Date() })
+        .where(inArray(schema.outbox.id, [...eventIds]));
     },
   };
 }
