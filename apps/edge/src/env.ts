@@ -15,6 +15,13 @@ export interface EdgeEnv {
   readonly HYPERDRIVE?: Hyperdrive;
   /** Producer side of the `cw-events` queue (domain-event pipeline). */
   readonly EVENTS_QUEUE?: Queue;
+  /**
+   * Producer side of the `cw-agents` queue. When bound, on-publish agent runs
+   * are enqueued here (consumed one message at a time) instead of running
+   * inline in the cw-events consumer, so a batch of published entries never
+   * has to fit N agent workflows inside one consumer invocation.
+   */
+  readonly AGENTS_QUEUE?: Queue;
   /** Delivery cache (tag-versioned; see @cw/adapter-cache-kv). */
   readonly KV_CACHE?: KVNamespace;
   /** Vectorize index for RAG/semantic search (1536 dims, cosine). */

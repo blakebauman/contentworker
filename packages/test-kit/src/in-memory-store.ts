@@ -190,10 +190,25 @@ export class InMemoryContentStore implements ContentStore {
         rows = rows.filter((r) => r.contentTypeApiId === query.contentTypeApiId);
       }
       if (query.since) rows = rows.filter((r) => r.publishedAt > (query.since as string));
-      // Default order is publishedAt asc so a `since` cursor advances
-      // deterministically; an explicit `order` overrides it inside runEntryQuery.
+      if (query.afterEntryId !== undefined && query.afterEntryId !== '') {
+        const cursor = query.afterEntryId;
+        rows = rows.filter((r) => r.entryId > cursor);
+      }
+      // Keyset paging (afterEntryId, '' = from the start) orders by entryId
+      // (stable cursor); the default is publishedAt asc so a `since` cursor
+      // advances deterministically. Explicit `order` overrides in runEntryQuery.
       rows.sort((a, b) =>
-        a.publishedAt < b.publishedAt ? -1 : a.publishedAt > b.publishedAt ? 1 : 0,
+        query.afterEntryId !== undefined
+          ? a.entryId < b.entryId
+            ? -1
+            : a.entryId > b.entryId
+              ? 1
+              : 0
+          : a.publishedAt < b.publishedAt
+            ? -1
+            : a.publishedAt > b.publishedAt
+              ? 1
+              : 0,
       );
       const filtered = runEntryQuery(
         rows,

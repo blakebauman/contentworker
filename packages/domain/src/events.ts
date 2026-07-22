@@ -55,6 +55,16 @@ export interface SearchReindexRequestedEvent extends BaseEvent {
   readonly type: 'search.reindex_requested';
   /** Limit the reindex to one content type, or all when omitted. */
   readonly contentTypeApiId?: string;
+  /**
+   * Continuation cursor: reindex only entries with `entryId` strictly greater
+   * (keyset paging — stable under concurrent publishes/unpublishes). Set only
+   * on self-enqueued follow-up slices: the consumer processes a bounded slice
+   * per invocation and re-enqueues the remainder, so one queue message never
+   * has to fit an entire reindex inside a single invocation's limits.
+   */
+  readonly afterEntryId?: string;
+  /** Entries already processed by earlier slices (bounds the job total). */
+  readonly entriesSoFar?: number;
 }
 
 export type EventType = DomainEvent['type'];

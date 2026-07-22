@@ -10,8 +10,9 @@ import {
   createHasher,
   relayOutbox,
   runDueScheduledActions,
+  runPublishAgents,
 } from '@cw/application';
-import type { DomainEvent } from '@cw/domain';
+import type { DomainEvent, Scope } from '@cw/domain';
 import type { McpDeps } from '@cw/mcp-server/wire';
 import { Hono } from 'hono';
 import { AgentWorkflow } from './agents/workflow.js';
@@ -37,6 +38,25 @@ function isDomainEvent(body: unknown): body is DomainEvent {
     typeof e.id === 'string' &&
     typeof e.type === 'string' &&
     typeof e.occurredAt === 'string' &&
+    typeof scope?.spaceId === 'string' &&
+    typeof scope?.environmentId === 'string'
+  );
+}
+
+/** One on-publish agent job on the `cw-agents` queue (consumed one at a time). */
+interface AgentJobMessage {
+  readonly kind: 'agent.publish_run';
+  readonly scope: Scope;
+  readonly entryId: string;
+}
+
+function isAgentJob(body: unknown): body is AgentJobMessage {
+  if (typeof body !== 'object' || body === null) return false;
+  const j = body as Record<string, unknown>;
+  const scope = j.scope as Record<string, unknown> | undefined;
+  return (
+    j.kind === 'agent.publish_run' &&
+    typeof j.entryId === 'string' &&
     typeof scope?.spaceId === 'string' &&
     typeof scope?.environmentId === 'string'
   );
@@ -97,6 +117,100 @@ function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
   return app;
 }
 
+/**
+ * cw-events consumer body. When AGENTS_QUEUE is bound, entry.published events
+ * enqueue an agent job there (before ack, so at-least-once holds) instead of
+ * awaiting workflows inline — a batch of 25 published entries then costs 25
+ * cheap sends, not up to 25×2 polled Workflow runs in one invocation.
+ */
+async function consumeEvents(batch: MessageBatch, env: EdgeEnv, wired: EdgeWired): Promise<void> {
+  const agentConfig = agentConfigFromEnv(env);
+  const agentsConfigured = agentConfig.enrich || agentConfig.moderate;
+  const forwardAgents = Boolean(env.AGENTS_QUEUE) && agentsConfigured;
+  const deps: ConsumeDeps = {
+    sender: createWebhookSender(),
+    invoker: createHttpFunctionInvoker(),
+    cache: wired.cache,
+    // Parity with the Node worker: RAG indexing only when embeddings are
+    // explicitly configured (EMBEDDINGS_PROVIDER), never with the dev fallback.
+    rag: env.EMBEDDINGS_PROVIDER ? wired.rag : undefined,
+    bus: env.LIVE_HUB ? createDoEventBus(env.LIVE_HUB) : undefined,
+    onLiveError: (err) => console.error('live publish error', err),
+    // Inline agents only when no cw-agents queue is bound (dev/demo parity).
+    agents: forwardAgents ? undefined : makeAgents(env, wired.ctx, wired.ai),
+    agentConfig: forwardAgents ? undefined : agentConfig,
+  };
+  for (const msg of batch.messages) {
+    // Validate the message shape before treating it as a DomainEvent. A
+    // malformed/poison message is acked (dropped) rather than retried forever.
+    if (!isDomainEvent(msg.body)) {
+      console.error('dropping malformed queue message', { id: msg.id });
+      msg.ack();
+      continue;
+    }
+    try {
+      const runs = await consumeEvent(wired.ctx, deps, msg.body);
+      for (const r of runs) {
+        console.log(JSON.stringify({ msg: `${r.workflow} complete`, ...r }));
+      }
+      if (forwardAgents && msg.body.type === 'entry.published' && env.AGENTS_QUEUE) {
+        const job: AgentJobMessage = {
+          kind: 'agent.publish_run',
+          scope: msg.body.scope,
+          entryId: msg.body.entryId,
+        };
+        await env.AGENTS_QUEUE.send(job);
+      }
+      msg.ack();
+    } catch (err) {
+      console.error('event dispatch failed; retrying', err);
+      msg.retry();
+    }
+  }
+}
+
+/**
+ * cw-agents consumer body: runs the on-publish agents for one entry per
+ * message. runPublishAgents owns the post-run behavior (AgentRun records,
+ * moderation retraction), so those survive the move off the events consumer.
+ */
+async function consumeAgentJobs(
+  batch: MessageBatch,
+  env: EdgeEnv,
+  wired: EdgeWired,
+): Promise<void> {
+  const agentConfig = agentConfigFromEnv(env);
+  const agents = makeAgents(env, wired.ctx, wired.ai);
+  for (const msg of batch.messages) {
+    if (!isAgentJob(msg.body)) {
+      console.error('dropping malformed agent job', { id: msg.id });
+      msg.ack();
+      continue;
+    }
+    if (!agents) {
+      // Agents were disabled after the job was enqueued — drop, don't retry.
+      msg.ack();
+      continue;
+    }
+    try {
+      const runs = await runPublishAgents(
+        wired.ctx,
+        agents,
+        msg.body.scope,
+        msg.body.entryId,
+        agentConfig,
+      );
+      for (const r of runs) {
+        console.log(JSON.stringify({ msg: `${r.workflow} complete`, ...r }));
+      }
+      msg.ack();
+    } catch (err) {
+      console.error('agent job failed; retrying', err);
+      msg.retry();
+    }
+  }
+}
+
 export default {
   /**
    * HTTP surface: management/delivery/preview APIs + MCP + the DO live route.
@@ -136,44 +250,44 @@ export default {
   },
 
   /**
-   * cw-events consumer: the same consumeEvent body the Node worker runs —
-   * webhooks, cache invalidation, RAG indexing, functions, live fan-out,
-   * on-publish agents. Per-message ack/retry so one poison event doesn't
-   * recycle the whole batch; retries/DLQ are configured on the queue binding.
+   * Queue consumers, routed by queue name:
+   * - cw-events: the same consumeEvent body the Node worker runs — webhooks,
+   *   cache invalidation, RAG indexing (one bounded slice per reindex message),
+   *   functions, live fan-out. On-publish agent runs are forwarded to cw-agents
+   *   when that queue is bound, else run inline (dev parity).
+   * - cw-agents: one agent job per invocation (batch size 1) — each job can
+   *   await durable Workflow runs for minutes without starving event delivery.
+   * - cw-events-dlq: dead letters are logged loudly and acked, never silent.
+   * Per-message ack/retry so one poison message doesn't recycle a batch.
    */
   async queue(batch: MessageBatch, env: EdgeEnv, _exec: ExecutionContext): Promise<void> {
-    const wired = wireEdge(env);
-    const deps: ConsumeDeps = {
-      sender: createWebhookSender(),
-      invoker: createHttpFunctionInvoker(),
-      cache: wired.cache,
-      // Parity with the Node worker: RAG indexing only when embeddings are
-      // explicitly configured (EMBEDDINGS_PROVIDER), never with the dev fallback.
-      rag: env.EMBEDDINGS_PROVIDER ? wired.rag : undefined,
-      bus: env.LIVE_HUB ? createDoEventBus(env.LIVE_HUB) : undefined,
-      onLiveError: (err) => console.error('live publish error', err),
-      agents: makeAgents(env, wired.ctx, wired.ai),
-      agentConfig: agentConfigFromEnv(env),
-    };
-    try {
+    if (batch.queue === 'cw-events-dlq') {
       for (const msg of batch.messages) {
-        // Validate the message shape before treating it as a DomainEvent. A
-        // malformed/poison message is acked (dropped) rather than retried forever.
-        if (!isDomainEvent(msg.body)) {
-          console.error('dropping malformed queue message', { id: msg.id });
-          msg.ack();
-          continue;
-        }
-        try {
-          const runs = await consumeEvent(wired.ctx, deps, msg.body);
-          for (const r of runs) {
-            console.log(JSON.stringify({ msg: `${r.workflow} complete`, ...r }));
-          }
-          msg.ack();
-        } catch (err) {
-          console.error('event dispatch failed; retrying', err);
-          msg.retry();
-        }
+        console.error(
+          JSON.stringify({
+            msg: 'dead-lettered message dropped after max retries',
+            id: msg.id,
+            body: msg.body,
+          }),
+        );
+        msg.ack();
+      }
+      return;
+    }
+
+    const wired = wireEdge(env);
+    try {
+      if (batch.queue === 'cw-agents') {
+        await consumeAgentJobs(batch, env, wired);
+      } else {
+        await consumeEvents(batch, env, wired);
+      }
+      // Events appended during consumption — reindex continuation slices,
+      // moderation retractions — relay now instead of waiting for the cron.
+      if (wired.queue) {
+        await relayOutbox(wired.ctx, wired.queue).catch((err) =>
+          console.error('post-batch outbox relay failed', err),
+        );
       }
     } finally {
       await wired.close();
