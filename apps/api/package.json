@@ -54,6 +54,7 @@
     "hono-openapi": "^1.3.1",
     "ioredis": "^5.4.2",
     "openid-client": "^6.0.0",
+    "tsx": "^4.19.2",
     "uuid": "^11.0.3",
     "zod": "^4.4.3",
     "zod-openapi": "^4.2.4"
@@ -61,7 +62,6 @@
   "devDependencies": {
     "@cw/sdk-core": "workspace:*",
     "@types/node": "^22.20.0",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },

@@ -98,9 +98,12 @@ services:
         condition: service_healthy
 
   # Admin SPA: built and served by vite preview, proxying API paths to `api`
-  # (same-origin, so no CORS). Open http://localhost:5173.
+  # (same-origin, so no CORS). Open http://localhost:5173. Uses the image's
+  # `dev` stage — vite is a dev dependency, absent from the prod stage.
   admin:
-    build: .
+    build:
+      context: .
+      target: dev
     command:
       - sh
       - -c

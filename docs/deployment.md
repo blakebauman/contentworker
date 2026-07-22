@@ -6,11 +6,16 @@ variables, so the same image runs on any cloud — see [Configuration](./configu
 
 ## Container image
 
-The `Dockerfile` builds one image for all Node services:
+The `Dockerfile` builds one image for all Node services, in two stages:
 
 - Base `node:22-alpine`, `corepack enable` for pnpm.
-- Copies the workspace and runs `pnpm install` (dev deps included — services run via `tsx`, so
-  there's no separate compile step).
+- **`prod` (default)** — production dependencies only and runs as the non-root
+  `node` user. `tsx` is a production dependency of each app (services run TS
+  directly, no compile step), while build/test toolchains (typescript, vite,
+  vitest, drizzle-kit, biome) never reach the runtime image. This is what the
+  Helm chart deploys.
+- **`dev`** — full install including dev dependencies; docker-compose's `admin`
+  service targets it to build/serve the SPA with vite inside the container.
 - Default command runs the API; each service overrides the command:
   - api: `pnpm --filter @cw/api start`
   - worker: `pnpm --filter @cw/worker start`
