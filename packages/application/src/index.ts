@@ -33,6 +33,7 @@ export * from './ai-actions.js';
 export * from './ai-budget.js';
 export * from './ai-prompt.js';
 export * from './agent-actions.js';
+export * from './agent-schedules.js';
 export * from './rag.js';
 export * from './roles.js';
 export * from './semantics.js';

@@ -134,6 +134,9 @@ agents:
   moderate: false
   # Apply agent output automatically; false routes proposals to human review.
   autoApply: false
+  # Run recurring agent jobs (cron-based agent-schedules) from the worker.
+  # AI_AGENT_* budget vars and AGENT_SCHEDULE_* caps go in config.extraEnv.
+  schedules: false
   # in-process = non-durable, runs inside the worker (dev / single node).
   # temporal  = durable execution: deploys the agent-worker (workflow host) and
   #             the worker starts workflows on the Temporal cluster.

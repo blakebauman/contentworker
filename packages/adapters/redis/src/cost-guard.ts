@@ -17,11 +17,18 @@ export interface RedisCostGuardLimits {
  * count and token usage; both expire when the window rolls, so no cleanup is
  * needed. Budget is per space (the tenant boundary), not per environment.
  */
-export function createRedisCostGuard(connection: Redis, limits: RedisCostGuardLimits): CostGuard {
+export function createRedisCostGuard(
+  connection: Redis,
+  limits: RedisCostGuardLimits,
+  opts: { keyPrefix?: string } = {},
+): CostGuard {
+  // Distinct prefixes give independent windows (e.g. `cwagent` for background
+  // agent spend vs the default interactive window).
+  const prefix = opts.keyPrefix ?? 'cwai';
   const windowMs = limits.windowSeconds * 1000;
   const bucket = () => Math.floor(Date.now() / windowMs);
-  const reqKey = (scope: Scope) => `cwai:req:${scope.spaceId}:${bucket()}`;
-  const tokKey = (scope: Scope) => `cwai:tok:${scope.spaceId}:${bucket()}`;
+  const reqKey = (scope: Scope) => `${prefix}:req:${scope.spaceId}:${bucket()}`;
+  const tokKey = (scope: Scope) => `${prefix}:tok:${scope.spaceId}:${bucket()}`;
   const retryAfter = () => Math.ceil((((bucket() + 1) * windowMs - Date.now()) as number) / 1000);
 
   return {

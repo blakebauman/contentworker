@@ -159,7 +159,8 @@ export function agentConfigFromEnv(env: EdgeEnv): PublishAgentsConfig {
  */
 export function makeAgents(env: EdgeEnv, ctx: AppContext, ai: AIProvider): AgentRunner | undefined {
   const cfg = agentConfigFromEnv(env);
-  if (!cfg.enrich && !cfg.moderate) return undefined;
+  // Schedules need a runner even when no on-publish agent is enabled.
+  if (!cfg.enrich && !cfg.moderate && env.AGENTS_SCHEDULES !== 'true') return undefined;
   if (env.AGENT_RUNTIME === 'cloudflare-workflows' && env.AGENT_WF) {
     return new CloudflareWorkflowsAgentRuntime(env.AGENT_WF, ids);
   }

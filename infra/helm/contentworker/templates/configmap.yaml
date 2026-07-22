@@ -63,6 +63,7 @@ data:
   AGENTS_ENRICH: {{ .Values.agents.enrich | quote }}
   AGENTS_MODERATE: {{ .Values.agents.moderate | quote }}
   AGENTS_AUTO_APPLY: {{ .Values.agents.autoApply | quote }}
+  AGENTS_SCHEDULES: {{ .Values.agents.schedules | quote }}
   {{- if eq .Values.agents.runtime "temporal" }}
   AGENT_RUNTIME: "temporal"
   TEMPORAL_ADDRESS: {{ .Values.agents.temporal.address | default (printf "%s-temporal-frontend:7233" .Release.Name) | quote }}

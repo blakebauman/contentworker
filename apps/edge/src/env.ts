@@ -80,6 +80,10 @@ export interface EdgeEnv {
   readonly AGENTS_ENRICH?: string;
   readonly AGENTS_MODERATE?: string;
   readonly AGENTS_AUTO_APPLY?: string;
+  /** `true` runs recurring agent schedules from the cron trigger. */
+  readonly AGENTS_SCHEDULES?: string;
+  readonly AGENT_SCHEDULE_MAX_ENTRIES?: string;
+  readonly AGENT_SCHEDULE_MAX_RUN_TOKENS?: string;
   readonly AGENT_RUNTIME?: string;
   readonly REQUIRE_SECURE_SECRETS?: string;
   /** Comma-separated fake-adapter allow list (ai,blob,embeddings,vectors | all). */

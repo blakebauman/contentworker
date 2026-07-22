@@ -55,8 +55,13 @@ export class CostGuardDO extends DurableObject<EdgeEnv> {
 }
 
 /** CostGuard over the per-space CostGuardDO namespace. */
-export function createDoCostGuard(ns: DurableObjectNamespace<CostGuardDO>): CostGuard {
-  const stub = (scope: Scope) => ns.get(ns.idFromName(scope.spaceId));
+export function createDoCostGuard(
+  ns: DurableObjectNamespace<CostGuardDO>,
+  namePrefix = '',
+): CostGuard {
+  // A prefix gives an independent counter window per space (e.g. `agent:` for
+  // background agent spend) while reusing the same DO class and limits.
+  const stub = (scope: Scope) => ns.get(ns.idFromName(`${namePrefix}${scope.spaceId}`));
   return {
     consume: (scope) => stub(scope).consume(),
     settle: async (scope, tokens) => {

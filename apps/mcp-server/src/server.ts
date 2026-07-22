@@ -1,4 +1,5 @@
 import {
+  AGENT_WORKFLOWS,
   addComment,
   addEntryToRelease,
   auditEntry,
@@ -8,6 +9,7 @@ import {
   canvasToEntry,
   compareEnvironments,
   createAIAction,
+  createAgentSchedule,
   createAppExtension,
   createConcept,
   createContentType,
@@ -18,6 +20,7 @@ import {
   createScheme,
   createTag,
   createTask,
+  deleteAgentSchedule,
   deleteAppExtension,
   deleteEnvironmentAlias,
   deleteFunction,
@@ -33,6 +36,7 @@ import {
   getVersion,
   hybridSearch,
   listAIActions,
+  listAgentSchedules,
   listAppExtensions,
   listAssets,
   listAuditLog,
@@ -68,6 +72,7 @@ import {
   transitionEntry,
   translateEntry,
   unpublishEntry,
+  updateAgentSchedule,
   updateEntry,
   updateRole,
 } from '@cw/application';
@@ -1103,6 +1108,78 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
           scheduledFor: args.scheduledFor,
         }),
       );
+    },
+  );
+
+  // --- agent schedules (recurring agent jobs) ------------------------------
+  server.tool(
+    'agent_schedule_create',
+    'Create a recurring agent job: on a cron cadence (UTC), run one agent ' +
+      'workflow over entries published since the previous run.',
+    {
+      workflow: z.enum(AGENT_WORKFLOWS),
+      cron: z.string().describe('5-field cron expression, evaluated in UTC'),
+      contentTypeApiId: z.string().optional(),
+      enabled: z.boolean().optional(),
+      autoApply: z.boolean().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      return ok(
+        await createAgentSchedule(ctx, scopeOf(args), {
+          workflow: args.workflow,
+          cron: args.cron,
+          contentTypeApiId: args.contentTypeApiId,
+          enabled: args.enabled,
+          autoApply: args.autoApply,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'agent_schedule_list',
+    'List the recurring agent jobs configured for a space environment.',
+    { ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.previewRead, scopeOf(args));
+      return ok({ items: await listAgentSchedules(ctx, scopeOf(args)) });
+    },
+  );
+
+  server.tool(
+    'agent_schedule_update',
+    'Update a recurring agent job (cron cadence, enabled, autoApply, content-type filter).',
+    {
+      id: z.string(),
+      cron: z.string().optional(),
+      enabled: z.boolean().optional(),
+      autoApply: z.boolean().optional(),
+      contentTypeApiId: z.string().nullable().optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      return ok(
+        await updateAgentSchedule(ctx, scopeOf(args), args.id, {
+          cron: args.cron,
+          enabled: args.enabled,
+          autoApply: args.autoApply,
+          contentTypeApiId: args.contentTypeApiId,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'agent_schedule_delete',
+    'Delete a recurring agent job.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      await deleteAgentSchedule(ctx, scopeOf(args), args.id);
+      return ok({ deleted: true });
     },
   );
 

@@ -22,10 +22,12 @@ import {
   type AppContext,
   EVENTS_TOPIC,
   type RagDeps,
+  agentBudgetLimits,
   aiBudgetLimits,
   assertNoFakeAdapters,
   consumeEvent,
   relayOutbox,
+  runDueAgentSchedules,
   runDueScheduledActions,
 } from '@cw/application';
 import type { DomainEvent } from '@cw/domain';
@@ -59,6 +61,9 @@ if (!redisUrl) throw new Error('REDIS_URL is required');
 
 const RELAY_INTERVAL_MS = Number(process.env.RELAY_INTERVAL_MS ?? 1000);
 const SCHEDULE_INTERVAL_MS = Number(process.env.SCHEDULE_INTERVAL_MS ?? 5000);
+// Recurring agent jobs (AGENTS_SCHEDULES=true): due-schedule poll cadence.
+const AGENT_SCHEDULE_INTERVAL_MS = Number(process.env.AGENT_SCHEDULE_INTERVAL_MS ?? 60_000);
+const SCHEDULES_ENABLED = process.env.AGENTS_SCHEDULES === 'true';
 // Health + metrics port (K8s probes, Prometheus scrape). 9464 is the
 // conventional Prometheus exporter port.
 const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? 9464);
@@ -117,6 +122,13 @@ const agentConfig = {
   autoApply: process.env.AGENTS_AUTO_APPLY === 'true',
 };
 
+/** AI provider for in-process agent activities (no dev stub on the worker). */
+function makeAgentsAI(): AIProvider {
+  return process.env.AI_PROVIDER === 'azure-openai'
+    ? createAzureOpenAIProvider()
+    : createAnthropicProvider();
+}
+
 /**
  * Builds the on-publish agent runtime when AGENTS_ENRICH and/or AGENTS_MODERATE
  * is enabled. AGENT_RUNTIME=temporal → durable execution on the Temporal cluster
@@ -124,7 +136,7 @@ const agentConfig = {
  * (non-durable).
  */
 async function makeAgents(ctx: AppContext): Promise<AgentRuntime | undefined> {
-  if (!agentConfig.enrich && !agentConfig.moderate) return undefined;
+  if (!agentConfig.enrich && !agentConfig.moderate && !SCHEDULES_ENABLED) return undefined;
   if (process.env.AGENT_RUNTIME === 'temporal') {
     const address = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
     const connection = await Connection.connect({ address });
@@ -139,11 +151,7 @@ async function makeAgents(ctx: AppContext): Promise<AgentRuntime | undefined> {
       ids,
     );
   }
-  const ai: AIProvider =
-    process.env.AI_PROVIDER === 'azure-openai'
-      ? createAzureOpenAIProvider()
-      : createAnthropicProvider();
-  return new InProcessAgentRuntime(makeActivities({ ctx, ai }));
+  return new InProcessAgentRuntime(makeActivities({ ctx, ai: makeAgentsAI() }));
 }
 
 async function main() {
@@ -262,6 +270,39 @@ async function main() {
   const scheduleTimer = setInterval(scheduleTick, SCHEDULE_INTERVAL_MS);
   logger.info({ intervalMs: SCHEDULE_INTERVAL_MS }, 'worker running scheduled actions');
 
+  // Recurring agent jobs: run due schedules under the background agent budget
+  // (AI_AGENT_* window when set — separate `cwagent` Redis keys — else the
+  // standard one), so batch agent spend can never exhaust the interactive
+  // window. In-process runs meter through the schedule ctx; Temporal runs
+  // meter on agent-worker, whose wire applies the same AI_AGENT_* preference.
+  let agentScheduleTimer: NodeJS.Timeout | undefined;
+  if (SCHEDULES_ENABLED && agents) {
+    const agentLimits = agentBudgetLimits(process.env);
+    const scheduleCtx: AppContext = agentLimits
+      ? {
+          ...ctx,
+          costGuard: createRedisCostGuard(connection, agentLimits, { keyPrefix: 'cwagent' }),
+        }
+      : ctx;
+    const scheduleRunner =
+      process.env.AGENT_RUNTIME === 'temporal'
+        ? agents
+        : new InProcessAgentRuntime(makeActivities({ ctx: scheduleCtx, ai: makeAgentsAI() }));
+    const agentScheduleTick = async () => {
+      try {
+        const s = await runDueAgentSchedules(scheduleCtx, scheduleRunner, {
+          entriesPerRun: Number(process.env.AGENT_SCHEDULE_MAX_ENTRIES ?? 25),
+          maxRunTokens: Number(process.env.AGENT_SCHEDULE_MAX_RUN_TOKENS ?? 100_000),
+        });
+        if (s.schedules > 0) logger.info(s, 'agent schedules run');
+      } catch (err) {
+        logger.error({ err }, 'agent schedules error');
+      }
+    };
+    agentScheduleTimer = setInterval(agentScheduleTick, AGENT_SCHEDULE_INTERVAL_MS);
+    logger.info({ intervalMs: AGENT_SCHEDULE_INTERVAL_MS }, 'worker running agent schedules');
+  }
+
   // Health (K8s liveness/readiness) + Prometheus metrics.
   startDefaultMetrics('cw-worker');
   const health = createServer(async (req, res) => {
@@ -297,6 +338,7 @@ async function main() {
     logger.info({ signal }, 'worker shutting down');
     clearInterval(relayTimer);
     clearInterval(scheduleTimer);
+    if (agentScheduleTimer) clearInterval(agentScheduleTimer);
     health.close();
     try {
       await queue.close();

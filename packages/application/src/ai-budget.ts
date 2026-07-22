@@ -26,6 +26,30 @@ export function aiBudgetLimits(
 }
 
 /**
+ * A separate, typically stricter window for BACKGROUND agent spend (scheduled
+ * runs, on-publish agents), so batch work can never exhaust the interactive
+ * budget. Returns `undefined` when the AI_AGENT_* vars are unset — background
+ * runs then share the standard window.
+ */
+export function agentBudgetLimits(
+  env: Record<string, string | undefined> = {},
+): AiBudgetLimits | undefined {
+  if (
+    env.AI_AGENT_MAX_REQUESTS_PER_WINDOW === undefined &&
+    env.AI_AGENT_MAX_TOKENS_PER_WINDOW === undefined
+  ) {
+    return undefined;
+  }
+  const limits = {
+    maxRequests: Number(env.AI_AGENT_MAX_REQUESTS_PER_WINDOW ?? 60),
+    maxTokens: Number(env.AI_AGENT_MAX_TOKENS_PER_WINDOW ?? 200_000),
+    windowSeconds: Number(env.AI_AGENT_BUDGET_WINDOW_SECONDS ?? env.AI_BUDGET_WINDOW_SECONDS ?? 60),
+  };
+  if (limits.maxRequests <= 0 || limits.maxTokens <= 0) return undefined;
+  return limits;
+}
+
+/**
  * Runs an AI generation under the tenant's budget: consults `ctx.costGuard`
  * first (throwing {@link RateLimitedError} → HTTP 429 when the scope is over its
  * per-window request or token ceiling), performs the generation, then records

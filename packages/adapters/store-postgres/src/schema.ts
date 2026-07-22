@@ -383,6 +383,29 @@ export const scheduledActions = pgTable(
   ],
 );
 
+export const agentSchedules = pgTable(
+  'agent_schedules',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    workflow: text('workflow').notNull(),
+    contentTypeApiId: text('content_type_api_id'),
+    cron: text('cron').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    autoApply: boolean('auto_apply').notNull().default(false),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    cursorEntryId: text('cursor_entry_id'),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.spaceId, t.environmentId, t.id] }),
+    // The worker scans for enabled schedules whose next run has arrived.
+    index('agent_schedules_due').on(t.enabled, t.nextRunAt),
+  ],
+);
+
 export const comments = pgTable(
   'comments',
   {

@@ -9,6 +9,7 @@ import {
   consumeEvent,
   createHasher,
   relayOutbox,
+  runDueAgentSchedules,
   runDueScheduledActions,
   runPublishAgents,
 } from '@cw/application';
@@ -16,7 +17,7 @@ import type { DomainEvent, Scope } from '@cw/domain';
 import type { McpDeps } from '@cw/mcp-server/wire';
 import { Hono } from 'hono';
 import { AgentWorkflow } from './agents/workflow.js';
-import { CostGuardDO } from './do/cost-guard.js';
+import { CostGuardDO, createDoCostGuard } from './do/cost-guard.js';
 import { LiveHubDO, createDoEventBus } from './do/live-hub.js';
 import { RateLimiterDO, createDoRateLimiter } from './do/rate-limiter.js';
 import type { EdgeEnv } from './env.js';
@@ -313,6 +314,21 @@ export default {
         for (let i = 0; i < 10; i++) {
           const relayed = await relayOutbox(wired.ctx, wired.queue);
           if (relayed === 0) break;
+        }
+      }
+      // Recurring agent jobs: due schedules run here on the cron tick, metered
+      // through a separate background counter window (the `agent:` DO prefix)
+      // so batch spend can't exhaust the interactive budget.
+      if (env.AGENTS_SCHEDULES === 'true') {
+        const bgGuard = env.AI_BUDGET ? createDoCostGuard(env.AI_BUDGET, 'agent:') : undefined;
+        const scheduleCtx = { ...wired.ctx, costGuard: bgGuard ?? wired.ctx.costGuard };
+        const agents = makeAgents(env, scheduleCtx, wired.ai);
+        if (agents) {
+          const s = await runDueAgentSchedules(scheduleCtx, agents, {
+            entriesPerRun: Number(env.AGENT_SCHEDULE_MAX_ENTRIES ?? 25),
+            maxRunTokens: Number(env.AGENT_SCHEDULE_MAX_RUN_TOKENS ?? 100_000),
+          });
+          if (s.schedules > 0) console.log(JSON.stringify({ msg: 'agent schedules run', ...s }));
         }
       }
     } finally {
