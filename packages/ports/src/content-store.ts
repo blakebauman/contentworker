@@ -405,6 +405,13 @@ export interface EntryQuery {
   readonly skip?: number;
   /** Delta cursor — only entries published strictly after this ISO timestamp. */
   readonly since?: string;
+  /**
+   * Keyset cursor — only entries with `entryId` strictly greater, ordered by
+   * `entryId` (`''` = from the start, still entryId-ordered). IDs are UUIDv7
+   * (time-ordered), so paging with this cursor is stable under concurrent
+   * publishes/unpublishes, unlike `skip` (used by the resumable reindex job).
+   */
+  readonly afterEntryId?: string;
   /** Field-level predicates (all must match). `field` is a field apiId or `sys.*`. */
   readonly filters?: readonly QueryFilter[];
   /** Sort keys, applied in order. */

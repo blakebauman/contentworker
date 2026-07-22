@@ -280,13 +280,21 @@ function makeEntryRepo(db: Db): EntryRepo {
       }
       if (query.since)
         conditions.push(gt(schema.entryPublished.publishedAt, new Date(query.since)));
+      if (query.afterEntryId !== undefined && query.afterEntryId !== '')
+        conditions.push(gt(schema.entryPublished.entryId, query.afterEntryId));
       let select = db
         .select()
         .from(schema.entryPublished)
         .where(and(...conditions))
-        // entryId tie-break: same-transaction publishes share publishedAt, and
-        // stable ordering is what makes offset paging (e.g. reindex) reliable.
-        .orderBy(asc(schema.entryPublished.publishedAt), asc(schema.entryPublished.entryId))
+        // Keyset paging (afterEntryId) orders by entryId so the cursor stays
+        // stable under concurrent publishes/unpublishes; otherwise publishedAt
+        // with an entryId tie-break (same-transaction publishes share
+        // publishedAt), which keeps offset paging reliable.
+        .orderBy(
+          ...(query.afterEntryId !== undefined
+            ? [asc(schema.entryPublished.entryId)]
+            : [asc(schema.entryPublished.publishedAt), asc(schema.entryPublished.entryId)]),
+        )
         .$dynamic();
       if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
       const published = (await select).map(toPublished);

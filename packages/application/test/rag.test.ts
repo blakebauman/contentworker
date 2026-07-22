@@ -8,6 +8,7 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   type AppContext,
+  MAX_REINDEX_ENTRIES,
   type RagDeps,
   chunk,
   createContentType,
@@ -19,6 +20,7 @@ import {
   reindexEmbeddings,
   removeEntryEmbeddings,
   requestReindex,
+  runReindexJob,
   semanticSearch,
 } from '../src/index.js';
 
@@ -191,6 +193,123 @@ describe('reindex embeddings', () => {
       chunks: 0,
       truncated: false,
     });
+  });
+
+  it('honors an entry budget and reports the resume cursor', async () => {
+    await publishArticle(scope, 'first article about databases');
+    await publishArticle(scope, 'second article about coffee');
+    await publishArticle(scope, 'third article about sailing');
+
+    const first = await reindexEmbeddings(deps, ctx, scope, { maxEntries: 2 });
+    expect(first.entries).toBe(2);
+    expect(first.truncated).toBe(true);
+    expect(first.nextCursor).toBeDefined();
+
+    const rest = await reindexEmbeddings(deps, ctx, scope, { afterEntryId: first.nextCursor });
+    expect(rest.entries).toBe(1);
+    expect(rest.truncated).toBe(false);
+  });
+
+  it('the cursor survives an unpublish of an already-processed entry', async () => {
+    const a = await publishArticle(scope, 'entry one');
+    await publishArticle(scope, 'entry two');
+    await publishArticle(scope, 'entry three');
+
+    const first = await reindexEmbeddings(deps, ctx, scope, { maxEntries: 1 });
+    expect(first.entries).toBe(1);
+    // An offset cursor would now skip an entry; the keyset cursor does not.
+    await ctx.store.entries.removePublished(scope, a);
+    const rest = await reindexEmbeddings(deps, ctx, scope, { afterEntryId: first.nextCursor });
+    expect(rest.entries).toBe(2);
+    expect(rest.truncated).toBe(false);
+  });
+
+  it('runReindexJob re-enqueues a continuation event when a slice is truncated', async () => {
+    await publishArticle(scope, 'alpha entry');
+    await publishArticle(scope, 'beta entry');
+    // Drain the outbox events from publishing so only the continuation remains.
+    await ctx.store.withTransaction(async (tx) => {
+      const pending = await tx.outbox.readPending(100);
+      await tx.outbox.markRelayed(pending.map((e) => e.id));
+    });
+
+    // Simulate a slice budget of 1 by claiming the job already processed all
+    // but one entry of the whole-job cap.
+    const result = await runReindexJob(deps, ctx, {
+      id: ctx.ids.newId(),
+      type: 'search.reindex_requested',
+      scope,
+      occurredAt: ctx.clock.now().toISOString(),
+      entriesSoFar: MAX_REINDEX_ENTRIES - 1,
+    });
+    expect(result.entries).toBe(1);
+    expect(result.truncated).toBe(true);
+
+    // At the whole-job cap, no continuation is enqueued (bounded job).
+    const pending = await ctx.store.outbox.readPending(10);
+    expect(pending.filter((e) => e.type === 'search.reindex_requested')).toHaveLength(0);
+  });
+
+  it('runReindexJob continuation carries the cursor and finishes the job', async () => {
+    await publishArticle(scope, 'gamma entry');
+    await publishArticle(scope, 'delta entry');
+    await ctx.store.withTransaction(async (tx) => {
+      const pending = await tx.outbox.readPending(100);
+      await tx.outbox.markRelayed(pending.map((e) => e.id));
+    });
+
+    const first = await runReindexJob(
+      deps,
+      ctx,
+      {
+        id: ctx.ids.newId(),
+        type: 'search.reindex_requested',
+        scope,
+        occurredAt: ctx.clock.now().toISOString(),
+      },
+      { entriesPerRun: 1 },
+    );
+    expect(first.entries).toBe(1);
+    expect(first.truncated).toBe(true);
+
+    const pending = await ctx.store.outbox.readPending(10);
+    const continuation = pending.find((e) => e.type === 'search.reindex_requested');
+    expect(continuation).toBeDefined();
+    if (continuation?.type !== 'search.reindex_requested') throw new Error('unreachable');
+    expect(continuation.afterEntryId).toBeDefined();
+    expect(continuation.entriesSoFar).toBe(1);
+
+    const second = await runReindexJob(deps, ctx, continuation);
+    expect(second.entries).toBe(1);
+    expect(second.truncated).toBe(false);
+  });
+
+  it('runReindexJob dedupes a redelivered slice via the cache marker', async () => {
+    await publishArticle(scope, 'epsilon entry');
+    await ctx.store.withTransaction(async (tx) => {
+      const pending = await tx.outbox.readPending(100);
+      await tx.outbox.markRelayed(pending.map((e) => e.id));
+    });
+
+    const entries = new Map<string, string>();
+    const cache = {
+      get: async (k: string) => entries.get(k) ?? null,
+      set: async (k: string, v: string) => void entries.set(k, v),
+      invalidateTag: async () => {},
+    };
+    const guarded: AppContext = { ...ctx, cache };
+    const event = {
+      id: ctx.ids.newId(),
+      type: 'search.reindex_requested' as const,
+      scope,
+      occurredAt: ctx.clock.now().toISOString(),
+    };
+    const first = await runReindexJob(deps, guarded, event);
+    expect(first.entries).toBe(1);
+    // Same event id redelivered: the marker short-circuits the re-run.
+    const second = await runReindexJob(deps, guarded, event);
+    expect(second.entries).toBe(0);
+    expect(second.truncated).toBe(false);
   });
 
   it('requestReindex enqueues an outbox event and enforces a cooldown', async () => {
