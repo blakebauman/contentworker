@@ -110,6 +110,10 @@ never fight over replicas.
   `api-preview` — each with its own `ROLE`, replica count, and HPA. Delivery is read-heavy and
   scales highest; preview lowest. This is the recommended production topology.
 
+The Cloudflare target has the same choice — one all-in-one worker vs three
+role-isolated workers — driven by the same `ROLE` var; see
+[cloudflare.md](cloudflare.md#deployment-topologies-one-worker-or-three).
+
 ### Base values (excerpt)
 
 ```yaml

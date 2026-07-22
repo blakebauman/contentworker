@@ -3,10 +3,12 @@
 contentworker's second deployment target: one Cloudflare Worker runs the entire
 platform — Management/Delivery/Preview APIs, the admin SPA, the MCP server, the
 event pipeline, the Live Content API, and the durable agents — against **Neon
-Postgres via Hyperdrive**. The Node + Kubernetes/compose path (see
-[deployment.md](deployment.md)) remains fully supported for self-hosting; both
-targets share the same hexagonal core and differ only in adapters and
-composition roots.
+Postgres via Hyperdrive**. (Enterprises that need blast-radius isolation can
+split the same script into three role-isolated workers — see
+[Deployment topologies](#deployment-topologies-one-worker-or-three).) The
+Node + Kubernetes/compose path (see [deployment.md](deployment.md)) remains
+fully supported for self-hosting; both targets share the same hexagonal core
+and differ only in adapters and composition roots.
 
 ## How the pieces map
 
@@ -65,26 +67,74 @@ pnpm --filter @cw/edge dev               # miniflare emulates KV/Queues/DO/Workf
 pnpm --filter @cw/edge exec wrangler dev -e demo   # zero-infra demo (in-memory store, dev keys)
 ```
 
-## Scale-out (enterprise)
+## Deployment topologies: one worker or three
 
-One deploy is a complete system. To isolate blast radius and limits at scale,
-the same script ships as three role-isolated workers via the configured
-wrangler environments (Workers autoscale horizontally regardless; the split is
-operational isolation, not throughput):
+The edge target ships in two mutually exclusive topologies from the same
+`wrangler.jsonc`:
+
+| | All-in-one (default) | Scale-out (enterprise) |
+| --- | --- | --- |
+| Workers | 1 (`cw-edge`) | 3 (`cw-edge-pipeline` / `-management` / `-delivery`) |
+| Deploy | `wrangler deploy` | `wrangler deploy -e pipeline` → `-e management` → `-e delivery` |
+| Serves | everything on one hostname | one hostname per plane (e.g. `cdn.` / `cms.`) |
+| Best for | most deployments, staging, single-team | isolation of blast radius, limits, and attack surface |
+
+**Pick the all-in-one worker unless you have a concrete isolation
+requirement.** Every Cloudflare Worker already autoscales horizontally across
+isolates and PoPs on its own — the three-way split adds *zero* throughput.
+What it buys is operational isolation:
+
+- **Blast radius** — a bad deploy or crash loop in the authoring plane cannot
+  take down the public read plane, and vice versa. Each worker versions,
+  deploys, and rolls back independently.
+- **Capability isolation by construction** — the delivery worker physically
+  has no `EVENTS_QUEUE` binding and no cron trigger, so it *cannot* mutate
+  content or run scheduled publishes even if a bug tried. The split is
+  enforced by absent bindings, not by code paths.
+- **Attack surface** — the pipeline worker (all the privileged background
+  work) has `workers_dev: false` and no routes: it is unreachable over HTTP
+  entirely. It exists only for queues, cron, and the stateful classes.
+- **Independent limits and config** — per-worker CPU limits, rate-limit
+  posture, custom domains, and secrets.
+
+This is the Workers analogue of the Helm chart's monolith-vs-split API
+topology (`api.split.enabled` — see [deployment.md](deployment.md)); the
+`ROLE` var drives both.
+
+### The three workers
 
 - **`cw-edge-pipeline`** — the event backbone: queue consumers (`cw-events`,
   `cw-agents`, DLQ), the cron sweeper, agents — and the **owner of every
-  Durable Object class and the AgentWorkflow**. Durable Objects live in
-  exactly one worker; the other roles bind into this one via `script_name`,
-  so all three share the same live hub, rate-limit, and budget state.
-- **`cw-edge-management`** — Management API + MCP + the admin SPA; produces
-  onto `cw-events` (outbox nudges) and signals review-watcher Workflows.
+  Durable Object class and the AgentWorkflow**. Not publicly reachable.
+- **`cw-edge-management`** — Management API + MCP + the admin SPA
+  (`ROLE=management`); produces onto `cw-events` (outbox nudges) and signals
+  review-watcher Workflows via the cross-script `AGENT_WF` binding.
 - **`cw-edge-delivery`** — the public read plane: `ROLE=delivery,preview`
   mounts the Delivery + Preview APIs and the DO-served SSE hub. Read-only for
-  content: no queue producer, no cron.
+  content: no queue producer, no cron. (`ROLE` accepts a comma-separated
+  union, so drafts don't need a fourth worker.)
+
+### What stays shared
+
+Splitting the compute does **not** split the state. All three workers bind
+the same Hyperdrive, KV namespace, and Vectorize index as the all-in-one
+deployment, and there is still exactly **one set of Durable Objects**:
+Durable Object classes live in the worker that declares their migrations
+(pipeline), and delivery/management reach the *same instances* through
+`script_name` bindings. Concretely:
+
+| State | Owner | Bound by | Why it must be shared |
+| --- | --- | --- | --- |
+| `LiveHubDO` (SSE hub per space:env) | pipeline | delivery | pipeline publishes events into the hub instances delivery's subscribers are parked on — different instances would silently drop live updates |
+| `RateLimiterDO` (per client IP) | pipeline | delivery + management | one global failed-auth budget per IP across all planes |
+| `CostGuardDO` (per-space AI budget) | pipeline | management | generation (management) and agents (pipeline) draw down one shared window |
+| `AgentWorkflow` | pipeline | management | review decisions on the Management API signal watcher runs executing in pipeline |
+
+### Deploying
 
 ```bash
-# Deploy order matters — pipeline first (it creates the DO/Workflow classes):
+# Deploy order matters — pipeline first (it creates the DO/Workflow classes
+# the other two workers' script_name bindings point at):
 wrangler deploy -e pipeline
 wrangler deploy -e management     # build the admin SPA first (assets)
 wrangler deploy -e delivery
@@ -97,17 +147,36 @@ on all three**: they share one database, and a per-worker `TOKEN_PEPPER`
 would break API-key auth across workers. Management additionally needs
 `SESSION_SECRET` + `MCP_TOKEN`; management + pipeline need
 `ANTHROPIC_API_KEY`. Attach zone routes per env in `wrangler.jsonc`
-(commented placeholders); pipeline is intentionally unreachable over HTTP
-(`workers_dev: false`, no routes).
+(commented placeholders).
 
 Per-env vars are deliberately minimal (code defaults + the fail-closed adapter
-guard catch drift). The Hyperdrive/KV/Vectorize ids are the same shared
-resources as the all-in-one deployment — but scale-out **replaces** the
-all-in-one `cw-edge` worker rather than running beside it: a queue can have
-only one consumer worker, and the Workflow name `cw-agent` is account-unique,
-so `wrangler deploy -e pipeline` fails while `cw-edge` still holds them.
-Cut over by deleting the all-in-one worker (or redeploying it without queue
-consumers and the workflow) before deploying pipeline.
+guard catch drift).
+
+### Cutting over from the all-in-one worker
+
+Scale-out **replaces** `cw-edge` rather than running beside it: a queue can
+have only one consumer worker, and the Workflow name `cw-agent` is
+account-unique, so `wrangler deploy -e pipeline` fails while `cw-edge` still
+holds them. Cut over by deleting the all-in-one worker (or redeploying it
+without queue consumers and the workflow) before deploying pipeline. The
+Neon/KV/Vectorize/R2 data plane is untouched by the cutover; note that
+Durable Object state (live SSE subscribers, in-flight rate-limit windows,
+budget counters) starts fresh in the new pipeline worker — all of it is
+short-lived by design.
+
+Going back is the reverse: delete the three workers, redeploy `cw-edge`.
+
+### Maintainer note: wrangler env inheritance
+
+Wrangler named environments inherit `triggers`, `assets`, and `migrations`
+from the top-level config (while inheriting almost no other bindings), so
+each scale-out env pins all three explicitly (`env.demo` is standalone and
+intentionally keeps the inherited SPA and cron). This is load-bearing: without the
+overrides, the "read-only" delivery worker inherits the every-minute cron and
+runs scheduled publishes (a mutation), every worker serves the admin SPA, and
+non-owner workers create shadow DO namespaces that a dropped `script_name`
+would silently point at. When adding a new env, start from an existing block
+— never from empty.
 
 ## Semantics & tradeoffs vs the Node path
 
