@@ -89,6 +89,108 @@ describe('GraphQL Delivery (generated from content types)', () => {
     expect((list.body.data as { articleCollection: unknown[] }).articleCollection).toHaveLength(1);
   });
 
+  it('never serves one principal the resolvers of another (cache is principal-free)', async () => {
+    const { ctx, rag, blob, ai } = wire(config);
+    const app = createApp(ctx, config, rag, blob, ai);
+    const admin = { Authorization: 'Bearer admin', 'Content-Type': 'application/json' };
+
+    await app.request(`${M}/content-types`, {
+      method: 'POST',
+      headers: cma,
+      body: JSON.stringify({
+        apiId: 'post',
+        name: 'Post',
+        displayField: 'title',
+        fields: [
+          {
+            apiId: 'title',
+            name: 'Title',
+            type: 'Symbol',
+            localized: false,
+            required: true,
+            position: 0,
+          },
+          {
+            apiId: 'internalNotes',
+            name: 'Internal notes',
+            type: 'Text',
+            localized: false,
+            required: false,
+            position: 1,
+          },
+        ],
+      }),
+    });
+    await app.request(`${M}/content-types/post/published`, { method: 'POST', headers: cma });
+    const created = await app.request(`${M}/entries`, {
+      method: 'POST',
+      headers: cma,
+      body: JSON.stringify({
+        contentTypeApiId: 'post',
+        fields: { title: { 'en-US': 'Public' }, internalNotes: { 'en-US': 'secret' } },
+      }),
+    });
+    const { entry } = (await created.json()) as { entry: { id: string } };
+    await app.request(`${M}/entries/${entry.id}/published`, { method: 'POST', headers: cma });
+
+    // Granular role reading EVERY type (same visible shape as the full CDA
+    // key — the two principals share a schema-cache slot) but with a
+    // field-level deny on post.internalNotes.
+    const roleRes = await app.request('/spaces/s1/roles', {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({
+        name: 'Reader without notes',
+        scopes: ['delivery:read'],
+        contentGrants: [
+          { contentTypeApiId: 'post', actions: ['read'], deniedFields: ['internalNotes'] },
+          { contentTypeApiId: 'article', actions: ['read'] },
+          { contentTypeApiId: 'author', actions: ['read'] },
+        ],
+      }),
+    });
+    const role = (await roleRes.json()) as { id: string };
+    const keyRes = await app.request('/spaces/s1/api-keys', {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({ kind: 'cda', roleId: role.id }),
+    });
+    const { token } = (await keyRes.json()) as { token: string };
+
+    const q = `{ post(id: "${entry.id}", locale: "en-US") { title internalNotes } postCollection(locale: "en-US") { internalNotes } }`;
+    const gqlAs = async (bearer: string) => {
+      const res = await app.request('/delivery/s1/main/graphql', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q }),
+      });
+      return (await res.json()) as {
+        data?: {
+          post: { title: string; internalNotes: string | null };
+          postCollection: { internalNotes: string | null }[];
+        };
+        errors?: unknown[];
+      };
+    };
+
+    // Full-access key first: warms the cache slot for this shape.
+    const full = await gqlAs('cda');
+    expect(full.data?.post.internalNotes).toBe('secret');
+    expect(full.data?.postCollection[0]?.internalNotes).toBe('secret');
+
+    // The granular key must get ITS OWN masking, not the warm schema's
+    // full-access closures — on the single entry AND the collection.
+    const granular = await gqlAs(token);
+    expect(granular.errors).toBeUndefined();
+    expect(granular.data?.post.title).toBe('Public');
+    expect(granular.data?.post.internalNotes).toBeNull();
+    expect(granular.data?.postCollection[0]?.internalNotes).toBeNull();
+
+    // And the full key is not poisoned in the other direction.
+    const fullAgain = await gqlAs('cda');
+    expect(fullAgain.data?.post.internalNotes).toBe('secret');
+  });
+
   it('requires the delivery scope', async () => {
     const { ctx, rag, blob, ai } = wire(config);
     const app = createApp(ctx, config, rag, blob, ai);

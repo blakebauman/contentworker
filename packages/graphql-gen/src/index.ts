@@ -49,6 +49,16 @@ export interface DeliveryResolvers {
   search(query: string, topK?: number): Promise<SearchHit[]>;
 }
 
+/**
+ * Per-request execution context — pass as `contextValue` to graphql execute().
+ * Resolvers are deliberately NOT baked into the schema: they carry the caller's
+ * principal (RBAC masking, per-type access), so a cached schema must stay
+ * shareable across principals whose visible type set matches.
+ */
+export interface DeliveryContext {
+  readonly resolvers: DeliveryResolvers;
+}
+
 /** Arbitrary-JSON scalar — used for rich text, JSON, location, and link fields. */
 const JSONScalar = new GraphQLScalarType({
   name: 'JSON',
@@ -83,10 +93,7 @@ function scalarFor(field: FieldDefinition): GraphQLOutputType {
  * `search`. Field values come from the resolver-rendered entry, so locale
  * flattening and reference resolution are reused, not reimplemented.
  */
-export function buildDeliverySchema(
-  contentTypes: readonly ContentType[],
-  resolvers: DeliveryResolvers,
-): GraphQLSchema {
+export function buildDeliverySchema(contentTypes: readonly ContentType[]): GraphQLSchema {
   const sysType = new GraphQLObjectType({
     name: 'Sys',
     fields: {
@@ -112,7 +119,7 @@ export function buildDeliverySchema(
   });
 
   const localeArg = { locale: { type: GraphQLString } };
-  const query: GraphQLFieldConfigMap<unknown, unknown> = {};
+  const query: GraphQLFieldConfigMap<unknown, DeliveryContext> = {};
 
   for (const ct of contentTypes) {
     const fields: GraphQLFieldConfigMap<ResolvedEntry, unknown> = {
@@ -126,8 +133,8 @@ export function buildDeliverySchema(
     query[ct.apiId] = {
       type: objectType,
       args: { id: { type: new GraphQLNonNull(GraphQLID) }, ...localeArg },
-      resolve: (_root, args: { id: string; locale?: string }) =>
-        resolvers.entry(ct.apiId, args.id, args.locale),
+      resolve: (_root, args: { id: string; locale?: string }, ctx: DeliveryContext) =>
+        ctx.resolvers.entry(ct.apiId, args.id, args.locale),
     };
     query[`${ct.apiId}Collection`] = {
       type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
@@ -149,21 +156,22 @@ export function buildDeliverySchema(
           order?: readonly string[];
           search?: string;
         },
-      ) => resolvers.collection(ct.apiId, args),
+        ctx: DeliveryContext,
+      ) => ctx.resolvers.collection(ct.apiId, args),
     };
   }
 
   query.asset = {
     type: JSONScalar,
     args: { id: { type: new GraphQLNonNull(GraphQLID) }, ...localeArg },
-    resolve: (_root, args: { id: string; locale?: string }) =>
-      resolvers.asset(args.id, args.locale),
+    resolve: (_root, args: { id: string; locale?: string }, ctx: DeliveryContext) =>
+      ctx.resolvers.asset(args.id, args.locale),
   };
   query.search = {
     type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(searchHitType))),
     args: { query: { type: new GraphQLNonNull(GraphQLString) }, topK: { type: GraphQLInt } },
-    resolve: (_root, args: { query: string; topK?: number }) =>
-      resolvers.search(args.query, args.topK),
+    resolve: (_root, args: { query: string; topK?: number }, ctx: DeliveryContext) =>
+      ctx.resolvers.search(args.query, args.topK),
   };
 
   return new GraphQLSchema({ query: new GraphQLObjectType({ name: 'Query', fields: query }) });

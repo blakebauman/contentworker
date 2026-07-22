@@ -1,7 +1,12 @@
 import { defineContentType } from '@cw/domain';
 import { graphql } from 'graphql';
 import { describe, expect, it } from 'vitest';
-import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '../src/index.js';
+import {
+  type DeliveryContext,
+  type DeliveryResolvers,
+  type ResolvedEntry,
+  buildDeliverySchema,
+} from '../src/index.js';
 
 const article = defineContentType({
   apiId: 'article',
@@ -53,11 +58,14 @@ const resolvers: DeliveryResolvers = {
 };
 
 describe('@cw/graphql-gen', () => {
-  const schema = buildDeliverySchema([article], resolvers);
+  // Resolvers travel per-request as contextValue — never baked into the schema.
+  const schema = buildDeliverySchema([article]);
+  const contextValue: DeliveryContext = { resolvers };
 
   it('generates typed object types with scalar + JSON (link) fields', async () => {
     const r = await graphql({
       schema,
+      contextValue,
       source: '{ article(id: "e1") { _sys { id contentType } title wordCount hero } }',
     });
     expect(r.errors).toBeUndefined();
@@ -72,6 +80,7 @@ describe('@cw/graphql-gen', () => {
   it('exposes a collection root and a search root', async () => {
     const r = await graphql({
       schema,
+      contextValue,
       source: '{ articleCollection { _sys { id } } search(query: "x") { entryId score } }',
     });
     expect(r.errors).toBeUndefined();
@@ -81,7 +90,7 @@ describe('@cw/graphql-gen', () => {
   });
 
   it('returns null for a wrong-id query without throwing', async () => {
-    const r = await graphql({ schema, source: '{ article(id: "nope") { title } }' });
+    const r = await graphql({ schema, contextValue, source: '{ article(id: "nope") { title } }' });
     expect(r.errors).toBeUndefined();
     expect((r.data as { article: unknown }).article).toBeNull();
   });

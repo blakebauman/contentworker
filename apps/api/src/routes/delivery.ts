@@ -16,7 +16,12 @@ import {
   canAccessContentType,
   maskDeniedFields,
 } from '@cw/domain';
-import { type DeliveryResolvers, type ResolvedEntry, buildDeliverySchema } from '@cw/graphql-gen';
+import {
+  type DeliveryContext,
+  type DeliveryResolvers,
+  type ResolvedEntry,
+  buildDeliverySchema,
+} from '@cw/graphql-gen';
 import {
   type ASTNode,
   type FragmentDefinitionNode,
@@ -283,9 +288,16 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
   );
 
   // --- GraphQL Delivery ---------------------------------------------------
-  // Schema is generated from published content types and cached per scope; it
-  // rebuilds automatically when the content-type set/versions change.
-  const schemaCache = new Map<string, { hash: string; schema: GraphQLSchema }>();
+  // Schema is generated from the content types the principal may read and
+  // cached content-addressed (scope + visible apiId@version set), so it
+  // rebuilds automatically when the content-type set/versions change and is
+  // shared across principals with the same visible shape. The schema holds NO
+  // principal state — resolvers travel per-request via the GraphQL
+  // contextValue (a cached schema serving another caller's closures would be
+  // an RBAC bypass: field-level masking belongs to the principal, not the
+  // shape). Bounded FIFO eviction keeps many-tenant processes flat.
+  const schemaCache = new Map<string, GraphQLSchema>();
+  const MAX_SCHEMA_CACHE = 100;
 
   async function schemaFor(
     scope: Scope,
@@ -295,20 +307,37 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     const grantedTypes = principal.contentGrants
       ? types.filter((t) => canAccessContentType(principal, 'read', t.apiId))
       : types;
-    const hash = grantedTypes
+    const shape = grantedTypes
       .map((t) => `${t.apiId}@${t.version}`)
       .sort()
       .join(',');
-    const key = `${scope.spaceId}:${scope.environmentId}:${principal.kind}`;
+    const key = `${scope.spaceId}:${scope.environmentId}:${shape}`;
     const cached = schemaCache.get(key);
-    if (cached && cached.hash === hash) return cached.schema;
+    if (cached) return cached;
+    const schema = buildDeliverySchema(grantedTypes);
+    if (schemaCache.size >= MAX_SCHEMA_CACHE) {
+      const oldest = schemaCache.keys().next().value;
+      if (oldest !== undefined) schemaCache.delete(oldest);
+    }
+    schemaCache.set(key, schema);
+    return schema;
+  }
 
-    const resolvers: DeliveryResolvers = {
+  function resolversFor(
+    scope: Scope,
+    principal: AuthVars['Variables']['principal'],
+  ): DeliveryResolvers {
+    return {
       entry: async (contentType, id, locale) => {
         if (!canAccessContentType(principal, 'read', contentType)) return null;
         try {
           const e = await getPublishedEntry(ctx, scope, id, { locale, include: 1 });
-          return e.contentType === contentType ? (e as ResolvedEntry) : null;
+          if (e.contentType !== contentType) return null;
+          // Same field-level masking as the REST single-entry path.
+          return {
+            ...e,
+            fields: maskDeniedFields(principal, e.contentType, e.fields),
+          } as ResolvedEntry;
         } catch {
           return null;
         }
@@ -358,9 +387,6 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
         return visible;
       },
     };
-    const schema = buildDeliverySchema(grantedTypes, resolvers);
-    schemaCache.set(key, { hash, schema });
-    return schema;
   }
 
   // In-browser GraphQL explorer. Registered OUTSIDE the guarded BASE/* prefix so
@@ -374,7 +400,9 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     const body = c.req.method === 'POST' ? await c.req.json().catch(() => ({})) : {};
     const source = (body as { query?: string }).query ?? c.req.query('query');
     if (!source) return c.json({ errors: [{ message: 'No GraphQL query provided' }] }, 400);
-    const schema = await schemaFor(scopeOf(c), c.get('principal'));
+    const scope = scopeOf(c);
+    const principal = c.get('principal');
+    const schema = await schemaFor(scope, principal);
 
     let document: ReturnType<typeof parse>;
     try {
@@ -394,6 +422,9 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
     const result = await execute({
       schema,
       document,
+      // Data access is bound to THIS caller here — never inside the cached
+      // schema (see schemaFor).
+      contextValue: { resolvers: resolversFor(scope, principal) } satisfies DeliveryContext,
       variableValues: (body as { variables?: Record<string, unknown> }).variables,
       operationName: (body as { operationName?: string }).operationName,
     });
