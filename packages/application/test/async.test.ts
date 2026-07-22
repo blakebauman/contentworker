@@ -127,4 +127,57 @@ describe('P4: outbox relay, webhook fan-out, cache invalidation', () => {
     );
     expect(h.cache.size).toBe(0);
   });
+
+  it('invalidates transitively embedding entries, not just direct referrers', async () => {
+    const id = await seedAndPublish(h.ctx);
+    // Reference chain: a embeds b, b embeds the published entry (id).
+    await h.ctx.store.references.replaceForEntry(scope, 'entry-b', [
+      { fromEntryId: 'entry-b', fromField: 'embed', toId: id },
+    ]);
+    await h.ctx.store.references.replaceForEntry(scope, 'entry-a', [
+      { fromEntryId: 'entry-a', fromField: 'embed', toId: 'entry-b' },
+    ]);
+    // Prime cached renders for all three under their entry tags.
+    for (const e of [id, 'entry-a', 'entry-b']) {
+      await h.cache.set(`render:${e}`, 'cached', { tags: [cacheTag(scope, e)] });
+    }
+    // Unrelated entry stays cached.
+    await h.cache.set('render:other', 'cached', { tags: [cacheTag(scope, 'other')] });
+
+    await dispatchEvent(
+      h.ctx,
+      { sender: h.sender, cache: h.cache },
+      {
+        id: 'evt-transitive',
+        type: 'entry.published',
+        scope,
+        occurredAt: '2026-01-01T00:00:00.000Z',
+        entryId: id,
+        contentTypeApiId: 'article',
+        version: 2,
+        fields: {},
+      },
+    );
+
+    expect(await h.cache.get(`render:${id}`)).toBeNull();
+    expect(await h.cache.get('render:entry-b')).toBeNull(); // direct referrer
+    expect(await h.cache.get('render:entry-a')).toBeNull(); // transitive (2 hops)
+    expect(await h.cache.get('render:other')).toBe('cached');
+  });
+
+  it('relays with the event id as the dedupe key', async () => {
+    await seedAndPublish(h.ctx);
+    const seen: (string | undefined)[] = [];
+    const recordingQueue = {
+      enqueue: async (_topic: string, payload: unknown, opts?: { dedupeKey?: string }) => {
+        seen.push(opts?.dedupeKey);
+        void payload;
+      },
+      process: () => ({ close: async () => {} }),
+    };
+    const relayed = await relayOutbox(h.ctx, recordingQueue);
+    expect(relayed).toBeGreaterThan(0);
+    expect(seen.length).toBe(relayed);
+    for (const key of seen) expect(key).toBeTruthy();
+  });
 });

@@ -1,0 +1,53 @@
+name: Deploy edge
+
+# Manual deploy of the Cloudflare Worker (apps/edge). Opt-in: requires the
+# CLOUDFLARE_API_TOKEN repository secret (a token scoped to Workers Scripts,
+# KV, Queues, Vectorize, D1/Hyperdrive as bound in wrangler.jsonc).
+# Migrations are NOT run here — apply them out-of-band first:
+#   DATABASE_URL=$NEON_URL pnpm --filter @cw/migrator start
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "wrangler environment ('' = top-level/staging config, 'demo' = zero-infra demo)"
+        required: false
+        default: ""
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The Worker serves the admin SPA from ../admin/dist via assets.
+      - name: Build admin
+        run: pnpm --filter @cw/admin build
+
+      - name: Deploy
+        run: |
+          cd apps/edge
+          if [ -n "$WRANGLER_ENV" ]; then
+            pnpm exec wrangler deploy -e "$WRANGLER_ENV"
+          else
+            pnpm exec wrangler deploy
+          fi
+        env:
+          WRANGLER_ENV: ${{ inputs.environment }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Required when the token can reach more than one account.
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -27,7 +27,19 @@ export function createRedisQueue(redis: Redis): QueuePort & { close(): Promise<v
 
   return {
     async enqueue(topic, payload, opts) {
-      await queueFor(topic).add(topic, payload, {
+      const q = queueFor(topic);
+      if (opts?.dedupeKey) {
+        // BullMQ's jobId dedupe is a silent no-op against a retained job in
+        // ANY state — including `failed`. A failed twin must not swallow a
+        // legitimate re-enqueue (the outbox re-relays exactly when delivery
+        // is in doubt), so give it a fresh attempt cycle instead.
+        const existing = await q.getJob(opts.dedupeKey);
+        if (existing) {
+          if (await existing.isFailed()) await existing.retry();
+          return;
+        }
+      }
+      await q.add(topic, payload, {
         delay: opts?.delayMs,
         jobId: opts?.dedupeKey,
         attempts: 5,

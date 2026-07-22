@@ -297,8 +297,11 @@ export async function semanticSearch(
   const minScore = opts.minScore ?? 1e-6;
   const [embedding] = await deps.embeddings.embed([query], { taskType: 'query' });
   if (!embedding) return [];
-  // Over-fetch chunks, then collapse to best chunk per entry.
-  const matches = await deps.vectors.query(scope, embedding, { topK: topK * 4, minScore });
+  // Over-fetch chunks, then collapse to best chunk per entry — clamped to the
+  // backend's declared per-query cap (e.g. Vectorize: 50) so a store limit is
+  // an explicit contract instead of a silent truncation.
+  const overFetch = Math.min(topK * 4, deps.vectors.maxTopK ?? topK * 4);
+  const matches = await deps.vectors.query(scope, embedding, { topK: overFetch, minScore });
   const best = new Map<string, SearchHit>();
   for (const m of matches) {
     const existing = best.get(m.entryId);

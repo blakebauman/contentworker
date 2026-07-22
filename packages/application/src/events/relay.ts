@@ -25,7 +25,10 @@ export async function relayOutbox(
     const batch = await tx.outbox.readPending(opts.batchSize ?? 100);
     if (batch.length === 0) return 0;
     for (const event of batch) {
-      await queue.enqueue(EVENTS_TOPIC, event);
+      // dedupeKey: queues that support producer-side dedupe (BullMQ job ids)
+      // collapse the crash-between-enqueue-and-commit redelivery; queues that
+      // don't (Cloudflare Queues) ignore it — consumers stay idempotent.
+      await queue.enqueue(EVENTS_TOPIC, event, { dedupeKey: event.id });
     }
     await tx.outbox.markRelayed(batch.map((e) => e.id));
     return batch.length;

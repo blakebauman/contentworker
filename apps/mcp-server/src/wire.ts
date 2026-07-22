@@ -4,6 +4,7 @@ import {
   createAzureOpenAIProvider,
 } from '@cw/adapter-ai-azure-openai';
 import { createOpenAIEmbeddings } from '@cw/adapter-embeddings-openai';
+import { createRedisCostGuard } from '@cw/adapter-redis';
 import { createPostgresStore } from '@cw/adapter-store-postgres';
 import { createPgVectorStore } from '@cw/adapter-vector-pgvector';
 import { InProcessAgentRuntime, makeActivities } from '@cw/agent-runtime';
@@ -25,6 +26,7 @@ import {
   LocalEmbeddingsProvider,
   StubAIProvider,
 } from '@cw/test-kit';
+import { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
 
 const clock: Clock = { now: () => new Date() };
@@ -117,8 +119,15 @@ export function wire(env: NodeJS.ProcessEnv = process.env): McpDeps {
     fakes,
   });
 
-  const limits = aiBudgetLimits(process.env);
-  const costGuard = limits ? new InMemoryCostGuard(limits) : undefined;
+  // AI budget: shared across MCP replicas via Redis when configured — the
+  // same window the API and worker meter against — else an in-process
+  // fallback (per-replica budgets on a scaled deployment).
+  const limits = aiBudgetLimits(env);
+  const costGuard = limits
+    ? env.REDIS_URL
+      ? createRedisCostGuard(new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }), limits)
+      : new InMemoryCostGuard(limits)
+    : undefined;
   const ctx: AppContext = { store, clock, ids, costGuard };
   return {
     ctx,

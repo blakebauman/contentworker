@@ -146,6 +146,12 @@ export interface VectorMatch {
 
 /** Vector store for semantic search / RAG (pgvector by default). */
 export interface VectorStore {
+  /**
+   * Largest `topK` a single query honors, when the backend caps it (e.g.
+   * Vectorize: 50 with metadata). Callers clamp their over-fetch to this so a
+   * backend limit is an explicit contract, not a silent truncation.
+   */
+  readonly maxTopK?: number;
   upsert(rows: VectorRow[]): Promise<void>;
   deleteByEntry(scope: Scope, entryId: string): Promise<void>;
   query(

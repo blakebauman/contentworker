@@ -74,6 +74,10 @@ export function createVectorizeStore(
   opts: VectorizeStoreOptions,
 ): VectorStore {
   return {
+    // Declared cap: callers (semanticSearch over-fetch) clamp to it instead of
+    // Vectorize silently truncating deeper requests.
+    maxTopK: MAX_TOP_K,
+
     async upsert(rows: VectorRow[]) {
       if (rows.length === 0) return;
       // Group by entry — callers batch per entry, but stay defensive.

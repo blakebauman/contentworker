@@ -246,11 +246,10 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       const items = await listSpaces(ctx);
       return c.json({ items: items.map((s) => ({ id: s.spaceId, name: s.name })) });
     }
-    const cfg = await ctx.store.spaces.getConfig({
-      spaceId: principal.spaceId,
-      environmentId: 'main',
-    });
-    return c.json({ items: cfg ? [{ id: cfg.spaceId, name: cfg.name }] : [] });
+    // Through the application layer like every other route (no direct store
+    // access, no hard-coded environment): list, then keep the principal's own.
+    const items = (await listSpaces(ctx)).filter((s) => s.spaceId === principal.spaceId);
+    return c.json({ items: items.map((s) => ({ id: s.spaceId, name: s.name })) });
   });
   app.post(
     '/spaces',
