@@ -23,9 +23,9 @@ spec:
       {{- end }}
       containers:
         - name: agent-worker
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "cw.appImage" (dict "root" . "app" "agent-worker") }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["pnpm", "--filter", "@cw/agent-worker", "start"]
+          command: {{ include "cw.appCommand" (dict "root" . "app" "agent-worker") }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             - name: HEALTH_PORT

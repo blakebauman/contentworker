@@ -32,9 +32,9 @@ spec:
       {{- end }}
       containers:
         - name: api
-          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          image: "{{ include "cw.appImage" (dict "root" $root "app" "api") }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["pnpm", "--filter", "@cw/api", "start"]
+          command: {{ include "cw.appCommand" (dict "root" $root "app" "api" "entry" "src/server.ts") }}
           securityContext: {{- toYaml $root.Values.containerSecurityContext | nindent 12 }}
           env:
             - name: ROLE

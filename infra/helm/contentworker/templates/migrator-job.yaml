@@ -20,9 +20,9 @@ spec:
       {{- include "cw.scheduling" . | nindent 6 }}
       containers:
         - name: migrator
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "cw.appImage" (dict "root" . "app" "migrator") }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["pnpm", "--filter", "@cw/migrator", "start"]
+          command: {{ include "cw.appCommand" (dict "root" . "app" "migrator") }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           # Configmap carries EMBEDDINGS_DIM (pgvector column width) and any
           # SKIP_PGVECTOR override alongside the secret's DATABASE_URL.

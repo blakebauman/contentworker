@@ -22,9 +22,9 @@ spec:
       {{- end }}
       containers:
         - name: worker
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "cw.appImage" (dict "root" . "app" "worker") }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["pnpm", "--filter", "@cw/worker", "start"]
+          command: {{ include "cw.appCommand" (dict "root" . "app" "worker") }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             - name: HEALTH_PORT

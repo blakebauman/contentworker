@@ -1,7 +1,10 @@
 # Local / kind / minikube — fully self-contained (bundled Postgres + Redis).
 #   helm install cw ./infra/helm/contentworker -f values-local.yaml
 image:
-  pullPolicy: Never # use a locally-built image (docker build -t contentworker:0.1.0 .)
+  # Use a locally-built image (docker build -t contentworker:0.1.0 .). With
+  # image.perApp: true, build and kind/minikube-load all five per-app images
+  # (contentworker-{api,worker,mcp-server,agent-worker,migrator}:0.1.0) instead.
+  pullPolicy: Never
 
 config:
   aiProvider: anthropic

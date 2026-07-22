@@ -1,8 +1,9 @@
 # Deployment
 
 contentworker ships as a **single container image** that runs any of the services (api, worker,
-mcp-server, migrator). The service and its adapters are selected entirely by environment
-variables, so the same image runs on any cloud — see [Configuration](./configuration.md).
+mcp-server, migrator) — with an optional slim **per-app image** build for production. The
+service and its adapters are selected entirely by environment variables, so the same image
+runs on any cloud — see [Configuration](./configuration.md).
 
 For what to back up and how to restore per target, see
 [Backup & restore](./backup-and-restore.md); for the per-target consistency
@@ -10,14 +11,15 @@ matrix, see [Consistency & guarantees](./consistency.md).
 
 ## Container image
 
-The `Dockerfile` builds one image for all Node services, in two stages:
+The `Dockerfile` builds two image shapes from the same source:
 
 - Base `node:22-alpine`, `corepack enable` for pnpm.
-- **`prod` (default)** — production dependencies only and runs as the non-root
-  `node` user. `tsx` is a production dependency of each app (services run TS
-  directly, no compile step), while build/test toolchains (typescript, vite,
-  vitest, drizzle-kit, biome) never reach the runtime image. This is what the
-  Helm chart deploys.
+- **`prod` (default)** — the shared whole-monorepo image: production
+  dependencies only, runs as the non-root `node` user. `tsx` is a production
+  dependency of each app (services run TS directly, no compile step), while
+  build/test toolchains (typescript, vite, vitest, drizzle-kit, biome) never
+  reach the runtime image. This is what docker-compose runs and what the Helm
+  chart deploys by default.
 - **`dev`** — full install including dev dependencies; docker-compose's `admin`
   service targets it to build/serve the SPA with vite inside the container.
 - Default command runs the API; each service overrides the command:
@@ -26,6 +28,30 @@ The `Dockerfile` builds one image for all Node services, in two stages:
   - agent-worker: `pnpm --filter @cw/agent-worker start` (needs `TEMPORAL_ADDRESS`)
   - mcp-server: `pnpm --filter @cw/mcp-server start`
   - migrator: `pnpm --filter @cw/migrator start`
+
+### Slim per-app images (production)
+
+The **`app`** target uses `pnpm deploy` to prune the workspace down to one
+service and only the production dependencies its dependency graph actually
+needs — one self-contained package per image, no pnpm and no workspace inside.
+Build one per service (only the api's entrypoint differs):
+
+```bash
+docker build --target app --build-arg APP=api --build-arg APP_ENTRY=src/server.ts -t contentworker-api .
+for a in worker mcp-server agent-worker migrator; do
+  docker build --target app --build-arg APP="$a" -t "contentworker-$a" .
+done
+```
+
+Enable in the Helm chart with `image.perApp: true`: each service then pulls
+`<image.repository>-<app>:<image.tag>` and execs
+`node --import tsx <entry>` directly. Every image the install pulls must
+exist in the registry under those names (mcp-server and agent-worker only
+when enabled). The trade-offs vs the shared image: less than
+half the size (the api: ~456MB vs ~1.09GB shared), smaller pull/attack
+surface per pod, and no unrelated app code in any container — against five
+image builds per release instead of one. CI builds and boot-tests the api's
+slim image on every push (`slim-image` job).
 
 ## Local: docker-compose
 

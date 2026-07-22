@@ -76,3 +76,29 @@ topologySpreadConstraints:
 app.kubernetes.io/name: {{ include "cw.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
+
+{{/*
+Image reference for a service. With image.perApp, each service runs its slim
+`pnpm deploy` image (<repository>-<app>:<tag>, built via --target app); the
+default is the single shared monorepo image.
+*/}}
+{{- define "cw.appImage" -}}
+{{- if .root.Values.image.perApp -}}
+{{- printf "%s-%s:%s" .root.Values.image.repository .app .root.Values.image.tag -}}
+{{- else -}}
+{{- printf "%s:%s" .root.Values.image.repository .root.Values.image.tag -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Container command for a service. Slim per-app images contain one standalone
+package (no pnpm, no workspace), so they exec node directly; the shared image
+selects the app with a workspace filter.
+*/}}
+{{- define "cw.appCommand" -}}
+{{- if .root.Values.image.perApp -}}
+["node", "--import", "tsx", {{ .entry | default "src/main.ts" | quote }}]
+{{- else -}}
+["pnpm", "--filter", {{ printf "@cw/%s" .app | quote }}, "start"]
+{{- end -}}
+{{- end }}

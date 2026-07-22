@@ -5,6 +5,12 @@ image:
   repository: contentworker
   tag: "0.1.0"
   pullPolicy: IfNotPresent
+  # Slim per-app images: each service pulls <repository>-<app>:<tag>
+  # (contentworker-api, -worker, -mcp-server, -agent-worker, -migrator) built
+  # with `docker build --target app --build-arg APP=<app>` and runs node
+  # directly (the slim images contain one standalone package, no pnpm).
+  # Requires all five images in the registry. false = one shared image.
+  perApp: false
 
 imagePullSecrets: []
 nameOverride: ""
