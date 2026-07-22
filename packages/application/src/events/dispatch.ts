@@ -5,8 +5,8 @@ import { invokeFunctionsForEvent } from '../functions.js';
 import {
   type RagDeps,
   indexEntryEmbeddings,
-  reindexEmbeddings,
   removeEntryEmbeddings,
+  runReindexJob,
 } from '../rag.js';
 
 export interface DispatchDeps {
@@ -32,13 +32,12 @@ export async function dispatchEvent(
 ): Promise<void> {
   const scope = event.scope;
 
-  // Background reindex job: run the (bounded) embed loop here on the consumer,
-  // not on the triggering request. Nothing else applies to this event type.
+  // Background reindex job: run one bounded slice here on the consumer; the
+  // remainder (if any) is re-enqueued as a continuation event via the outbox.
+  // Nothing else applies to this event type.
   if (event.type === 'search.reindex_requested') {
     if (deps.rag) {
-      await reindexEmbeddings(deps.rag, ctx, scope, {
-        contentTypeApiId: event.contentTypeApiId,
-      });
+      await runReindexJob(deps.rag, ctx, event);
     }
     return;
   }

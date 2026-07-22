@@ -38,7 +38,7 @@ AI), so `wrangler dev -e demo` boots a zero-infrastructure demo.
 wrangler hyperdrive create cw-neon --connection-string="$NEON_UNPOOLED_URL"
 wrangler kv namespace create cw-cache
 wrangler vectorize create cw-vectors --dimensions=1536 --metric=cosine
-wrangler queues create cw-events && wrangler queues create cw-events-dlq
+wrangler queues create cw-events && wrangler queues create cw-agents && wrangler queues create cw-events-dlq
 wrangler r2 bucket create cw-assets    # + an R2 S3-API token for presigning
 
 # paste the hyperdrive/kv ids into apps/edge/wrangler.jsonc, then
@@ -89,6 +89,21 @@ horizontally regardless; the split is operational isolation, not throughput.
 - **Vectorize indexing lag:** upserts/deletes are async-indexed (seconds), so
   search-after-publish is not immediate — same class of lag as queue-driven
   embedding on the Node path.
+- **Agent runs consume from their own queue:** `cw-events` forwards each
+  published entry's agent work to `cw-agents` (batch size 1), so a batch of
+  events never has to fit N polled Workflow runs inside one consumer
+  invocation. Without the `AGENTS_QUEUE` binding, agents run inline in the
+  events consumer (dev/demo parity).
+- **Bulk reindex runs in bounded slices:** each `search.reindex_requested`
+  message embeds at most a few hundred entries, then re-enqueues a
+  continuation event carrying a keyset cursor (relayed immediately after the
+  batch) — a full reindex never has to fit one consumer invocation's
+  CPU/subrequest limits. Redelivered slices are deduped via a best-effort
+  cache marker; a duplicate that slips through re-embeds already-indexed
+  entries (idempotent — wasted work, never wrong data).
+- **Dead letters are visible:** the `cw-events-dlq` consumer logs each
+  dead-lettered message loudly and acks it, so poison events surface in
+  observability instead of vanishing when retries are exhausted.
 - **Agent duplicate runs:** if a queue consumer retries after starting an agent
   workflow, a duplicate instance runs. Runs are recorded proposals (never
   direct state changes), so duplicates are benign ledger noise.

@@ -1,5 +1,5 @@
 import { RateLimitedError, isRichTextDocument, richTextToPlainText } from '@cw/domain';
-import type { EntryFields, Scope } from '@cw/domain';
+import type { EntryFields, Scope, SearchReindexRequestedEvent } from '@cw/domain';
 import type { EmbeddingsProvider, VectorRow, VectorStore } from '@cw/ports';
 import type { AppContext } from './context.js';
 
@@ -95,12 +95,22 @@ export interface ReindexResult {
   readonly entries: number;
   /** Vector rows written (an entry with no extractable text yields none). */
   readonly chunks: number;
-  /** True if the per-run entry cap was hit and some entries were not reindexed. */
+  /** True if the entry budget was hit and some entries were not reindexed. */
   readonly truncated: boolean;
+  /** Keyset cursor to resume from (last processed entryId); unset if none. */
+  readonly nextCursor?: string;
 }
 
-/** Max published entries a single reindex run will process (resource bound). */
+/** Max published entries a whole reindex job will process across all slices. */
 export const MAX_REINDEX_ENTRIES = 50_000;
+/**
+ * Max entries one consumer invocation processes before re-enqueuing the rest
+ * as a continuation event. Sized for the most constrained host (a Cloudflare
+ * queue consumer: each entry costs an embeddings call plus vector writes, all
+ * inside one invocation's CPU/subrequest limits); the Node worker simply gets
+ * finer-grained, resumable slices.
+ */
+export const REINDEX_ENTRIES_PER_RUN = 200;
 /** Minimum seconds between reindex runs for the same scope (when a cache exists). */
 export const REINDEX_COOLDOWN_SECONDS = 60;
 
@@ -154,10 +164,21 @@ export async function reindexEmbeddings(
   deps: RagDeps,
   ctx: AppContext,
   scope: Scope,
-  opts: { contentTypeApiId?: string; batchSize?: number } = {},
+  opts: {
+    contentTypeApiId?: string;
+    batchSize?: number;
+    /** Keyset cursor to resume from (continuation of an earlier slice). */
+    afterEntryId?: string;
+    /** Entry budget for this call; defaults to the whole-job cap. */
+    maxEntries?: number;
+  } = {},
 ): Promise<ReindexResult> {
   const batchSize = Math.min(Math.max(1, opts.batchSize ?? 100), 500);
-  let skip = 0;
+  const maxEntries = opts.maxEntries ?? MAX_REINDEX_ENTRIES;
+  // Keyset paging (entryId is UUIDv7, time-ordered and unique): the cursor
+  // stays valid even when entries before it are unpublished or republished
+  // between slices, which would shift an offset cursor and skip entries.
+  let cursor = opts.afterEntryId;
   let entries = 0;
   let chunks = 0;
   let truncated = false;
@@ -165,10 +186,10 @@ export async function reindexEmbeddings(
     const page = await ctx.store.entries.listPublished(scope, {
       contentTypeApiId: opts.contentTypeApiId,
       limit: batchSize,
-      skip,
+      afterEntryId: cursor ?? '',
     });
     for (const published of page) {
-      if (entries >= MAX_REINDEX_ENTRIES) {
+      if (entries >= maxEntries) {
         truncated = true;
         break;
       }
@@ -178,11 +199,73 @@ export async function reindexEmbeddings(
         entryVersion: published.version,
       });
       entries += 1;
+      cursor = published.entryId;
     }
     if (truncated || page.length < batchSize) break;
-    skip += batchSize;
   }
-  return { entries, chunks, truncated };
+  return { entries, chunks, truncated, nextCursor: cursor };
+}
+
+/**
+ * Runs one bounded slice of a reindex job (the `search.reindex_requested`
+ * consumer body) and, when more entries remain, re-enqueues a continuation
+ * event carrying the keyset cursor — via the outbox, so the follow-up flows
+ * through the same relay → queue → consumer path on every host. A slice is
+ * capped at {@link REINDEX_ENTRIES_PER_RUN} entries and the whole job (across
+ * slices) at {@link MAX_REINDEX_ENTRIES}.
+ *
+ * At-least-once redelivery: each slice is idempotent (stale vectors are
+ * replaced), and a per-event cache marker dedupes re-runs so a redelivered
+ * slice doesn't fork the continuation chain. The marker is best-effort (the
+ * cache is optional and may be eventually consistent); a fork that slips
+ * through re-embeds duplicate slices — wasted work, never wrong data.
+ */
+export async function runReindexJob(
+  deps: RagDeps,
+  ctx: AppContext,
+  event: SearchReindexRequestedEvent,
+  opts: { entriesPerRun?: number } = {},
+): Promise<ReindexResult> {
+  const entriesSoFar = event.entriesSoFar ?? 0;
+  const perRun = Math.max(1, opts.entriesPerRun ?? REINDEX_ENTRIES_PER_RUN);
+  const budget = Math.min(perRun, MAX_REINDEX_ENTRIES - entriesSoFar);
+  if (budget <= 0) {
+    return { entries: 0, chunks: 0, truncated: true, nextCursor: event.afterEntryId };
+  }
+
+  const sliceMarker = `cw:reindex:slice:${event.id}`;
+  if (ctx.cache && (await ctx.cache.get(sliceMarker))) {
+    // This slice already ran (queue redelivery) — don't re-run or re-enqueue.
+    return { entries: 0, chunks: 0, truncated: false, nextCursor: event.afterEntryId };
+  }
+
+  const result = await reindexEmbeddings(deps, ctx, event.scope, {
+    contentTypeApiId: event.contentTypeApiId,
+    afterEntryId: event.afterEntryId,
+    maxEntries: budget,
+  });
+  const totalAfter = entriesSoFar + result.entries;
+  if (result.truncated && totalAfter < MAX_REINDEX_ENTRIES) {
+    await ctx.store.outbox.append({
+      id: ctx.ids.newId(),
+      type: 'search.reindex_requested',
+      scope: event.scope,
+      occurredAt: ctx.clock.now().toISOString(),
+      contentTypeApiId: event.contentTypeApiId,
+      afterEntryId: result.nextCursor,
+      entriesSoFar: totalAfter,
+    });
+    // Keep the scope on cooldown while slices are in flight, so a re-trigger
+    // can't start a second concurrent chain the moment the request-time
+    // cooldown (60s) lapses mid-job.
+    await ctx.cache?.set(
+      reindexCooldownKey(event.scope, event.contentTypeApiId),
+      ctx.clock.now().toISOString(),
+      { ttlSeconds: REINDEX_COOLDOWN_SECONDS },
+    );
+  }
+  await ctx.cache?.set(sliceMarker, ctx.clock.now().toISOString(), { ttlSeconds: 3600 });
+  return result;
 }
 
 export async function removeEntryEmbeddings(
