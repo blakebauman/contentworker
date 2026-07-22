@@ -47,7 +47,7 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
           resources: {{- toYaml .Values.worker.resources | nindent 12 }}
-{{- if .Values.worker.autoscaling.enabled }}
+{{- if and .Values.worker.autoscaling.enabled (not .Values.worker.keda.enabled) }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

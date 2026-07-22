@@ -13,6 +13,9 @@
 {{- $workloads = append $workloads (dict "name" "api" "replicas" $apiReplicas) -}}
 {{- end -}}
 {{- $workerReplicas := ternary (int .Values.worker.autoscaling.minReplicas) (int .Values.worker.replicas) .Values.worker.autoscaling.enabled -}}
+{{- if .Values.worker.keda.enabled -}}
+{{- $workerReplicas = int .Values.worker.keda.minReplicas -}}
+{{- end -}}
 {{- $workloads = append $workloads (dict "name" "worker" "replicas" $workerReplicas) -}}
 {{- if .Values.mcpServer.enabled -}}
 {{- $workloads = append $workloads (dict "name" "mcp" "replicas" (int .Values.mcpServer.replicas)) -}}

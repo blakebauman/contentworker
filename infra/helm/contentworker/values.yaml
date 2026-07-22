@@ -112,6 +112,21 @@ worker:
   replicas: 1
   # Health + Prometheus metrics port (/healthz fails when the relay stalls).
   healthPort: 9464
+  # Queue-depth-based autoscaling via KEDA (requires KEDA in the cluster).
+  # Preferred over the CPU HPA for the worker: the BullMQ backlog, not CPU, is
+  # the real load signal. When enabled it replaces worker.autoscaling (the CPU
+  # HPA is not rendered) and manages replicas between min and max.
+  keda:
+    enabled: false
+    # Redis host:port for the KEDA redis scaler (KEDA cannot parse REDIS_URL).
+    redisAddress: ""
+    # Scale out when the events wait list exceeds this many jobs per replica.
+    listLength: "100"
+    minReplicas: 1
+    maxReplicas: 10
+    # Key in the platform secret holding the Redis password, for clusters with
+    # AUTH (rendered as a TriggerAuthentication). Empty = no auth.
+    passwordSecretKey: ""
   # Drain window for in-flight dispatches on rotation. Raise (e.g. 600) when
   # in-process agents run on publish — a dispatch can then take minutes.
   terminationGracePeriodSeconds: 120

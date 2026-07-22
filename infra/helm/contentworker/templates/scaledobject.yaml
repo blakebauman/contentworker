@@ -1,0 +1,40 @@
+{{- if .Values.worker.keda.enabled }}
+# Queue-depth autoscaling for the worker: KEDA's redis scaler watches the
+# BullMQ wait list of the events topic (`bull:cw.events:wait`) and scales the
+# Deployment on backlog, which tracks real load far better than CPU. KEDA owns
+# the HPA it creates — the chart's CPU HPA is suppressed while this is enabled.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "cw.fullname" . }}-worker
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "cw.fullname" . }}-worker
+  minReplicaCount: {{ .Values.worker.keda.minReplicas }}
+  maxReplicaCount: {{ .Values.worker.keda.maxReplicas }}
+  triggers:
+    - type: redis
+      metadata:
+        address: {{ required "worker.keda.redisAddress (host:port) is required when worker.keda.enabled" .Values.worker.keda.redisAddress | quote }}
+        # BullMQ key layout: <prefix>:<queue>:wait holds jobs awaiting a worker.
+        listName: "bull:cw.events:wait"
+        listLength: {{ .Values.worker.keda.listLength | quote }}
+      {{- if .Values.worker.keda.passwordSecretKey }}
+      authenticationRef:
+        name: {{ include "cw.fullname" . }}-worker-redis-auth
+      {{- end }}
+{{- if .Values.worker.keda.passwordSecretKey }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "cw.fullname" . }}-worker-redis-auth
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: {{ include "cw.secretName" . }}
+      key: {{ .Values.worker.keda.passwordSecretKey }}
+{{- end }}
+{{- end }}
