@@ -185,7 +185,26 @@ describe('reindex embeddings', () => {
   });
 
   it('returns zero counts for a scope with nothing published', async () => {
-    expect(await reindexEmbeddings(deps, ctx, scope, {})).toEqual({ entries: 0, chunks: 0 });
+    expect(await reindexEmbeddings(deps, ctx, scope, {})).toEqual({
+      entries: 0,
+      chunks: 0,
+      truncated: false,
+    });
+  });
+
+  it('enforces a cooldown between reindex runs when a cache is present', async () => {
+    const entries = new Map<string, string>();
+    const cache = {
+      get: async (k: string) => entries.get(k) ?? null,
+      set: async (k: string, v: string) => void entries.set(k, v),
+      invalidateTag: async () => {},
+    };
+    const guarded: AppContext = { ...ctx, cache };
+    await publishArticle(scope, 'postgres relational database');
+    // First run succeeds and sets the cooldown.
+    await expect(reindexEmbeddings(deps, guarded, scope, {})).resolves.toBeTruthy();
+    // Second run within the window is rejected.
+    await expect(reindexEmbeddings(deps, guarded, scope, {})).rejects.toThrow(/cooldown/i);
   });
 
   it('only touches the requested scope', async () => {

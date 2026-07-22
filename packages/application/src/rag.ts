@@ -1,4 +1,4 @@
-import { isRichTextDocument, richTextToPlainText } from '@cw/domain';
+import { RateLimitedError, isRichTextDocument, richTextToPlainText } from '@cw/domain';
 import type { EntryFields, Scope } from '@cw/domain';
 import type { EmbeddingsProvider, VectorRow, VectorStore } from '@cw/ports';
 import type { AppContext } from './context.js';
@@ -95,6 +95,17 @@ export interface ReindexResult {
   readonly entries: number;
   /** Vector rows written (an entry with no extractable text yields none). */
   readonly chunks: number;
+  /** True if the per-run entry cap was hit and some entries were not reindexed. */
+  readonly truncated: boolean;
+}
+
+/** Max published entries a single reindex run will process (resource bound). */
+export const MAX_REINDEX_ENTRIES = 50_000;
+/** Minimum seconds between reindex runs for the same scope (when a cache exists). */
+export const REINDEX_COOLDOWN_SECONDS = 60;
+
+function reindexCooldownKey(scope: Scope, contentTypeApiId?: string): string {
+  return `cw:reindex:cooldown:${scope.spaceId}:${scope.environmentId}:${contentTypeApiId ?? '*'}`;
 }
 
 /**
@@ -109,10 +120,26 @@ export async function reindexEmbeddings(
   scope: Scope,
   opts: { contentTypeApiId?: string; batchSize?: number } = {},
 ): Promise<ReindexResult> {
-  const batchSize = opts.batchSize ?? 100;
+  // Cooldown + coarse singleton: a full reindex is expensive (an embedding call
+  // per chunk of every published entry), so refuse to start another for the same
+  // scope within the cooldown window. Enforced via the shared cache when present
+  // (cross-replica); in cacheless dev there is no gate.
+  const cooldownKey = reindexCooldownKey(scope, opts.contentTypeApiId);
+  if (ctx.cache && (await ctx.cache.get(cooldownKey))) {
+    throw new RateLimitedError(
+      'A reindex for this scope ran recently; retry after the cooldown.',
+      REINDEX_COOLDOWN_SECONDS,
+    );
+  }
+  await ctx.cache?.set(cooldownKey, ctx.clock.now().toISOString(), {
+    ttlSeconds: REINDEX_COOLDOWN_SECONDS,
+  });
+
+  const batchSize = Math.min(Math.max(1, opts.batchSize ?? 100), 500);
   let skip = 0;
   let entries = 0;
   let chunks = 0;
+  let truncated = false;
   for (;;) {
     const page = await ctx.store.entries.listPublished(scope, {
       contentTypeApiId: opts.contentTypeApiId,
@@ -120,6 +147,10 @@ export async function reindexEmbeddings(
       skip,
     });
     for (const published of page) {
+      if (entries >= MAX_REINDEX_ENTRIES) {
+        truncated = true;
+        break;
+      }
       chunks += await indexEntryEmbeddings(deps, scope, {
         entryId: published.entryId,
         fields: published.fields,
@@ -127,10 +158,10 @@ export async function reindexEmbeddings(
       });
       entries += 1;
     }
-    if (page.length < batchSize) break;
+    if (truncated || page.length < batchSize) break;
     skip += batchSize;
   }
-  return { entries, chunks };
+  return { entries, chunks, truncated };
 }
 
 export async function removeEntryEmbeddings(
