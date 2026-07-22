@@ -4,6 +4,10 @@ contentworker ships as a **single container image** that runs any of the service
 mcp-server, migrator). The service and its adapters are selected entirely by environment
 variables, so the same image runs on any cloud — see [Configuration](./configuration.md).
 
+For what to back up and how to restore per target, see
+[Backup & restore](./backup-and-restore.md); for the per-target consistency
+matrix, see [Consistency & guarantees](./consistency.md).
+
 ## Container image
 
 The `Dockerfile` builds one image for all Node services, in two stages:

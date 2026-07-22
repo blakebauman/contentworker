@@ -26,9 +26,13 @@ These docs describe how contentworker is built and how to run, extend, and integ
    serverless target — one Worker on Cloudflare with Neon via Hyperdrive — see
    **[Cloudflare](./cloudflare.md)**.
 9. **[Configuration](./configuration.md)** — the complete environment-variable reference.
-10. **[Development](./development.md)** — workspace commands, testing, conventions, schema
+10. **[Consistency & guarantees](./consistency.md)** — the invariants that hold everywhere,
+    and the honest per-target matrix of timing/staleness differences (Node/K8s vs Cloudflare).
+11. **[Backup & restore](./backup-and-restore.md)** — what holds state, what is derivable,
+    per-target backup guidance, the outbox replay procedure, and the restore runbook.
+12. **[Development](./development.md)** — workspace commands, testing, conventions, schema
     reference, and how to add a new use-case.
-11. **[Admin UI](./admin-ui.md)** — the management SPA at `:5173`, compose override HMR, and
+13. **[Admin UI](./admin-ui.md)** — the management SPA at `:5173`, compose override HMR, and
     local dev workflow.
 
 ## Conventions used in these docs
