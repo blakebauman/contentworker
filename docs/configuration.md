@@ -13,6 +13,8 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `AI_PROVIDER=azure-openai` | Azure OpenAI generation | Anthropic (default) |
 | `EMBEDDINGS_PROVIDER=azure-openai` | Azure OpenAI embeddings | local deterministic embeddings |
 | `EMBEDDINGS_PROVIDER=openai` | Any OpenAI-compatible embeddings endpoint (OpenAI, Ollama, vLLM, TEI) | local deterministic embeddings |
+| `VECTOR_PROVIDER=qdrant` | Qdrant VectorStore (self-hostable) | pgvector (Node, with `DATABASE_URL`) / Vectorize (edge) |
+| `SEARCH_PROVIDER=opensearch` | OpenSearch lexical index (BM25) for hybrid search | built-in Postgres FTS |
 
 ## Core / infrastructure
 
@@ -129,6 +131,24 @@ Uploads use presigned PUT URLs (default 900 s) so file bytes never transit the A
 
 Anthropic tier→model: `flagship`→`claude-opus-4-8`, `balanced`→`claude-sonnet-4-6`,
 `fast`→`claude-haiku-4-5`. See [AI, agents & search](./ai-agents-and-search.md).
+
+### Search backends (optional swaps)
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `VECTOR_PROVIDER` | — | `qdrant` swaps the VectorStore off pgvector/Vectorize |
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant HTTP endpoint (or Qdrant Cloud URL) |
+| `QDRANT_API_KEY` | — | api-key header; omit for unauthenticated local instances |
+| `QDRANT_COLLECTION` | `cw_embeddings` | Collection name (created on first use, Cosine) |
+| `SEARCH_PROVIDER` | — | `opensearch` binds the external lexical index; publishes (and the reindex job) keep it fresh, hybrid search reads its ranking. Unset → Postgres FTS |
+| `OPENSEARCH_URL` | `http://localhost:9200` | OpenSearch HTTP endpoint |
+| `OPENSEARCH_USERNAME` / `OPENSEARCH_PASSWORD` | — | Basic auth; omit for unauthenticated clusters |
+| `OPENSEARCH_INDEX` | `cw-entries` | Index name (created with mappings on first use) |
+
+Both adapters are plain `fetch` — they run on the Node services and the edge
+Worker alike. The OpenSearch index is maintained incrementally by publish
+events; a bulk `POST …/search/reindex` also refreshes it when RAG
+(`EMBEDDINGS_PROVIDER`) is configured.
 
 ### AI budget (per-space cost/rate guard)
 

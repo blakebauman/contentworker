@@ -141,6 +141,14 @@
     // Ollama, vLLM, TEI); EMBEDDINGS_API_KEY via `wrangler secret put` if needed.
     "EMBEDDINGS_BASE_URL": "",
     "EMBEDDINGS_MODEL": "",
+    // Search-backend swaps (both adapters are plain fetch, edge-compatible).
+    // Secrets via `wrangler secret put`: QDRANT_API_KEY, OPENSEARCH_USERNAME/PASSWORD.
+    "VECTOR_PROVIDER": "",
+    "QDRANT_URL": "",
+    "QDRANT_COLLECTION": "",
+    "SEARCH_PROVIDER": "",
+    "OPENSEARCH_URL": "",
+    "OPENSEARCH_INDEX": "",
     // Staging runs persistent (Hyperdrive) but without R2/embeddings/Anthropic
     // configured; name those fakes explicitly so the boot guard accepts them.
     // PRODUCTION: set to "" (and configure the real adapters) — a persistent

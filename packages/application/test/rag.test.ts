@@ -1,6 +1,7 @@
 import {
   FixedClock,
   InMemoryContentStore,
+  InMemorySearchIndex,
   InMemoryVectorStore,
   LocalEmbeddingsProvider,
   SequenceIdGenerator,
@@ -15,6 +16,7 @@ import {
   createEntry,
   createSpace,
   extractTextByLocale,
+  hybridSearch,
   indexEntryEmbeddings,
   publishEntry,
   reindexEmbeddings,
@@ -136,6 +138,31 @@ describe('P7: RAG indexing + semantic search', () => {
     );
     // Uncapped stores get topK*4 (up to 400); a declared cap clamps it.
     expect(requested).toEqual([50]);
+  });
+
+  it('hybrid search reads the external lexical index when bound', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    await searchIndex.index(scope, {
+      entryId: 'e-lex',
+      contentTypeApiId: 'article',
+      textByLocale: { 'en-US': 'terraform infrastructure provisioning' },
+      entryVersion: 1,
+    });
+    const store = new InMemoryContentStore();
+    const ctx: AppContext = {
+      store: store as never,
+      clock: new FixedClock(),
+      ids: new SequenceIdGenerator('x'),
+    };
+    const withIndex: RagDeps = {
+      embeddings: new LocalEmbeddingsProvider(64),
+      vectors: new InMemoryVectorStore(),
+      searchIndex,
+    };
+    // The store has no published entries at all — a hit can only come from
+    // the external index, proving the lexical leg switched over.
+    const hits = await hybridSearch(withIndex, ctx, scope, 'terraform provisioning', { topK: 5 });
+    expect(hits.map((h) => h.entryId)).toEqual(['e-lex']);
   });
 
   it('removes embeddings on unpublish', async () => {
@@ -303,6 +330,30 @@ describe('reindex embeddings', () => {
     const second = await runReindexJob(deps, ctx, continuation);
     expect(second.entries).toBe(1);
     expect(second.truncated).toBe(false);
+  });
+
+  it('runReindexJob runs lexical-only when a SearchIndex is bound without embeddings', async () => {
+    await publishArticle(scope, 'lexical only backfill entry');
+    await ctx.store.withTransaction(async (tx) => {
+      const pending = await tx.outbox.readPending(100);
+      await tx.outbox.markRelayed(pending.map((e) => e.id));
+    });
+
+    const searchIndex = new InMemorySearchIndex();
+    const result = await runReindexJob(
+      undefined, // no RagDeps: EMBEDDINGS_PROVIDER unset
+      ctx,
+      {
+        id: ctx.ids.newId(),
+        type: 'search.reindex_requested',
+        scope,
+        occurredAt: ctx.clock.now().toISOString(),
+      },
+      { searchIndex },
+    );
+    expect(result.entries).toBe(1);
+    expect(result.chunks).toBe(0); // no embeddings were written
+    expect(await searchIndex.search(scope, 'backfill', { topK: 5 })).toHaveLength(1);
   });
 
   it('runReindexJob dedupes a redelivered slice via the cache marker', async () => {

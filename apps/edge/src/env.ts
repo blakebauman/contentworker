@@ -58,6 +58,17 @@ export interface EdgeEnv {
   readonly EMBEDDINGS_BASE_URL?: string;
   readonly EMBEDDINGS_API_KEY?: string;
   readonly EMBEDDINGS_MODEL?: string;
+  /** `qdrant` selects the Qdrant VectorStore over the VECTORIZE binding. */
+  readonly VECTOR_PROVIDER?: string;
+  readonly QDRANT_URL?: string;
+  readonly QDRANT_API_KEY?: string;
+  readonly QDRANT_COLLECTION?: string;
+  /** `opensearch` binds the external lexical index for hybrid search. */
+  readonly SEARCH_PROVIDER?: string;
+  readonly OPENSEARCH_URL?: string;
+  readonly OPENSEARCH_USERNAME?: string;
+  readonly OPENSEARCH_PASSWORD?: string;
+  readonly OPENSEARCH_INDEX?: string;
   readonly BLOB_BUCKET?: string;
   readonly BLOB_ENDPOINT?: string;
   readonly BLOB_FORCE_PATH_STYLE?: string;

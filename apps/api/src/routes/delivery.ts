@@ -127,7 +127,10 @@ export function deliveryRoutes(deps: AuthDeps): Hono<AuthVars> {
       let hits =
         mode === 'semantic'
           ? await semanticSearch(rag, scope, q, opts)
-          : await hybridSearch(mode === 'lexical' ? undefined : rag, ctx, scope, q, opts);
+          : await hybridSearch(rag, ctx, scope, q, {
+              ...opts,
+              lexicalOnly: mode === 'lexical',
+            });
       const principal = c.get('principal');
       if (principal.contentGrants) {
         const visible = [];

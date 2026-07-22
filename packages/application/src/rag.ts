@@ -1,11 +1,17 @@
 import { RateLimitedError, isRichTextDocument, richTextToPlainText } from '@cw/domain';
 import type { EntryFields, Scope, SearchReindexRequestedEvent } from '@cw/domain';
-import type { EmbeddingsProvider, VectorRow, VectorStore } from '@cw/ports';
+import type { EmbeddingsProvider, SearchIndex, VectorRow, VectorStore } from '@cw/ports';
 import type { AppContext } from './context.js';
 
 export interface RagDeps {
   readonly embeddings: EmbeddingsProvider;
   readonly vectors: VectorStore;
+  /**
+   * Optional external lexical index (e.g. OpenSearch). When present, hybrid
+   * search reads its ranking and the reindex job refreshes it; absent, the
+   * lexical leg stays on the store's built-in Postgres FTS.
+   */
+  readonly searchIndex?: SearchIndex;
 }
 
 /** Largest `topK` a search may request; bounds vector/FTS over-fetch work. */
@@ -161,7 +167,7 @@ export async function requestReindex(
  * replaced). The per-run entry cap and batch clamp bound a single run.
  */
 export async function reindexEmbeddings(
-  deps: RagDeps,
+  deps: RagDeps | undefined,
   ctx: AppContext,
   scope: Scope,
   opts: {
@@ -171,6 +177,9 @@ export async function reindexEmbeddings(
     afterEntryId?: string;
     /** Entry budget for this call; defaults to the whole-job cap. */
     maxEntries?: number;
+    /** Lexical index to refresh (overrides deps.searchIndex; enables
+     *  lexical-only reindex when embeddings are not configured). */
+    searchIndex?: SearchIndex;
   } = {},
 ): Promise<ReindexResult> {
   const batchSize = Math.min(Math.max(1, opts.batchSize ?? 100), 500);
@@ -188,16 +197,31 @@ export async function reindexEmbeddings(
       limit: batchSize,
       afterEntryId: cursor ?? '',
     });
+    const searchIndex = opts.searchIndex ?? deps?.searchIndex;
     for (const published of page) {
       if (entries >= maxEntries) {
         truncated = true;
         break;
       }
-      chunks += await indexEntryEmbeddings(deps, scope, {
-        entryId: published.entryId,
-        fields: published.fields,
-        entryVersion: published.version,
-      });
+      if (deps) {
+        chunks += await indexEntryEmbeddings(deps, scope, {
+          entryId: published.entryId,
+          fields: published.fields,
+          entryVersion: published.version,
+        });
+      }
+      // Refresh the external lexical index in the same pass, when bound.
+      // refresh: false — bulk writes ride the engine's own refresh cycle.
+      await searchIndex?.index(
+        scope,
+        {
+          entryId: published.entryId,
+          contentTypeApiId: published.contentTypeApiId,
+          textByLocale: extractTextByLocale(published.fields),
+          entryVersion: published.version,
+        },
+        { refresh: false },
+      );
       entries += 1;
       cursor = published.entryId;
     }
@@ -221,10 +245,10 @@ export async function reindexEmbeddings(
  * through re-embeds duplicate slices — wasted work, never wrong data.
  */
 export async function runReindexJob(
-  deps: RagDeps,
+  deps: RagDeps | undefined,
   ctx: AppContext,
   event: SearchReindexRequestedEvent,
-  opts: { entriesPerRun?: number } = {},
+  opts: { entriesPerRun?: number; searchIndex?: SearchIndex } = {},
 ): Promise<ReindexResult> {
   const entriesSoFar = event.entriesSoFar ?? 0;
   const perRun = Math.max(1, opts.entriesPerRun ?? REINDEX_ENTRIES_PER_RUN);
@@ -243,6 +267,7 @@ export async function runReindexJob(
     contentTypeApiId: event.contentTypeApiId,
     afterEntryId: event.afterEntryId,
     maxEntries: budget,
+    searchIndex: opts.searchIndex,
   });
   const totalAfter = entriesSoFar + result.entries;
   if (result.truncated && totalAfter < MAX_REINDEX_ENTRIES) {
@@ -327,15 +352,30 @@ export async function hybridSearch(
   ctx: AppContext,
   scope: Scope,
   query: string,
-  opts: { topK?: number } = {},
+  opts: { topK?: number; lexicalOnly?: boolean } = {},
 ): Promise<SearchHit[]> {
   const topK = clampTopK(opts.topK);
   // Over-fetch per leg so a hit ranked just outside topK in both legs can
   // still fuse into the final topK.
   const fetchK = topK * 2;
+  // The external index (when bound) serves the lexical leg in every mode —
+  // including lexicalOnly — with graceful degradation to the built-in FTS:
+  // a briefly unreachable index should cost freshness, not fail delivery reads.
+  const lexicalLeg = async () => {
+    if (deps?.searchIndex) {
+      try {
+        return await deps.searchIndex.search(scope, query, { topK: fetchK });
+      } catch {
+        return ctx.store.entries.searchPublished(scope, query, { topK: fetchK });
+      }
+    }
+    return ctx.store.entries.searchPublished(scope, query, { topK: fetchK });
+  };
   const [semantic, lexical] = await Promise.all([
-    deps ? semanticSearch(deps, scope, query, { topK: fetchK }) : Promise.resolve([]),
-    ctx.store.entries.searchPublished(scope, query, { topK: fetchK }),
+    deps && !opts.lexicalOnly
+      ? semanticSearch(deps, scope, query, { topK: fetchK })
+      : Promise.resolve([]),
+    lexicalLeg(),
   ]);
 
   const fused = new Map<string, { score: number; snippet?: string }>();

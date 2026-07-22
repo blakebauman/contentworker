@@ -15,6 +15,27 @@ data:
   {{- with .Values.config.embeddingsModel }}
   EMBEDDINGS_MODEL: {{ . | quote }}
   {{- end }}
+  {{- with .Values.config.vectorProvider }}
+  VECTOR_PROVIDER: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.qdrantUrl }}
+  QDRANT_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.qdrantCollection }}
+  QDRANT_COLLECTION: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.searchProvider }}
+  SEARCH_PROVIDER: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.opensearchUrl }}
+  OPENSEARCH_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.opensearchUsername }}
+  OPENSEARCH_USERNAME: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.opensearchIndex }}
+  OPENSEARCH_INDEX: {{ . | quote }}
+  {{- end }}
   {{- with .Values.blob }}
   {{- if .bucket }}
   BLOB_BUCKET: {{ .bucket | quote }}
