@@ -1,5 +1,5 @@
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ensurePgVectorSchema } from '@cw/adapter-vector-pgvector';
 import { logger } from '@cw/telemetry';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -14,9 +14,15 @@ async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
 
-  // Migrations are generated into the postgres adapter package.
-  const here = dirname(fileURLToPath(import.meta.url));
-  const migrationsFolder = resolve(here, '../../../packages/adapters/store-postgres/drizzle');
+  // Migrations are generated into the postgres adapter package. Resolve the
+  // package itself, not a workspace-relative path — the slim `pnpm deploy`
+  // image layout has no packages/ directory (the adapter lives under
+  // node_modules there).
+  const require = createRequire(import.meta.url);
+  const migrationsFolder = resolve(
+    dirname(require.resolve('@cw/adapter-store-postgres/package.json')),
+    'drizzle',
+  );
 
   const sql = postgres(url, { max: 1 });
   const db = drizzle(sql);

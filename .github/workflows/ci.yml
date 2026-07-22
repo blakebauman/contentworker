@@ -78,6 +78,7 @@ jobs:
       - name: Template Helm chart (all values files)
         run: |
           helm template cw infra/helm/contentworker > /dev/null
+          helm template cw infra/helm/contentworker --set image.perApp=true > /dev/null
           for f in infra/helm/contentworker/values-*.yaml; do
             echo "--- ${f}"
             helm template cw infra/helm/contentworker -f "${f}" > /dev/null
@@ -112,3 +113,62 @@ jobs:
           size=$(gzip -c apps/edge/dist/main.js | wc -c)
           echo "edge bundle gzip size: ${size} bytes"
           test "$size" -lt 5000000
+
+  # Builds every slim per-app image (`pnpm deploy` → --target app) and boots
+  # the two with distinct runtime shapes: proves each pruned dependency graph
+  # is complete, not just that the Dockerfile parses. The migrator matters
+  # most — it resolves the drizzle migrations dir from inside the deployed
+  # package, a path that only exists correctly in this layout.
+  slim-image:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: contentworker_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+
+      # Layers up to `ARG APP` are shared, so the marginal cost per extra app
+      # is a single `pnpm deploy`.
+      - name: Build all five slim images
+        run: |
+          docker build --target app --build-arg APP=api \
+            --build-arg APP_ENTRY=src/server.ts -t contentworker-api:ci .
+          for a in worker mcp-server agent-worker migrator; do
+            docker build --target app --build-arg APP="$a" -t "contentworker-$a:ci" .
+          done
+
+      - name: Smoke-test migrator (applies migrations from the deployed layout)
+        run: >
+          docker run --rm --network host
+          -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/contentworker_smoke
+          contentworker-migrator:ci
+
+      # The image sets NODE_ENV=production, so the fail-closed secrets guard is
+      # active — random ≥32-char secrets keep that path honest instead of
+      # bypassing it with NODE_ENV=development.
+      - name: Smoke-test (in-memory store boot)
+        run: |
+          S=$(openssl rand -hex 24)
+          docker run -d --name api -p 8787:8787 \
+            -e ADMIN_TOKEN="a$S" -e CMA_KEY="b$S" -e CDA_KEY="c$S" \
+            -e CPA_KEY="d$S" -e SESSION_SECRET="e$S" \
+            contentworker-api:ci
+          ok=""
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8787/healthz > /dev/null && ok=1 && break
+            sleep 2
+          done
+          [ "$ok" = "1" ] || { docker logs api; exit 1; }
+          curl -sf http://localhost:8787/readyz
+          docker rm -f api

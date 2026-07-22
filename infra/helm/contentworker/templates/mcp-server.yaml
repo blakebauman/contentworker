@@ -20,9 +20,9 @@ spec:
       {{- end }}
       containers:
         - name: mcp
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "cw.appImage" (dict "root" . "app" "mcp-server") }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["pnpm", "--filter", "@cw/mcp-server", "start"]
+          command: {{ include "cw.appCommand" (dict "root" . "app" "mcp-server") }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             - name: PORT
