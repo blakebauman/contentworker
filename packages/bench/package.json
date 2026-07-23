@@ -1,0 +1,16 @@
+{
+  "name": "@cw/bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "delivery": "k6 run k6/delivery.js",
+    "management": "k6 run k6/management.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/k6": "^0.54.2",
+    "typescript": "^5.7.2"
+  },
+  "license": "Apache-2.0"
+}

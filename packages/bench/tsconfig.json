@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // k6 resolves import paths literally, so scripts import './config.ts'.
+    "allowImportingTsExtensions": true,
+    "types": ["k6"]
+  },
+  "include": ["k6/**/*"]
+}

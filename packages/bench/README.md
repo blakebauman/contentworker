@@ -1,11 +1,13 @@
-# k6 benchmarks
+# @cw/bench — k6 benchmarks
 
-Load tests for the two API surfaces that matter at launch:
+Load tests for the two API surfaces that matter at launch. The scripts are
+TypeScript run **directly by k6** (≥ v0.57) — no build step — and typechecked
+against `@types/k6` in CI like any other workspace package.
 
 | Script | Surface | Mutates target? |
 | --- | --- | --- |
-| `delivery.js` | Delivery API reads: lists + pagination, filter grammar, single entries with `include`, assets, GraphQL, full-text search, optional hybrid search | No |
-| `management.js` | Entry lifecycle writes: create → update → publish (transactional outbox) → unpublish | **Yes — disposable stacks only** |
+| `k6/delivery.ts` | Delivery API reads: lists + pagination, filter grammar, single entries with `include`, assets, GraphQL, full-text search, optional hybrid search | No |
+| `k6/management.ts` | Entry lifecycle writes: create → update → publish (transactional outbox) → unpublish | **Yes — disposable stacks only** |
 
 ## Prerequisites
 
@@ -19,15 +21,15 @@ Load tests for the two API surfaces that matter at launch:
 SEED_SCALE=10 pnpm --filter @cw/api dev
 
 # Terminal 2: smoke, then a real baseline
-k6 run bench/k6/delivery.js
-k6 run -e PROFILE=baseline -e RATE=100 bench/k6/delivery.js
+pnpm --filter @cw/bench delivery
+k6 run -e PROFILE=baseline -e RATE=100 packages/bench/k6/delivery.ts
 ```
 
 Via Docker (no local k6):
 
 ```bash
-docker run --rm -i -v "$PWD/bench/k6:/bench" grafana/k6 run \
-  -e BASE_URL=http://host.docker.internal:8787 -e PROFILE=baseline /bench/delivery.js
+docker run --rm -i -v "$PWD/packages/bench/k6:/bench" grafana/k6 run \
+  -e BASE_URL=http://host.docker.internal:8787 -e PROFILE=baseline /bench/delivery.ts
 ```
 
 ## Profiles
@@ -54,7 +56,7 @@ latency degrades (looping VUs would self-throttle and flatter the results).
 | `PROFILE` | `smoke` | See above |
 | `RATE` / `DURATION` | per profile | Override constant-profile load |
 | `P95_MS` | `300` | Read-path p95 threshold (fails the run when exceeded) |
-| `WRITE_P95_MS` | `800` | Write-path p95 threshold (`management.js`) |
+| `WRITE_P95_MS` | `800` | Write-path p95 threshold (`management.ts`) |
 | `SEARCH` | off | `true` adds hybrid-search traffic (needs real embeddings/vector adapters) |
 
 ## Reading the results
@@ -65,3 +67,10 @@ tagged — `http_req_duration{name:entry-by-id}`, `{name:list}`,
 `{name:filtered-list}`, `{name:graphql}`, `{name:publish}` — so a regression
 points at a route, not just a global average. The traffic mix is deterministic
 (no `Math.random`), so two runs at the same profile and scale are comparable.
+
+## Package layout note
+
+This package intentionally has no `test` script and no runtime dependencies:
+k6 is an external binary, the scripts never import workspace packages (they
+exercise the platform over HTTP like any real client), and `typecheck` is the
+only CI-relevant target.

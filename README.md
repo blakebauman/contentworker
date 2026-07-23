@@ -53,7 +53,7 @@ Detailed docs live in [`docs/`](./docs):
 | [Configuration](./docs/configuration.md) | The full environment-variable reference |
 | [Development](./docs/development.md) | Workspace commands, testing, schema, adding a use-case |
 | [Admin UI](./docs/admin-ui.md) | Management SPA at `:5173`, compose HMR, local dev workflow |
-| [Benchmarking](./docs/benchmarking.md) | Content-at-scale load testing: `SEED_SCALE` + the k6 suite in `bench/k6/` |
+| [Benchmarking](./docs/benchmarking.md) | Content-at-scale load testing: `SEED_SCALE` + the `@cw/bench` k6 suite |
 
 For Claude Code specifically, see [`CLAUDE.md`](./CLAUDE.md).
 

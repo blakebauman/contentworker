@@ -7,8 +7,8 @@
  * against a disposable stack (in-memory dev, or a docker-compose Postgres you
  * plan to throw away), never against an environment you care about.
  *
- *   k6 run bench/k6/management.js                       # smoke: 2 VUs, 30s
- *   k6 run -e PROFILE=baseline -e RATE=10 bench/k6/management.js
+ *   pnpm --filter @cw/bench management                  # smoke: 2 VUs, 30s
+ *   k6 run -e PROFILE=baseline -e RATE=10 packages/bench/k6/management.ts
  *
  * Writes are held to a laxer p95 than reads (WRITE_P95_MS, default 800):
  * publish does validation + referential-integrity checks + a read-model
@@ -16,11 +16,12 @@
  */
 import { check } from 'k6';
 import http from 'k6/http';
-import { LOCALE, MGMT, PROFILE, cmaHeaders, mix, scenarioFor } from './config.js';
+import type { Options } from 'k6/options';
+import { LOCALE, MGMT, PROFILE, cmaHeaders, mix, scenarioFor } from './config.ts';
 
 const WRITE_P95 = Number(__ENV.WRITE_P95_MS ?? 800);
 
-export const options = {
+export const options: Options = {
   scenarios: scenarioFor(PROFILE, 'lifecycle'),
   thresholds: {
     http_req_failed: ['rate<0.01'],
@@ -31,20 +32,20 @@ export const options = {
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
 
-export function setup() {
+export function setup(): void {
   const res = http.get(`${MGMT}/content-types`, { headers: cmaHeaders });
   if (res.status !== 200) {
     throw new Error(`setup: management auth failed with ${res.status}`);
   }
-  const hasArticle = res.json('items').some((ct) => ct.apiId === 'article');
-  if (!hasArticle) {
+  const items = res.json('items') as { apiId: string }[];
+  if (!items.some((ct) => ct.apiId === 'article')) {
     throw new Error('setup: no "article" content type — seed the target (SEED_DEV=true) first');
   }
 }
 
-const loc = (value) => ({ [LOCALE]: value });
+const loc = (value: unknown): Record<string, unknown> => ({ [LOCALE]: value });
 
-export function lifecycle() {
+export function lifecycle(): void {
   const seed = __VU * 100_000 + __ITER;
   const title = `bench ${__VU}-${__ITER}`;
 
@@ -64,7 +65,7 @@ export function lifecycle() {
   );
   const ok = check(created, { 'create 201': (r) => r.status === 201 });
   if (!ok) return;
-  const id = created.json('entry.id');
+  const id = created.json('entry.id') as string;
 
   const branch = mix(seed, [
     ['publish', 50],
