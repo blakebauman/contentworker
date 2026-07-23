@@ -7,27 +7,29 @@
  * collections, and full-text `query=` search. `SEARCH=true` adds hybrid
  * semantic search (needs a real embeddings/vector adapter to mean anything).
  *
- *   k6 run bench/k6/delivery.js
- *   k6 run -e PROFILE=baseline -e RATE=100 bench/k6/delivery.js
- *   k6 run -e PROFILE=stress -e BASE_URL=https://staging.example.com bench/k6/delivery.js
+ *   pnpm --filter @cw/bench delivery
+ *   k6 run -e PROFILE=baseline -e RATE=100 packages/bench/k6/delivery.ts
+ *   k6 run -e PROFILE=stress -e BASE_URL=https://staging.example.com packages/bench/k6/delivery.ts
  *
  * Seed the target first (SEED_DEV=true, SEED_SCALE for volume) so the pools
  * below have material — see docs/benchmarking.md.
  */
 import { check } from 'k6';
 import http from 'k6/http';
+import type { Options } from 'k6/options';
 import {
   DELIVERY,
   LOCALE,
   P95_MS,
   PROFILE,
   WITH_SEARCH,
+  type WeightedBranch,
   cdaHeaders,
   mix,
   scenarioFor,
-} from './config.js';
+} from './config.ts';
 
-export const options = {
+export const options: Options = {
   scenarios: scenarioFor(PROFILE, 'browse'),
   thresholds: {
     http_req_failed: ['rate<0.01'],
@@ -39,7 +41,12 @@ export const options = {
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
 
-const CONTENT_TYPES = ['article', 'product', 'event', 'recipe', 'page'];
+interface Pools {
+  entryIds: string[];
+  assetIds: string[];
+}
+
+const CONTENT_TYPES = ['article', 'product', 'event', 'recipe', 'page'] as const;
 
 const FILTER_VARIANTS = [
   'content_type=article&fields.featured[eq]=true&limit=20',
@@ -49,13 +56,18 @@ const FILTER_VARIANTS = [
   'content_type=product&fields.availability[in]=in-stock,backorder&limit=20',
   'content_type=event&order=fields.startDate&limit=20',
   'content_type=article&query=localization&limit=10',
-];
+] as const;
 
-const SEARCH_TERMS = ['localization', 'edge delivery', 'agent workflows', 'cache invalidation'];
+const SEARCH_TERMS = [
+  'localization',
+  'edge delivery',
+  'agent workflows',
+  'cache invalidation',
+] as const;
 
 /** Builds id pools from real published content so reads hit real documents. */
-export function setup() {
-  const pools = { entryIds: [], assetIds: [] };
+export function setup(): Pools {
+  const pools: Pools = { entryIds: [], assetIds: [] };
   for (const ct of ['article', 'product']) {
     const res = http.get(`${DELIVERY}/entries?content_type=${ct}&limit=100`, {
       headers: cdaHeaders,
@@ -63,12 +75,14 @@ export function setup() {
     if (res.status !== 200) {
       throw new Error(`setup: listing ${ct} failed with ${res.status} — is the target seeded?`);
     }
-    for (const item of res.json('items')) pools.entryIds.push(item.id);
+    for (const item of res.json('items') as { id: string }[]) pools.entryIds.push(item.id);
   }
   const assets = http.get(`${DELIVERY}/assets?limit=50`, { headers: cdaHeaders });
   if (assets.status === 200) {
     // Published asset snapshots key on `assetId` (not `id` like entries).
-    for (const item of assets.json('items')) pools.assetIds.push(item.assetId);
+    for (const item of assets.json('items') as { assetId: string }[]) {
+      pools.assetIds.push(item.assetId);
+    }
   }
   if (pools.entryIds.length === 0) {
     throw new Error('setup: no published entries — seed the target (SEED_DEV=true) first');
@@ -76,7 +90,7 @@ export function setup() {
   return pools;
 }
 
-const DEFAULT_MIX = [
+const DEFAULT_MIX: readonly WeightedBranch[] = [
   ['list', 30],
   ['filtered', 20],
   ['byId', 25],
@@ -85,12 +99,12 @@ const DEFAULT_MIX = [
   ['search', WITH_SEARCH ? 5 : 0],
 ];
 
-export function browse(pools) {
+export function browse(pools: Pools): void {
   const seed = __VU * 100_000 + __ITER;
   const branch = mix(seed, DEFAULT_MIX);
 
   if (branch === 'list') {
-    const ct = CONTENT_TYPES[seed % CONTENT_TYPES.length];
+    const ct = CONTENT_TYPES[seed % CONTENT_TYPES.length]!;
     // Rotate through the first 10 pages so pagination depth is exercised.
     const skip = (seed % 10) * 20;
     const res = http.get(
@@ -105,7 +119,7 @@ export function browse(pools) {
   }
 
   if (branch === 'filtered') {
-    const qs = FILTER_VARIANTS[seed % FILTER_VARIANTS.length];
+    const qs = FILTER_VARIANTS[seed % FILTER_VARIANTS.length]!;
     const res = http.get(`${DELIVERY}/entries?${qs}`, {
       headers: cdaHeaders,
       tags: { name: 'filtered-list' },
@@ -115,7 +129,7 @@ export function browse(pools) {
   }
 
   if (branch === 'byId') {
-    const id = pools.entryIds[seed % pools.entryIds.length];
+    const id = pools.entryIds[seed % pools.entryIds.length]!;
     // Half the reads resolve references two levels deep — the expensive path.
     const include = seed % 2 === 0 ? '?include=2' : '';
     const res = http.get(`${DELIVERY}/entries/${id}${include}`, {
@@ -157,7 +171,7 @@ export function browse(pools) {
   }
 
   // branch === 'search' (only reachable when SEARCH=true)
-  const q = SEARCH_TERMS[seed % SEARCH_TERMS.length];
+  const q = SEARCH_TERMS[seed % SEARCH_TERMS.length]!;
   const res = http.get(`${DELIVERY}/search?q=${encodeURIComponent(q)}&mode=hybrid&top_k=10`, {
     headers: cdaHeaders,
     tags: { name: 'search' },

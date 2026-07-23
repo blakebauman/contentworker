@@ -16,8 +16,10 @@
  *              real embeddings/vector adapter to be meaningful)
  *
  * These scripts run under k6's runtime (not Node): only `k6/*` modules and
- * standard JS built-ins are available.
+ * standard JS built-ins are available. k6 (≥ v0.57) executes the TypeScript
+ * directly — no build step.
  */
+import type { Scenario } from 'k6/options';
 
 export const BASE_URL = __ENV.BASE_URL ?? 'http://localhost:8787';
 export const SPACE = __ENV.SPACE ?? 'space-1';
@@ -31,26 +33,28 @@ export const WITH_SEARCH = __ENV.SEARCH === 'true';
 export const DELIVERY = `${BASE_URL}/delivery/${SPACE}/${ENVIRONMENT}`;
 export const MGMT = `${BASE_URL}/spaces/${SPACE}/environments/${ENVIRONMENT}`;
 
-export const cdaHeaders = {
+export const cdaHeaders: Record<string, string> = {
   authorization: `Bearer ${CDA_TOKEN}`,
 };
-export const cmaHeaders = {
+export const cmaHeaders: Record<string, string> = {
   authorization: `Bearer ${CMA_TOKEN}`,
   'content-type': 'application/json',
 };
+
+export type WeightedBranch = readonly [name: string, weight: number];
 
 /**
  * Deterministic per-iteration branch picker: keeps the traffic mix stable
  * across runs (no Math.random) so two runs at the same profile are comparable.
  */
-export function mix(seed, weights) {
+export function mix(seed: number, weights: readonly WeightedBranch[]): string {
   const total = weights.reduce((a, [, w]) => a + w, 0);
   let n = ((seed * 2654435761) >>> 0) % total;
   for (const [name, w] of weights) {
     if (n < w) return name;
     n -= w;
   }
-  return weights[0][0];
+  return weights[0]![0];
 }
 
 /**
@@ -58,10 +62,10 @@ export function mix(seed, weights) {
  * profiles, so measured latency degradation cannot self-throttle the offered
  * load — the standard methodology for capacity benchmarks.
  */
-export function scenarioFor(profile, execFn) {
+export function scenarioFor(profile: string, execFn: string): Record<string, Scenario> {
   const rate = Number(__ENV.RATE ?? 0);
   const duration = __ENV.DURATION ?? '';
-  const profiles = {
+  const profiles: Record<string, Scenario> = {
     // Functional pulse: is the target up and are the requests correct?
     smoke: { executor: 'constant-vus', vus: 2, duration: duration || '30s' },
     // Steady state at a fixed offered load — the day-to-day comparison run.
@@ -108,7 +112,7 @@ export function scenarioFor(profile, execFn) {
       maxVUs: 200,
     },
   };
-  const selected = profiles[profile] ?? profiles.smoke;
+  const selected = profiles[profile] ?? profiles.smoke!;
   return { [profile]: { ...selected, exec: execFn } };
 }
 

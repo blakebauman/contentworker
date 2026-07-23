@@ -2,7 +2,7 @@
 
 How to measure content-at-scale performance before launch: seed a realistic
 corpus with `@cw/seed`, then drive load with the k6 suite in
-[`bench/k6/`](../bench/k6/README.md).
+[`@cw/bench`](../packages/bench/README.md).
 
 ## 1. Seed the target at scale
 
@@ -36,15 +36,15 @@ the seeding cost. Postgres keeps the data across restarts.
 ## 2. Run the load
 
 ```bash
-k6 run bench/k6/delivery.js                                    # smoke first
-k6 run -e PROFILE=baseline -e RATE=100 bench/k6/delivery.js    # steady state
-k6 run -e PROFILE=stress bench/k6/delivery.js                  # find the knee
-k6 run -e PROFILE=baseline -e RATE=10 bench/k6/management.js   # write path
+pnpm --filter @cw/bench delivery                                        # smoke first
+k6 run -e PROFILE=baseline -e RATE=100 packages/bench/k6/delivery.ts    # steady state
+k6 run -e PROFILE=stress packages/bench/k6/delivery.ts                  # find the knee
+k6 run -e PROFILE=baseline -e RATE=10 packages/bench/k6/management.ts   # write path
 ```
 
-`delivery.js` is read-only. `management.js` **writes** (bench-titled entries)
+`delivery.ts` is read-only. `management.ts` **writes** (bench-titled entries)
 — point it only at disposable stacks. Profiles, env vars, and thresholds are
-documented in [`bench/k6/README.md`](../bench/k6/README.md).
+documented in [`packages/bench/README.md`](../packages/bench/README.md).
 
 ## 3. What to compare
 
