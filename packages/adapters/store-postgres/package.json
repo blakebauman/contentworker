@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@cw/application": "workspace:*",
+    "@cw/test-kit": "workspace:*",
     "drizzle-kit": "^0.31.1",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",

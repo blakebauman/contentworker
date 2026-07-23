@@ -1,7 +1,7 @@
 import { NotFoundError, type Scope } from '@cw/domain';
 import type { EntryQuery } from '@cw/ports';
 import type { AppContext } from './context.js';
-import type { RenderOptions } from './delivery.js';
+import { type RenderOptions, localeFallbackChain } from './delivery.js';
 import { renderFields } from './render.js';
 
 /** A previewed entry: the current (draft) version, including its status. */
@@ -50,7 +50,11 @@ export async function listPreviewEntries(
 ): Promise<PreviewedEntry[]> {
   const config = await spaceConfig(ctx, scope);
   const locale = query.locale ?? opts.locale ?? config.defaultLocale;
-  const rows = await ctx.store.entries.list(scope, { ...query, locale });
+  const rows = await ctx.store.entries.list(scope, {
+    ...query,
+    locale,
+    fallbackLocales: localeFallbackChain(config, locale),
+  });
   return rows.map((found) => ({
     id: found.entry.id,
     contentType: found.entry.contentTypeApiId,

@@ -3,6 +3,7 @@ import {
   type Principal,
   type Scope,
   canAccessContentType,
+  fallbackChain,
   maskDeniedFields,
   resolveLocalizedValue,
 } from '@cw/domain';
@@ -225,6 +226,25 @@ export async function getPublishedEntry(
   return result;
 }
 
+/**
+ * The locale-preference chain used for query field resolution, passed to the
+ * store so filtering/ordering/search resolve the same locale on every backend
+ * (jsonb key order is not insertion order).
+ *
+ * Delegates to the domain's `fallbackChain` — the ONE implementation of this
+ * rule — and drops its head, because `comparableValue` tries the requested
+ * locale itself first. Sharing it with `resolveLocalizedValue` is what keeps a
+ * filter from matching a locale the rendered response would never contain.
+ */
+export function localeFallbackChain(config: SpaceConfig, locale: string): string[] {
+  const chain = fallbackChain(toLocaleConfig(config), locale);
+  // The chain's head is the requested locale — except when `locale` is empty
+  // (a client can send `?locale=`), where the domain walker emits only the
+  // default. Slice only what is actually the head, so the default locale is
+  // never dropped from the preference list.
+  return chain[0] === locale ? chain.slice(1) : chain;
+}
+
 export async function listPublishedEntries(
   ctx: AppContext,
   scope: Scope,
@@ -235,7 +255,11 @@ export async function listPublishedEntries(
   // Filtering/ordering/search compare against a single resolved locale; default
   // to the requested locale, then the space default.
   const locale = query.locale ?? opts.locale ?? config.defaultLocale;
-  const rows = await ctx.store.entries.listPublished(scope, { ...query, locale });
+  const rows = await ctx.store.entries.listPublished(scope, {
+    ...query,
+    locale,
+    fallbackLocales: localeFallbackChain(config, locale),
+  });
   const depth = clampDepth(opts.include);
   // One shared prefetch across all rows: N rows × M links costs one batched
   // read per depth level, not N×M point reads.

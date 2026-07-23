@@ -11,6 +11,7 @@ import {
   type EntryFields,
   type EntryMetadata,
   type EntryVersion,
+  QueryTooBroadError,
   type ReferenceEdge,
   type Release,
   type Role,
@@ -65,6 +66,7 @@ import type {
   WorkflowRepo,
 } from '@cw/ports';
 import {
+  type SQL,
   and,
   asc,
   count,
@@ -83,6 +85,7 @@ import {
 } from 'drizzle-orm';
 import { type PostgresJsDatabase, drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { buildFilterPrefilter, buildSearchPrefilter } from './query-pushdown.js';
 import * as schema from './schema.js';
 
 type Db = PostgresJsDatabase<typeof schema>;
@@ -91,11 +94,14 @@ const scopeFilter = (t: { spaceId: unknown; environmentId: unknown }, scope: Sco
   and(eq(t.spaceId as never, scope.spaceId), eq(t.environmentId as never, scope.environmentId));
 
 // Field-level filtering/ordering/search/projection runs in JS over the loaded
-// rows (shared with the in-memory store for identical semantics). When any of
-// these are present we cannot push `limit/offset` into SQL, so the scoped set is
-// loaded in full and paginated in JS. Pushing JSONB predicates down to SQL is a
-// future optimization. The common `contentType + since + limit/skip` path keeps
-// its SQL pushdown.
+// rows (shared with the in-memory store for identical semantics), so `limit`/
+// `offset` cannot be pushed into SQL for those queries. They are not unbounded
+// though: superset prefilters (query-pushdown.ts) narrow the candidate rows in
+// SQL and the scan is capped, so only plausible matches are materialized. The
+// common `contentType + since + limit/skip` path is answered entirely in SQL.
+/** Default ceiling on candidate rows loaded for exact query evaluation. */
+export const DEFAULT_QUERY_SCAN_LIMIT = 5000;
+
 const isAdvancedQuery = (q: EntryQuery) =>
   Boolean(q.filters?.length || q.order?.length || q.search || q.select);
 
@@ -149,7 +155,7 @@ function makeContentTypeRepo(db: Db): ContentTypeRepo {
   };
 }
 
-function makeEntryRepo(db: Db): EntryRepo {
+function makeEntryRepo(db: Db, scanLimit = DEFAULT_QUERY_SCAN_LIMIT): EntryRepo {
   const putPublishedMany = async (
     scope: Scope,
     snapshots: readonly PublishedEntry[],
@@ -222,15 +228,47 @@ function makeEntryRepo(db: Db): EntryRepo {
       if (query.contentTypeApiId) {
         conditions.push(eq(schema.entries.contentTypeApiId, query.contentTypeApiId));
       }
+      if (advanced) {
+        // Draft field values live in entry_versions, so the superset prefilter
+        // is an EXISTS against the row's CURRENT version. Same contract as the
+        // published path: narrows candidates, never changes the answer.
+        const vFields = sql`v.fields`;
+        const parts: SQL[] = [];
+        if (query.filters?.length) {
+          const p = buildFilterPrefilter(query.filters, vFields, {
+            entryId: sql`${schema.entries.id}`,
+            contentTypeApiId: sql`${schema.entries.contentTypeApiId}`,
+          });
+          if (p) parts.push(p);
+        }
+        if (query.search) {
+          const p = buildSearchPrefilter(query.search, vFields);
+          if (p) parts.push(p);
+        }
+        const inner = parts.length > 0 ? and(...parts) : undefined;
+        if (inner) {
+          conditions.push(sql`EXISTS (
+            SELECT 1 FROM ${schema.entryVersions} v
+            WHERE v.space_id = ${scope.spaceId} AND v.environment_id = ${scope.environmentId}
+              AND v.entry_id = ${schema.entries.id}
+              AND v.version = ${schema.entries.currentVersion}
+              AND ${inner}
+          )`);
+        }
+      }
       let select = db
         .select()
         .from(schema.entries)
         .where(and(...conditions))
         .orderBy(asc(schema.entries.updatedAt))
         .$dynamic();
-      // SQL pagination is only valid when there are no JS-side field predicates.
-      if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
+      // SQL pagination is only valid when there are no JS-side field predicates;
+      // otherwise bound the candidate scan (+1 to detect overflow).
+      select = advanced
+        ? select.limit(scanLimit + 1)
+        : select.limit(query.limit ?? 100).offset(query.skip ?? 0);
       const rows = await select;
+      if (advanced && rows.length > scanLimit) throw new QueryTooBroadError(scanLimit);
       const fieldsByEntry = await currentVersionFields(db, scope, rows);
       const results: EntryWithFields[] = rows.map((row) => ({
         entry: toEntry(row),
@@ -361,6 +399,26 @@ function makeEntryRepo(db: Db): EntryRepo {
         );
         if (cond) conditions.push(cond);
       }
+      // Superset prefilters for the field-level predicates: they only narrow
+      // the candidate set, never change the answer (the domain engine below
+      // still decides). This is what keeps a filtered/searched query from
+      // materializing the entire scoped published set.
+      const fieldsCol = sql`${schema.entryPublished.fields}`;
+      const sysCols = {
+        entryId: sql`${schema.entryPublished.entryId}`,
+        contentTypeApiId: sql`${schema.entryPublished.contentTypeApiId}`,
+        publishedAt: sql`${schema.entryPublished.publishedAt}`,
+      };
+      if (advanced) {
+        if (query.filters?.length) {
+          const pre = buildFilterPrefilter(query.filters, fieldsCol, sysCols);
+          if (pre) conditions.push(pre);
+        }
+        if (query.search) {
+          const pre = buildSearchPrefilter(query.search, fieldsCol);
+          if (pre) conditions.push(pre);
+        }
+      }
       let select = db
         .select()
         .from(schema.entryPublished)
@@ -375,9 +433,20 @@ function makeEntryRepo(db: Db): EntryRepo {
             : [asc(schema.entryPublished.publishedAt), asc(schema.entryPublished.entryId)]),
         )
         .$dynamic();
-      if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
+      if (!advanced) {
+        select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
+      } else {
+        // Bound the candidate scan. Ordering/pagination still happen in JS
+        // (the engine's comparison semantics are type-dependent), so this cap
+        // is the ceiling on rows pulled into memory — +1 to detect overflow
+        // and report it instead of silently truncating the result.
+        select = select.limit(scanLimit + 1);
+      }
       const published = (await select).map(toPublished);
       if (!advanced) return published;
+      if (published.length > scanLimit) {
+        throw new QueryTooBroadError(scanLimit);
+      }
       const filtered = runEntryQuery(
         published,
         query,
@@ -2313,6 +2382,12 @@ export interface PostgresStoreOptions {
    */
   readonly fetchTypes?: boolean;
   readonly prepare?: boolean;
+  /**
+   * Max candidate rows a field-level query may pull into memory for exact
+   * evaluation (see query-pushdown.ts). Exceeding it raises
+   * {@link QueryTooBroadError} rather than silently truncating. Default 5000.
+   */
+  readonly queryScanLimit?: number;
 }
 
 /** The underlying postgres.js client type (composition-root sharing only). */
@@ -2335,7 +2410,7 @@ export function createPostgresStore(
     sql,
     spaces: makeSpaceRepo(db),
     contentTypes: makeContentTypeRepo(db),
-    entries: makeEntryRepo(db),
+    entries: makeEntryRepo(db, options.queryScanLimit ?? DEFAULT_QUERY_SCAN_LIMIT),
     assets: makeAssetRepo(db),
     references: makeReferenceRepo(db),
     webhooks: makeWebhookRepo(db),
@@ -2361,7 +2436,10 @@ export function createPostgresStore(
       return db.transaction(async (txdb) => {
         const tx: ContentStoreTx = {
           contentTypes: makeContentTypeRepo(txdb as unknown as Db),
-          entries: makeEntryRepo(txdb as unknown as Db),
+          entries: makeEntryRepo(
+            txdb as unknown as Db,
+            options.queryScanLimit ?? DEFAULT_QUERY_SCAN_LIMIT,
+          ),
           assets: makeAssetRepo(txdb as unknown as Db),
           references: makeReferenceRepo(txdb as unknown as Db),
           releases: makeReleaseRepo(txdb as unknown as Db),
