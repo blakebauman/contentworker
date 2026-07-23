@@ -140,6 +140,7 @@
     // explicit: refuses to serve with dev-default ADMIN_TOKEN/keys.
     "REQUIRE_SECURE_SECRETS": "true",
     "SEED_DEV": "false",
+    "SEED_SCALE": "1",
     "AGENT_RUNTIME": "cloudflare-workflows",
     "AGENTS_ENRICH": "false",
     "AGENTS_MODERATE": "false",
@@ -211,6 +212,7 @@
         "ROLE": "delivery,preview",
         "REQUIRE_SECURE_SECRETS": "true",
         "SEED_DEV": "false",
+        "SEED_SCALE": "1",
         "ALLOW_FAKE_ADAPTERS": ""
       },
       // "routes": [{ "pattern": "delivery.contentworker.dev", "custom_domain": true }],
@@ -246,6 +248,7 @@
         "ROLE": "management",
         "REQUIRE_SECURE_SECRETS": "true",
         "SEED_DEV": "false",
+        "SEED_SCALE": "1",
         "ALLOW_FAKE_ADAPTERS": "",
         "AI_MAX_REQUESTS_PER_WINDOW": "60",
         "AI_MAX_TOKENS_PER_WINDOW": "200000",
@@ -315,6 +318,7 @@
         "ROLE": "delivery",
         "REQUIRE_SECURE_SECRETS": "true",
         "SEED_DEV": "false",
+        "SEED_SCALE": "1",
         "AGENT_RUNTIME": "cloudflare-workflows",
         "AGENTS_ENRICH": "false",
         "AGENTS_MODERATE": "false",
