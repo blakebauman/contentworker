@@ -196,6 +196,9 @@
     "AI_BUDGET_WINDOW_SECONDS": "60",
     // Delivery cache TTL (GC bound; tag invalidation stays authoritative).
     "DELIVERY_CACHE_TTL_SECONDS": "86400",
+    // Cached LIST results — shorter, since list tags are coarser (per content
+    // type) than the per-entry tags on single-entry renders.
+    "DELIVERY_LIST_TTL_SECONDS": "3600",
     // Retention for relayed outbox rows + webhook delivery records (hours).
     "EVENT_RETENTION_HOURS": "168"
   },
@@ -236,7 +239,8 @@
         "SEED_DEV": "false",
         "SEED_SCALE": "1",
         "ALLOW_FAKE_ADAPTERS": "",
-        "DELIVERY_CACHE_TTL_SECONDS": "86400"
+        "DELIVERY_CACHE_TTL_SECONDS": "86400",
+        "DELIVERY_LIST_TTL_SECONDS": "3600"
       },
       // "routes": [{ "pattern": "delivery.contentworker.dev", "custom_domain": true }],
       "triggers": { "crons": [] },

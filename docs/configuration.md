@@ -24,6 +24,7 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `PORT` | `8787` (api), `8788` (mcp-server) | HTTP listen port |
 | `DATABASE_URL` | — | Postgres connection string; absent → in-memory store |
 | `REDIS_URL` | — | Redis connection string; absent → no cache (and the worker won't start) |
+| `DELIVERY_LIST_TTL_SECONDS` | `3600` | TTL for cached delivery **list** results. Lists are invalidated by content-type tags (a publish of the type evicts them), so the TTL is the backstop; only typed, non-cursor queries are cached |
 | `DELIVERY_CACHE_TTL_SECONDS` | `86400` | TTL on delivery cache entries — a garbage-collection bound so the cache backend doesn't accumulate every render forever; tag-version invalidation stays the correctness mechanism |
 | `MAX_BODY_BYTES` | `5242880` | Max accepted request body size (DoS guard); oversized → 413 |
 | `TRUSTED_PROXY_COUNT` | `1` | Reverse proxies in front; X-Forwarded-For is read this many hops from the right (spoof-resistant rate-limit keying). `0` ignores XFF |

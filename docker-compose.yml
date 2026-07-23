@@ -73,6 +73,8 @@ services:
       ROLE: all
       # Delivery cache TTL (GC bound; tag invalidation stays authoritative).
       DELIVERY_CACHE_TTL_SECONDS: "86400"
+      # Cached LIST results (coarser content-type tags → shorter TTL).
+      DELIVERY_LIST_TTL_SECONDS: "3600"
       # Bootstrap a usable dev space + keys + demo content (idempotent).
       SEED_DEV: "true"
       SEED_LOCALES: "en-US,de-DE"

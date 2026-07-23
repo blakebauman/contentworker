@@ -117,6 +117,9 @@ async function consumeEvents(batch: MessageBatch, env: EdgeEnv, wired: EdgeWired
   const agentsConfigured = agentConfig.enrich || agentConfig.moderate;
   const forwardAgents = Boolean(env.AGENTS_QUEUE) && agentsConfigured;
   const deps: ConsumeDeps = {
+    // One coalescing set per batch: a batch of same-type publishes writes each
+    // cache tag once instead of once per message (KV rate-limits per key).
+    invalidatedTags: new Set<string>(),
     sender: createWebhookSender(),
     invoker: createHttpFunctionInvoker(),
     cache: wired.cache,
