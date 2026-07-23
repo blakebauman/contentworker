@@ -14,16 +14,17 @@ import {
   runDueScheduledActions,
   runPublishAgents,
 } from '@cw/application';
-import type { DomainEvent, Scope } from '@cw/domain';
 import type { McpDeps } from '@cw/mcp-server/wire';
 import { Hono } from 'hono';
 import { sendReviewDecision } from './agents/runtime.js';
 import { AgentWorkflow } from './agents/workflow.js';
-import { CostGuardDO, createDoCostGuard } from './do/cost-guard.js';
+import { CostGuardDO, doAgentCostGuardFromEnv } from './do/cost-guard.js';
 import { LiveHubDO, createDoEventBus } from './do/live-hub.js';
 import { RateLimiterDO, createDoRateLimiter } from './do/rate-limiter.js';
 import type { EdgeEnv } from './env.js';
 import { mcpRoutes } from './mcp.js';
+import { type AgentJobMessage, isAgentJob, isDomainEvent } from './messages.js';
+import { makeMetrics } from './metrics.js';
 import { liveRoutes } from './routes/live.js';
 import { type EdgeWired, agentConfigFromEnv, makeAgents, wireEdge } from './wire.js';
 
@@ -31,39 +32,6 @@ import { type EdgeWired, agentConfigFromEnv, makeAgents, wireEdge } from './wire
 export { AgentWorkflow, CostGuardDO, LiveHubDO, RateLimiterDO };
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-/** Minimal runtime shape check for a queued DomainEvent (defensive, not exhaustive). */
-function isDomainEvent(body: unknown): body is DomainEvent {
-  if (typeof body !== 'object' || body === null) return false;
-  const e = body as Record<string, unknown>;
-  const scope = e.scope as Record<string, unknown> | undefined;
-  return (
-    typeof e.id === 'string' &&
-    typeof e.type === 'string' &&
-    typeof e.occurredAt === 'string' &&
-    typeof scope?.spaceId === 'string' &&
-    typeof scope?.environmentId === 'string'
-  );
-}
-
-/** One on-publish agent job on the `cw-agents` queue (consumed one at a time). */
-interface AgentJobMessage {
-  readonly kind: 'agent.publish_run';
-  readonly scope: Scope;
-  readonly entryId: string;
-}
-
-function isAgentJob(body: unknown): body is AgentJobMessage {
-  if (typeof body !== 'object' || body === null) return false;
-  const j = body as Record<string, unknown>;
-  const scope = j.scope as Record<string, unknown> | undefined;
-  return (
-    j.kind === 'agent.publish_run' &&
-    typeof j.entryId === 'string' &&
-    typeof scope?.spaceId === 'string' &&
-    typeof scope?.environmentId === 'string'
-  );
-}
 
 /** Idempotent dev bootstrap runs once per isolate (SEED_DEV + real database). */
 let devSeeded = false;
@@ -142,6 +110,7 @@ function buildApp(wired: EdgeWired, env: EdgeEnv): Hono {
  * cheap sends, not up to 25×2 polled Workflow runs in one invocation.
  */
 async function consumeEvents(batch: MessageBatch, env: EdgeEnv, wired: EdgeWired): Promise<void> {
+  const metrics = makeMetrics(env.METRICS);
   const agentConfig = agentConfigFromEnv(env);
   const agentsConfigured = agentConfig.enrich || agentConfig.moderate;
   const forwardAgents = Boolean(env.AGENTS_QUEUE) && agentsConfigured;
@@ -165,6 +134,7 @@ async function consumeEvents(batch: MessageBatch, env: EdgeEnv, wired: EdgeWired
     // malformed/poison message is acked (dropped) rather than retried forever.
     if (!isDomainEvent(msg.body)) {
       console.error('dropping malformed queue message', { id: msg.id });
+      metrics.count('cw_events_consumed_total', 1, { type: 'malformed', outcome: 'dropped' });
       msg.ack();
       continue;
     }
@@ -181,9 +151,11 @@ async function consumeEvents(batch: MessageBatch, env: EdgeEnv, wired: EdgeWired
         };
         await env.AGENTS_QUEUE.send(job);
       }
+      metrics.count('cw_events_consumed_total', 1, { type: msg.body.type, outcome: 'ok' });
       msg.ack();
     } catch (err) {
       console.error('event dispatch failed; retrying', err);
+      metrics.count('cw_events_consumed_total', 1, { type: msg.body.type, outcome: 'error' });
       msg.retry();
     }
   }
@@ -199,16 +171,19 @@ async function consumeAgentJobs(
   env: EdgeEnv,
   wired: EdgeWired,
 ): Promise<void> {
+  const metrics = makeMetrics(env.METRICS);
   const agentConfig = agentConfigFromEnv(env);
   const agents = makeAgents(env, wired.ctx, wired.ai);
   for (const msg of batch.messages) {
     if (!isAgentJob(msg.body)) {
       console.error('dropping malformed agent job', { id: msg.id });
+      metrics.count('cw_agent_jobs_total', 1, { outcome: 'dropped' });
       msg.ack();
       continue;
     }
     if (!agents) {
       // Agents were disabled after the job was enqueued — drop, don't retry.
+      metrics.count('cw_agent_jobs_total', 1, { outcome: 'disabled' });
       msg.ack();
       continue;
     }
@@ -223,9 +198,11 @@ async function consumeAgentJobs(
       for (const r of runs) {
         console.log(JSON.stringify({ msg: `${r.workflow} complete`, ...r }));
       }
+      metrics.count('cw_agent_jobs_total', 1, { outcome: 'ok' });
       msg.ack();
     } catch (err) {
       console.error('agent job failed; retrying', err);
+      metrics.count('cw_agent_jobs_total', 1, { outcome: 'error' });
       msg.retry();
     }
   }
@@ -251,12 +228,17 @@ export default {
       const res = await app.fetch(req, env, exec);
       exec.waitUntil(
         (async () => {
+          const metrics = makeMetrics(env.METRICS);
           try {
             if (wired.queue && MUTATING.has(req.method)) {
-              await relayOutbox(wired.ctx, wired.queue);
+              const relayed = await relayOutbox(wired.ctx, wired.queue);
+              if (relayed > 0) {
+                metrics.count('cw_outbox_relayed_total', relayed, { trigger: 'nudge' });
+              }
             }
           } catch (err) {
             console.error('outbox relay nudge failed', err);
+            metrics.count('cw_relay_errors_total', 1, { trigger: 'nudge' });
           } finally {
             await wired.close();
           }
@@ -282,6 +264,7 @@ export default {
    */
   async queue(batch: MessageBatch, env: EdgeEnv, _exec: ExecutionContext): Promise<void> {
     if (batch.queue === 'cw-events-dlq') {
+      const metrics = makeMetrics(env.METRICS);
       for (const msg of batch.messages) {
         console.error(
           JSON.stringify({
@@ -290,6 +273,7 @@ export default {
             body: msg.body,
           }),
         );
+        metrics.count('cw_dead_letters_total');
         msg.ack();
       }
       return;
@@ -305,8 +289,17 @@ export default {
       // Events appended during consumption — reindex continuation slices,
       // moderation retractions — relay now instead of waiting for the cron.
       if (wired.queue) {
-        await relayOutbox(wired.ctx, wired.queue).catch((err) =>
-          console.error('post-batch outbox relay failed', err),
+        const metrics = makeMetrics(env.METRICS);
+        await relayOutbox(wired.ctx, wired.queue).then(
+          (relayed) => {
+            if (relayed > 0) {
+              metrics.count('cw_outbox_relayed_total', relayed, { trigger: 'post-batch' });
+            }
+          },
+          (err) => {
+            console.error('post-batch outbox relay failed', err);
+            metrics.count('cw_relay_errors_total', 1, { trigger: 'post-batch' });
+          },
         );
       }
     } finally {
@@ -320,24 +313,39 @@ export default {
    */
   async scheduled(_ctrl: ScheduledController, env: EdgeEnv, _exec: ExecutionContext) {
     const wired = wireEdge(env);
+    const metrics = makeMetrics(env.METRICS);
     try {
       // Actions first: their outbox events are then picked up by the relay
       // sweep below instead of waiting a full cron interval.
       const { executed, failed } = await runDueScheduledActions(wired.ctx);
+      if (executed > 0)
+        metrics.count('cw_scheduled_actions_total', executed, { outcome: 'executed' });
+      if (failed > 0) metrics.count('cw_scheduled_actions_total', failed, { outcome: 'failed' });
       if (executed > 0 || failed > 0) {
         console.log(JSON.stringify({ msg: 'scheduled actions run', executed, failed }));
       }
+      // A relay error must not abort the tick (agent schedules still run) —
+      // same containment as the Node worker's relay loop.
       if (wired.queue) {
-        for (let i = 0; i < 10; i++) {
-          const relayed = await relayOutbox(wired.ctx, wired.queue);
-          if (relayed === 0) break;
+        try {
+          let total = 0;
+          for (let i = 0; i < 10; i++) {
+            const relayed = await relayOutbox(wired.ctx, wired.queue);
+            total += relayed;
+            if (relayed === 0) break;
+          }
+          if (total > 0) metrics.count('cw_outbox_relayed_total', total, { trigger: 'cron' });
+        } catch (err) {
+          console.error('cron outbox relay failed', err);
+          metrics.count('cw_relay_errors_total', 1, { trigger: 'cron' });
         }
       }
       // Recurring agent jobs: due schedules run here on the cron tick, metered
-      // through a separate background counter window (the `agent:` DO prefix)
-      // so batch spend can't exhaust the interactive budget.
+      // through a separate background counter window (the `agent:` DO prefix,
+      // AI_AGENT_* ceilings when set) so batch spend can't exhaust the
+      // interactive budget.
       if (env.AGENTS_SCHEDULES === 'true') {
-        const bgGuard = env.AI_BUDGET ? createDoCostGuard(env.AI_BUDGET, 'agent:') : undefined;
+        const bgGuard = doAgentCostGuardFromEnv(env);
         const scheduleCtx = { ...wired.ctx, costGuard: bgGuard ?? wired.ctx.costGuard };
         const agents = makeAgents(env, scheduleCtx, wired.ai);
         if (agents) {

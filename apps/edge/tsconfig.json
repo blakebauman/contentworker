@@ -3,7 +3,7 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "dist",
-    "types": ["@cloudflare/workers-types", "node"]
+    "types": ["@cloudflare/workers-types", "node", "@cloudflare/vitest-pool-workers"]
   },
   "include": ["src/**/*", "test/**/*"]
 }

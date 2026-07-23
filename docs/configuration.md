@@ -164,7 +164,7 @@ ceiling to `0` to disable metering.
 | `AI_BUDGET_WINDOW_SECONDS` | `60` | Rolling window length |
 | `AI_AGENT_MAX_REQUESTS_PER_WINDOW` | — | Separate, typically stricter window for BACKGROUND agent spend (scheduled + on-publish runs). Unset → background shares the standard window |
 | `AI_AGENT_MAX_TOKENS_PER_WINDOW` | — | Token ceiling for the background window |
-| `AI_AGENT_BUDGET_WINDOW_SECONDS` | `AI_BUDGET_WINDOW_SECONDS` | Background window length. On the edge target the background window shares the DO's limit values but counts separately (`agent:` prefix) |
+| `AI_AGENT_BUDGET_WINDOW_SECONDS` | `AI_BUDGET_WINDOW_SECONDS` | Background window length. On the edge target the background window counts separately (`agent:` DO name prefix) and enforces these AI_AGENT_* ceilings when set, falling back to the interactive ones. Leave the AI_AGENT_* vars genuinely unset to fall back — an empty-string var counts as configured |
 
 > On Cloudflare (`apps/edge`) the budget is enforced by the `CostGuardDO`
 > Durable Object (the `AI_BUDGET` binding) — shared across isolates and colos.

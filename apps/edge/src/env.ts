@@ -36,6 +36,12 @@ export interface EdgeEnv {
   readonly AGENT_WF?: Workflow;
   /** Static admin SPA assets (configured via wrangler `assets`). */
   readonly ASSETS?: Fetcher;
+  /**
+   * Workers Analytics Engine dataset for operational counters (outbox relays,
+   * consumed events, dead letters — the edge analogue of the Node worker's
+   * Prometheus metrics). Absent → counters fall back to structured log lines.
+   */
+  readonly METRICS?: AnalyticsEngineDataset;
 
   // ---- Vars / secrets (same names as the Node path) -------------------------
   readonly ROLE?: string;
@@ -93,4 +99,13 @@ export interface EdgeEnv {
   readonly AI_MAX_REQUESTS_PER_WINDOW?: string;
   readonly AI_MAX_TOKENS_PER_WINDOW?: string;
   readonly AI_BUDGET_WINDOW_SECONDS?: string;
+  /**
+   * Separate ceilings for BACKGROUND agent spend (the `agent:` counter
+   * windows); unset → the background windows enforce the interactive
+   * ceilings. Same names/semantics as the Node worker (agentBudgetLimits).
+   * Leave genuinely unset — an empty-string var counts as configured.
+   */
+  readonly AI_AGENT_MAX_REQUESTS_PER_WINDOW?: string;
+  readonly AI_AGENT_MAX_TOKENS_PER_WINDOW?: string;
+  readonly AI_AGENT_BUDGET_WINDOW_SECONDS?: string;
 }
