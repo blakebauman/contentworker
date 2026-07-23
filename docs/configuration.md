@@ -89,10 +89,10 @@ In Postgres mode these seeds are not used; create real keys via `POST …/api-ke
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `SEED_DEV` | `false` | When `true`, the API runs the idempotent `@cw/seed` bootstrap: space, dev keys, and a demo dataset covering every platform surface — all field types across eight content types, a generated entry corpus (drafts/changed/published), assets, taxonomy, releases, workflows, comments, tasks, webhooks, functions, extensions, AI actions, scheduled actions, agent runs/reviews/schedules, roles (plus a role-bound `dev-editor-key`), a `staging` environment with a `live` alias, and an audit trail. **Never enable in production.** docker-compose sets this to `true`; `pnpm --filter @cw/api dev` sets it too (opt out with `SEED_DEV=false pnpm --filter @cw/api dev`). |
-| `SEED_SCALE` | `1` | Corpus multiplier for the generated entry types (articles/products/events/recipes). `1` ≈ 400 entries (demo); `100` ≈ 18k entries for content-at-scale benchmarks. Deterministic at every scale. |
+| `SEED_SCALE` | `1` | Corpus multiplier for the generated entry types (articles/products/events/recipes). `1` ≈ 550 entries (demo); `100` ≈ 44k entries for content-at-scale benchmarks. Deterministic at every scale. |
 
 The in-memory store always pre-seeds the space and dev keys regardless of `SEED_DEV`. The demo
-dataset is marked complete with a `demo-seed-v2` tag; subsequent boots short-circuit on it, so
+dataset is marked complete with a `demo-seed-v3` tag; subsequent boots short-circuit on it, so
 re-seeding after a dataset change means deleting that tag (or resetting the store). With Postgres
 and `SEED_DEV=false`, create spaces and keys via the Management API.
 

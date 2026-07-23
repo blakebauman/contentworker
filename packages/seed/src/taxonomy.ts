@@ -22,28 +22,39 @@ const TAG_NAMES = [
   'case-study',
   'community',
   'benchmark',
+  'evergreen',
+  'needs-review',
+  'sponsored',
+  'archived',
 ] as const;
 
 const SCHEMES = [
   {
     name: 'Topics',
     concepts: [
-      { label: 'Content management', children: ['CMS basics', 'Modeling patterns'] },
-      { label: 'AI & automation', children: ['Agent workflows', 'Generation'] },
-      { label: 'Delivery', children: ['Edge caching'] },
+      {
+        label: 'Content management',
+        children: ['CMS basics', 'Modeling patterns', 'Migrations', 'Governance'],
+      },
+      {
+        label: 'AI & automation',
+        children: ['Agent workflows', 'Generation', 'Human-in-the-loop', 'Cost control'],
+      },
+      { label: 'Delivery', children: ['Edge caching', 'GraphQL', 'Image pipelines'] },
+      { label: 'Collaboration', children: ['Review workflows', 'Tasks & comments'] },
     ],
   },
   {
     name: 'Regions',
     concepts: [
-      { label: 'Americas', children: ['North America'] },
-      { label: 'EMEA', children: [] },
-      { label: 'APAC', children: [] },
+      { label: 'Americas', children: ['North America', 'LATAM'] },
+      { label: 'EMEA', children: ['DACH', 'UK & Ireland'] },
+      { label: 'APAC', children: ['Japan', 'ANZ'] },
     ],
   },
 ] as const;
 
-/** Two concept schemes (with hierarchy) and eight tags; idempotent by name. */
+/** Two concept schemes (with hierarchy) and twelve tags; idempotent by name. */
 export async function seedTaxonomy(run: SeedRun): Promise<TaxonomySeed> {
   const { ctx, scope } = run;
 

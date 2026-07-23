@@ -42,6 +42,21 @@ export async function seedGovernance(run: SeedRun, config: SeedConfig): Promise<
       scopes: ['content:publish', 'delivery:read', 'preview:read'],
     });
   }
+  if (!roles.some((r) => r.name === 'Translator')) {
+    await createRole(ctx, spaceId, {
+      name: 'Translator',
+      description: 'Edits localized fields only; structural fields are off-limits.',
+      scopes: ['content:write', 'preview:read'],
+      contentGrants: [
+        {
+          contentTypeApiId: '*',
+          actions: ['read', 'write'],
+          readOnlyFields: ['slug', 'author', 'category'],
+          deniedFields: ['views'],
+        },
+      ],
+    });
+  }
 
   // A CMA key bound to the Editor role: exercises granular-RBAC resolution.
   const hasher = createHasher(config.tokenPepper);
@@ -88,19 +103,25 @@ const AUDIT_ACTIONS = [
   { action: 'POST /releases', targetType: 'Release', status: 201 },
   { action: 'POST /assets/:id/published', targetType: 'Asset', status: 200 },
   { action: 'DELETE /entries/:id/published', targetType: 'Entry', status: 403 },
+  { action: 'POST /entries/:id/workflow/transition', targetType: 'Entry', status: 200 },
+  { action: 'PUT /entries/:id/metadata', targetType: 'Entry', status: 200 },
+  { action: 'POST /api-keys', targetType: 'ApiKey', status: 201 },
+  { action: 'DELETE /webhooks/:id', targetType: 'Webhook', status: 404 },
+  { action: 'POST /releases/:id/published', targetType: 'Release', status: 200 },
 ] as const;
 
 /**
- * ~25 backdated entries over 14 days, mirroring realistic mutating traffic.
- * Appends through the store port because `recordAudit` stamps the current
- * clock time — backdating is exactly what makes the demo trail useful.
+ * ~60 backdated entries over 30 days, mirroring realistic mutating traffic
+ * (mostly 2xx with occasional 403/404s). Appends through the store port
+ * because `recordAudit` stamps the current clock time — backdating is exactly
+ * what makes the demo trail useful.
  */
 async function seedAuditTrail(run: SeedRun): Promise<void> {
   const { ctx, scope } = run;
   const now = ctx.clock.now();
   let n = 0;
-  for (let day = 13; day >= 0; day--) {
-    const count = day % 3 === 0 ? 3 : 1;
+  for (let day = 29; day >= 0; day--) {
+    const count = day % 3 === 0 ? 4 : 1;
     for (let k = 0; k < count; k++) {
       const a = pick(AUDIT_ACTIONS, n);
       await ctx.store.audit.append({

@@ -22,15 +22,26 @@ export async function seedAgents(run: SeedRun, articleIds: readonly string[]): P
     await seedAgentRuns(run, articleIds);
   }
 
-  if (articleIds.length >= 4 && (await listAgentReviews(ctx, scope, {})).length === 0) {
-    for (let i = 0; i < 4; i++) {
+  if (articleIds.length >= 8 && (await listAgentReviews(ctx, scope, {})).length === 0) {
+    const proposals = [
+      { field: 'summary', note: 'Tightened the summary to one concrete claim' },
+      { field: 'summary', note: 'Rewrote the summary for a practitioner audience' },
+      { field: 'body', note: 'Flagged an unsourced statistic and proposed neutral wording' },
+      { field: 'summary', note: 'Aligned the summary with the updated title' },
+      { field: 'body', note: 'Proposed splitting the second paragraph' },
+      { field: 'summary', note: 'Added the audience and outcome to the summary' },
+      { field: 'body', note: 'Moderation: softened absolute claims in paragraph three' },
+      { field: 'summary', note: 'Localized-summary parity check produced a revision' },
+    ] as const;
+    for (let i = 0; i < proposals.length; i++) {
+      const p = proposals[i]!;
       await createAgentReview(ctx, scope, {
-        workflow: pick(['enrich', 'moderate'] as const, i),
+        workflow: pick(['enrich', 'moderate', 'curate'] as const, i),
         entryId: articleIds[i]!,
         proposed: {
-          summary: localized(locale, `Agent-proposed summary revision #${i + 1}.`),
+          [p.field]: localized(locale, `Agent proposal #${i + 1}: ${p.note.toLowerCase()}.`),
         },
-        notes: [`Proposed a richer summary (seeded review ${i + 1})`],
+        notes: [p.note, `Seeded review ${i + 1} — approve or reject in the admin.`],
       });
     }
   }
@@ -51,11 +62,12 @@ export async function seedAgents(run: SeedRun, articleIds: readonly string[]): P
 }
 
 /**
- * Records a deterministic spread of agent runs across the last 30 days so the
+ * Records a deterministic spread of agent runs across the last 60 days so the
  * dashboard's usage-trend, throughput, and per-workflow cards render
- * real-looking data. Timestamps are backdated off the injected clock; tokens
- * and statuses follow a fixed pattern (no randomness) for reproducible demos.
- * Runs reference real seeded entries so drill-downs resolve.
+ * real-looking data with month-over-month shape. Timestamps are backdated off
+ * the injected clock; tokens and statuses follow a fixed pattern (no
+ * randomness) for reproducible demos. Runs reference real seeded entries so
+ * drill-downs resolve.
  */
 async function seedAgentRuns(run: SeedRun, articleIds: readonly string[]): Promise<void> {
   const { ctx, scope } = run;
@@ -72,9 +84,9 @@ async function seedAgentRuns(run: SeedRun, articleIds: readonly string[]): Promi
   ] as const;
 
   let n = 0;
-  for (let day = 29; day >= 0; day--) {
-    // 0–4 runs per day, denser toward the present so week-over-week trends up.
-    const count = Math.max(0, Math.round(4 - day / 8 + (day % 2 === 0 ? 1 : 0)) % 5);
+  for (let day = 59; day >= 0; day--) {
+    // 0–5 runs per day, denser toward the present so week-over-week trends up.
+    const count = Math.max(0, Math.round(5 - day / 12 + (day % 2 === 0 ? 1 : 0)) % 6);
     for (let k = 0; k < count; k++) {
       const workflow = workflows[n % workflows.length]!;
       await ctx.store.agentRuns.record(scope, {

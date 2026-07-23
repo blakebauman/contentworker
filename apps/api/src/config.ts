@@ -45,7 +45,7 @@ export interface ApiConfig {
     environmentId: string;
     defaultLocale: string;
     locales: string[];
-    /** Corpus multiplier (SEED_SCALE): 1 = demo (~400 entries), 100 = bench. */
+    /** Corpus multiplier (SEED_SCALE): 1 = demo (~550 entries), 100 = bench. */
     scale: number;
   };
   /** HMAC secret for admin SSO session cookies. */
