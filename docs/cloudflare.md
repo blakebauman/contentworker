@@ -196,6 +196,21 @@ The full side-by-side matrix (including the Node column) lives in
   be served stale from a remote PoP for up to ~60s (tag versions are re-read on
   every hit, so within-PoP invalidation is immediate). CDN-class semantics,
   Delivery API only. Strict-freshness deployments unset `KV_CACHE`.
+- **List results are cached with coarser tags than single entries.** A cached
+  list carries the scope epoch plus a `ct:` tag per content type reachable in
+  its render, not a tag per member entry — a newly published entry changes
+  which rows a list returns without touching any entry already in it, so
+  per-entry tags could never evict it. The trade is over-invalidation: any
+  publish of a listed type drops every cached list of that type. Only queries
+  that name a `content_type` and use no delta cursor are cached (an untyped
+  query has no tag that reliably bumps; a scope-wide "any publish" tag would
+  exceed KV's ~1 write/s/key limit). `DELIVERY_LIST_TTL_SECONDS` (default
+  3600) bounds anything the tags don't cover.
+- **Embedded ASSET changes do not invalidate entry or list renders.** Assets
+  emit no domain events, so republishing an asset (new title/file) leaves
+  renders that embed it stale until their TTL. Pre-dates list caching and
+  applies to the single-entry cache too; the fix is to emit asset publish
+  events and invalidate the entries that reference them.
 - **Scheduled publishing granularity:** the cron sweeper fires every minute, so
   scheduled publish/unpublish executes within 60s of its wall-clock time
   (vs 5s on the Node worker).

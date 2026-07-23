@@ -53,6 +53,9 @@ config:
   # Delivery cache entry TTL, seconds — a GC bound; tag invalidation stays the
   # correctness mechanism.
   deliveryCacheTtlSeconds: "86400"
+  # TTL for cached delivery LIST results, seconds. Shorter than the single-entry
+  # TTL because list invalidation tags are per content type, not per entry.
+  deliveryListTtlSeconds: "3600"
   # Retention for relayed outbox rows + webhook delivery records, hours
   # (the worker sweeps hourly; RETENTION_INTERVAL_MS in extraEnv to change).
   eventRetentionHours: "168"

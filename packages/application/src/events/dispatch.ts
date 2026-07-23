@@ -33,6 +33,15 @@ export interface DispatchDeps {
    * embeddings configured.
    */
   readonly searchIndex?: SearchIndex;
+  /**
+   * Tags already invalidated during this consumer invocation. A queue batch of
+   * same-type publishes (a release, a burst of scheduled publishes) would
+   * otherwise write the SAME `ct:` tag once per event — and a cache backend
+   * like Workers KV rate-limits writes to a single key (~1/s), so the
+   * redundant writes can 429 and re-drive the whole event. Hosts pass one Set
+   * per batch; dispatch skips any tag already written under it.
+   */
+  readonly invalidatedTags?: Set<string>;
 }
 
 /**
@@ -97,7 +106,21 @@ export async function dispatchEvent(
       maxDepth: MAX_INVALIDATION_DEPTH,
       maxEntries: MAX_INVALIDATION_ENTRIES,
     });
-    await deps.cache.invalidateTags([event.entryId, ...embedders].map((id) => cacheTag(scope, id)));
+    const tags = [
+      ...[event.entryId, ...embedders].map((id) => cacheTag(scope, id)),
+      // Cached LIST results are tagged by content type, not by member id — a
+      // new or withdrawn entry changes which rows a list returns even though
+      // no cached member entry changed, so the type's tag must bump too.
+      contentTypeTag(scope, event.contentTypeApiId),
+    ];
+    // Coalesce across the batch: re-writing a tag another event in this same
+    // invocation already bumped adds no invalidation, only write pressure on
+    // a single hot key.
+    const fresh = deps.invalidatedTags ? tags.filter((t) => !deps.invalidatedTags?.has(t)) : tags;
+    if (fresh.length > 0) {
+      await deps.cache.invalidateTags(fresh);
+      for (const t of fresh) deps.invalidatedTags?.add(t);
+    }
   }
 
   // Terminal bulk-job fact: the unconditional scope-epoch bump — the
@@ -320,4 +343,17 @@ export function cacheTag(
  */
 export function epochTag(scope: { spaceId: string; environmentId: string }): string {
   return `epoch:${scope.spaceId}:${scope.environmentId}`;
+}
+
+/**
+ * Cache tag for every cached LIST result over a content type. Lists can't be
+ * tagged by member id alone: publishing a NEW entry changes which rows a list
+ * returns without touching any entry already in it, so a per-entry tag set
+ * would never evict it. Bumped on every publish/unpublish of the type.
+ */
+export function contentTypeTag(
+  scope: { spaceId: string; environmentId: string },
+  contentTypeApiId: string,
+): string {
+  return `ct:${scope.spaceId}:${scope.environmentId}:${contentTypeApiId}`;
 }

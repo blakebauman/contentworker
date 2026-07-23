@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   NotFoundError,
   type Principal,
@@ -9,8 +10,12 @@ import {
 } from '@cw/domain';
 import type { LocaleConfig } from '@cw/domain';
 import type { EntryQuery, PublishedAsset, PublishedEntry, SpaceConfig } from '@cw/ports';
-import { type AppContext, DEFAULT_DELIVERY_CACHE_TTL_SECONDS } from './context.js';
-import { cacheTag, epochTag } from './events/dispatch.js';
+import {
+  type AppContext,
+  DEFAULT_DELIVERY_CACHE_TTL_SECONDS,
+  DEFAULT_DELIVERY_LIST_TTL_SECONDS,
+} from './context.js';
+import { cacheTag, contentTypeTag, epochTag } from './events/dispatch.js';
 
 export interface RenderOptions {
   /** When set, fields are flattened to this locale with fallback. */
@@ -245,6 +250,62 @@ export function localeFallbackChain(config: SpaceConfig, locale: string): string
   return chain[0] === locale ? chain.slice(1) : chain;
 }
 
+/**
+ * Cache key for a list result. The query is canonicalized (keys sorted at
+ * every level) before hashing so semantically identical queries from REST,
+ * GraphQL and MCP share one entry regardless of property order.
+ *
+ * `renderLocale` is the RAW `opts.locale`, not the resolved one, and it is
+ * load-bearing: `render` branches on its presence to emit either
+ * locale-flattened fields or per-locale maps. Keying only on the resolved
+ * locale would let a flattened render be served to a caller that asked for all
+ * locales (and vice versa) — different response SHAPES sharing one entry.
+ */
+function listCacheKey(
+  scope: Scope,
+  query: EntryQuery,
+  locale: string,
+  depth: number,
+  renderLocale: string | undefined,
+): string {
+  const canonical = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(canonical);
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(
+        Object.entries(v as Record<string, unknown>)
+          .filter(([, val]) => val !== undefined)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, val]) => [k, canonical(val)]),
+      );
+    }
+    return v;
+  };
+  const digest = createHash('sha256')
+    .update(JSON.stringify(canonical({ ...query, locale })))
+    .digest('hex')
+    .slice(0, 32);
+  return `cw:dlist:${scope.spaceId}:${scope.environmentId}:${digest}:l=${renderLocale ?? ''}:i=${depth}`;
+}
+
+/**
+ * Whether a list query's result is worth caching.
+ *
+ * Delta cursors are excluded: each distinct cursor mints a new key that is
+ * unlikely to ever be read again, so caching them only churns the backend.
+ *
+ * Untyped queries are excluded too, and that one is about CORRECTNESS: list
+ * results are invalidated by content-type tags, so a query spanning all types
+ * has nothing that reliably bumps when some other type publishes. The
+ * alternative — a scope-wide "any publish" tag — would be written on every
+ * single publish and become a hot key (KV allows ~1 write/s/key), so typed
+ * queries (the overwhelmingly common shape) get the cache and untyped ones
+ * stay correct-but-uncached.
+ */
+function isCacheableListQuery(query: EntryQuery): boolean {
+  if (!query.contentTypeApiId) return false;
+  return query.since === undefined && query.after === undefined && query.afterEntryId === undefined;
+}
+
 export async function listPublishedEntries(
   ctx: AppContext,
   scope: Scope,
@@ -255,18 +316,58 @@ export async function listPublishedEntries(
   // Filtering/ordering/search compare against a single resolved locale; default
   // to the requested locale, then the space default.
   const locale = query.locale ?? opts.locale ?? config.defaultLocale;
+  const depth = clampDepth(opts.include);
+  const cacheable = Boolean(ctx.cache) && isCacheableListQuery(query);
+  const key = cacheable ? listCacheKey(scope, query, locale, depth, opts.locale) : '';
+
+  if (cacheable && ctx.cache) {
+    const hit = await ctx.cache.get(key);
+    // Cached PRE-mask, like the single-entry path: field-level RBAC is applied
+    // by the caller, so one cached list serves every principal.
+    if (hit) return JSON.parse(hit) as DeliveredEntry[];
+  }
+
   const rows = await ctx.store.entries.listPublished(scope, {
     ...query,
     locale,
     fallbackLocales: localeFallbackChain(config, locale),
   });
-  const depth = clampDepth(opts.include);
   // One shared prefetch across all rows: N rows × M links costs one batched
   // read per depth level, not N×M point reads.
   const fetched = await prefetchLinked(ctx, scope, rows, depth);
-  return rows.map((s) =>
+  const result = rows.map((s) =>
     render(scope, s, config, opts, depth, new Set([s.entryId]), new Set(), fetched),
   );
+
+  if (cacheable && ctx.cache) {
+    // Tagged by CONTENT TYPE, not by member id: a newly published entry
+    // changes which rows the list returns without touching any entry already
+    // in it, so per-entry tags would never evict it. Every type reachable in
+    // the render (queried + embedded) is tagged, so a change to an embedded
+    // entry evicts the lists that display it. This over-invalidates (any
+    // publish of the type drops the list) but keeps the envelope small —
+    // a tag per rendered row would cost a version read per row on every hit.
+    const types = new Set<string>([query.contentTypeApiId as string]);
+    for (const e of fetched.entries.values()) types.add(e.contentTypeApiId);
+    // Links whose target was NOT published at render time rendered as stubs
+    // and contributed no ct tag — their type is unknowable from here. Tag them
+    // by ENTRY id instead: publishing that entry bumps its per-entry tag and
+    // evicts this list, so a stub becomes a real embed on the next read rather
+    // than lingering for the whole TTL.
+    const linked = new Set<string>();
+    const assetIds = new Set<string>();
+    for (const e of fetched.entries.values()) collectLinkIds(e, linked, assetIds);
+    const unresolved = [...linked].filter((id) => !fetched.entries.has(id));
+    await ctx.cache.set(key, JSON.stringify(result), {
+      tags: [
+        epochTag(scope),
+        ...[...types].map((t) => contentTypeTag(scope, t)),
+        ...unresolved.map((id) => cacheTag(scope, id)),
+      ],
+      ttlSeconds: ctx.deliveryListTtlSeconds ?? DEFAULT_DELIVERY_LIST_TTL_SECONDS,
+    });
+  }
+  return result;
 }
 
 /** Entries that link to `id` — the reverse-reference graph (for invalidation). */
