@@ -176,6 +176,13 @@
       "when": 1784786726126,
       "tag": "0024_giant_texas_twister",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784813747670,
+      "tag": "0025_spicy_dakota_north",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import {
   createHasher,
   drainOutbox,
   pruneEventHistory,
+  resumeStalledBulkJobs,
   runDueAgentSchedules,
   runDueScheduledActions,
   runPublishAgents,
@@ -235,7 +236,9 @@ export default {
               // Loop-until-drained: a bulk mutation can append far more rows
               // than one relay batch; its own nudge should clear them rather
               // than leaving the overflow to the cron sweeper.
-              const relayed = await drainOutbox(wired.ctx, wired.queue);
+              const relayed = await drainOutbox(wired.ctx, wired.queue, {
+                routeTopic: wired.routeTopic,
+              });
               if (relayed > 0) {
                 metrics.count('cw_outbox_relayed_total', relayed, { trigger: 'nudge' });
               }
@@ -294,7 +297,7 @@ export default {
       // moderation retractions — relay now instead of waiting for the cron.
       if (wired.queue) {
         const metrics = makeMetrics(env.METRICS);
-        await drainOutbox(wired.ctx, wired.queue).then(
+        await drainOutbox(wired.ctx, wired.queue, { routeTopic: wired.routeTopic }).then(
           (relayed) => {
             if (relayed > 0) {
               metrics.count('cw_outbox_relayed_total', relayed, { trigger: 'post-batch' });
@@ -352,11 +355,29 @@ export default {
       // same containment as the Node worker's relay loop.
       if (wired.queue) {
         try {
-          const total = await drainOutbox(wired.ctx, wired.queue, { maxIterations: 20 });
+          const total = await drainOutbox(wired.ctx, wired.queue, {
+            maxIterations: 20,
+            routeTopic: wired.routeTopic,
+          });
           if (total > 0) metrics.count('cw_outbox_relayed_total', total, { trigger: 'cron' });
         } catch (err) {
           console.error('cron outbox relay failed', err);
           metrics.count('cw_relay_errors_total', 1, { trigger: 'cron' });
+        }
+      }
+      // Bulk-job crash recovery: re-nudge chunks whose claim went stale or
+      // whose chunk_due event was lost (normally returns 0 — one cheap
+      // indexed query). The re-appended events relay on the next tick's
+      // drain (or the following nudge).
+      if (wired.persistent) {
+        try {
+          const resumed = await resumeStalledBulkJobs(wired.ctx);
+          if (resumed > 0) {
+            console.log(JSON.stringify({ msg: 'stalled bulk chunks re-nudged', resumed }));
+            metrics.count('cw_bulk_chunks_resumed_total', resumed);
+          }
+        } catch (err) {
+          console.error('bulk stall sweep failed', err);
         }
       }
       // Recurring agent jobs: due schedules run here on the cron tick, metered

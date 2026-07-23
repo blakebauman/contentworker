@@ -62,6 +62,12 @@ export interface Cache {
   ): Promise<void>;
   /** Evicts every cached entry associated with `tag`. */
   invalidateTag(tag: string): Promise<void>;
+  /**
+   * Batch {@link invalidateTag}: adapters dedupe and use their cheapest bulk
+   * form (Redis pipeline, parallel KV writes). Idempotent — safe to re-run on
+   * a redelivered event.
+   */
+  invalidateTags(tags: readonly string[]): Promise<void>;
 }
 
 export interface WebhookSendResult {

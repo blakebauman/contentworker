@@ -1,5 +1,6 @@
 import {
   AGENT_WORKFLOWS,
+  BULK_JOB_MAX_ITEMS,
   addComment,
   addEntryToRelease,
   applyEntryTags,
@@ -7,6 +8,7 @@ import {
   autoTagAsset,
   autofillField,
   bulkEntryAction,
+  cancelBulkJob,
   canvasToEntry,
   compareEnvironments,
   createAIAction,
@@ -33,6 +35,8 @@ import {
   generateAltText,
   getAgentReview,
   getAssetUsage,
+  getBulkJob,
+  getBulkJobReport,
   getContentType,
   getPreviewEntry,
   getRelease,
@@ -44,6 +48,7 @@ import {
   listAppExtensions,
   listAssets,
   listAuditLog,
+  listBulkJobs,
   listComments,
   listConcepts,
   listContentTypes,
@@ -70,6 +75,7 @@ import {
   setAssetMetadata,
   setEntryMetadata,
   setEnvironmentAlias,
+  startBulkJob,
   suggestEntryTags,
   summarizeEntry,
   transformAssetUrl,
@@ -84,6 +90,7 @@ import {
   type ContentAction,
   type EntryFields,
   FIELD_TYPES,
+  ForbiddenError,
   type PermissionScope,
   type Principal,
   SCOPES,
@@ -493,6 +500,73 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
       guard(SCOPES.contentPublish, scopeOf(args));
       for (const id of args.ids) await guardEntry(scopeOf(args), id, 'publish');
       return ok(await bulkEntryAction(ctx, scopeOf(args), args.action, args.ids));
+    },
+  );
+
+  // Start/cancel/report demand an ungranted principal: per-item RBAC guards
+  // are impractical at bulk cardinality, and reports expose entry ids across
+  // all content types. Mirrors the API routes' policy exactly.
+  const guardBulkJobs = () => {
+    if (principal.contentGrants) {
+      throw new ForbiddenError('bulk jobs (unrestricted content:publish role required)');
+    }
+  };
+
+  server.tool(
+    'bulk_job_start',
+    'Start a durable bulk publish/unpublish job for a large entry-id set. ' +
+      'Processed in chunked transactions on the queue; poll bulk_job_status ' +
+      'for progress and bulk_job_report for the per-item compliance report.',
+    {
+      action: z.enum(['publish', 'unpublish']),
+      entryIds: z.array(z.string()).min(1).max(BULK_JOB_MAX_ITEMS),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      guardBulkJobs();
+      return ok(
+        await startBulkJob(ctx, scopeOf(args), {
+          action: args.action,
+          entryIds: args.entryIds,
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'bulk_job_status',
+    'Get a bulk job (status, chunk progress, succeeded/failed counts), or list recent jobs when no id is given.',
+    { id: z.string().optional(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      return ok(
+        args.id
+          ? await getBulkJob(ctx, scopeOf(args), args.id)
+          : await listBulkJobs(ctx, scopeOf(args)),
+      );
+    },
+  );
+
+  server.tool(
+    'bulk_job_report',
+    'Per-chunk completion report for a bulk job, including every per-item failure (compliance evidence).',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      guardBulkJobs();
+      return ok(await getBulkJobReport(ctx, scopeOf(args), args.id));
+    },
+  );
+
+  server.tool(
+    'bulk_job_cancel',
+    'Cancel a running bulk job: pending chunks are skipped; in-flight chunks finish. Idempotent.',
+    { id: z.string(), ...scopeArgs },
+    async (args) => {
+      guard(SCOPES.contentPublish, scopeOf(args));
+      guardBulkJobs();
+      return ok(await cancelBulkJob(ctx, scopeOf(args), args.id));
     },
   );
 

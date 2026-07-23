@@ -9,7 +9,7 @@ import {
 import type { LocaleConfig } from '@cw/domain';
 import type { EntryQuery, PublishedAsset, PublishedEntry, SpaceConfig } from '@cw/ports';
 import { type AppContext, DEFAULT_DELIVERY_CACHE_TTL_SECONDS } from './context.js';
-import { cacheTag } from './events/dispatch.js';
+import { cacheTag, epochTag } from './events/dispatch.js';
 
 export interface RenderOptions {
   /** When set, fields are flattened to this locale with fallback. */
@@ -210,10 +210,13 @@ export async function getPublishedEntry(
 
   if (ctx.cache) {
     // Tag the cached render with every entry it contains (root + embedded), so a
-    // change to any of them evicts this render — even at include depth > 1.
-    // The TTL is garbage collection, not correctness: without it every render
-    // ever produced would sit in the backend forever.
-    const tags = [...collected].map((eid) => cacheTag(scope, eid));
+    // change to any of them evicts this render — even at include depth > 1 —
+    // plus the scope epoch tag, so a bulk operation evicts the whole scope
+    // with ONE version bump. The TTL is garbage collection, not correctness —
+    // except for one narrow race: a render computed from pre-bulk data whose
+    // set() lands after the epoch bump snapshots the NEW epoch version and
+    // survives tag checks, so the TTL is the staleness ceiling for that window.
+    const tags = [epochTag(scope), ...[...collected].map((eid) => cacheTag(scope, eid))];
     await ctx.cache.set(key, JSON.stringify(result), {
       tags,
       ttlSeconds: ctx.deliveryCacheTtlSeconds ?? DEFAULT_DELIVERY_CACHE_TTL_SECONDS,

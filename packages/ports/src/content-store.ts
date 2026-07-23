@@ -62,6 +62,7 @@ export interface ContentStore {
   readonly functions: FunctionRepo;
   readonly appExtensions: AppExtensionRepo;
   readonly previewTokens: PreviewTokenRepo;
+  readonly bulkJobs: BulkJobRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -313,6 +314,7 @@ export interface ContentStoreTx {
   readonly references: ReferenceRepo;
   readonly releases: ReleaseRepo;
   readonly taxonomy: TaxonomyRepo;
+  readonly bulkJobs: BulkJobRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -588,6 +590,17 @@ export interface ReferenceRepo {
   removeForEntry(scope: Scope, fromEntryId: string): Promise<void>;
   /** Edges pointing AT `toId` — i.e. entries that embed it (for invalidation). */
   findReverse(scope: Scope, toId: string): Promise<ReferenceEdge[]>;
+  /**
+   * Transitive reverse closure: ids of every entry that directly or
+   * indirectly embeds any of `toIds`, bounded by depth and count, excluding
+   * the seeds themselves. One backend query (recursive CTE) instead of a
+   * breadth-first walk of round-trips.
+   */
+  findReverseClosure(
+    scope: Scope,
+    toIds: readonly string[],
+    opts: { maxDepth: number; maxEntries: number },
+  ): Promise<string[]>;
   /** Outgoing edges from `fromEntryId`. */
   findForward(scope: Scope, fromEntryId: string): Promise<ReferenceEdge[]>;
 }
@@ -620,6 +633,105 @@ export interface WebhookRepo {
    * number deleted.
    */
   deleteDeliveriesBefore(before: Date, limit: number): Promise<number>;
+}
+
+// ---- Bulk jobs ------------------------------------------------------------
+
+export type BulkJobAction = 'publish' | 'unpublish';
+export type BulkJobStatus = 'running' | 'completed' | 'cancelled';
+export type BulkChunkStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+/** A durable bulk operation: N entry ids processed as CAS-claimed chunks. */
+export interface BulkJob {
+  readonly id: string;
+  readonly action: BulkJobAction;
+  readonly status: BulkJobStatus;
+  readonly totalItems: number;
+  readonly totalChunks: number;
+  readonly completedChunks: number;
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly createdAt: string;
+  readonly completedAt?: string;
+}
+
+/** One chunk of a bulk job — the unit of claiming, retry, and reporting. */
+export interface BulkJobChunk {
+  readonly jobId: string;
+  readonly chunkId: string;
+  readonly entryIds: readonly string[];
+  readonly status: BulkChunkStatus;
+  readonly attempts: number;
+  /** Per-item failures recorded when the chunk completed. */
+  readonly failures: readonly { id: string; error: string }[];
+}
+
+/** A stalled/pending chunk paired with its scope (the sweep polls all scopes). */
+export interface ScopedBulkChunkRef {
+  readonly scope: Scope;
+  readonly jobId: string;
+  readonly chunkId: string;
+}
+
+export interface BulkJobRepo {
+  createJob(scope: Scope, job: BulkJob): Promise<void>;
+  getJob(scope: Scope, id: string): Promise<BulkJob | null>;
+  /** Jobs newest-first. */
+  listJobs(scope: Scope, opts?: { limit?: number }): Promise<BulkJob[]>;
+  /** Batch-inserts pending chunks (multi-row). */
+  createChunks(scope: Scope, chunks: readonly BulkJobChunk[]): Promise<void>;
+  /** Chunks of a job, in chunkId order (for the compliance report). */
+  listChunks(scope: Scope, jobId: string): Promise<BulkJobChunk[]>;
+  /**
+   * CAS-claims a chunk for processing: `pending`, or `running` with a claim
+   * older than `staleBefore` (crashed worker), atomically becomes `running`
+   * with `claimedAt = now` and `attempts + 1`. Returns the claimed chunk, or
+   * null when it was already claimed/completed — the caller must treat null
+   * as "someone else owns it" and do nothing.
+   */
+  claimChunk(
+    scope: Scope,
+    jobId: string,
+    chunkId: string,
+    opts: { now: Date; staleBefore: Date },
+  ): Promise<BulkJobChunk | null>;
+  /**
+   * Marks a claimed chunk terminal (`completed`/`failed`), records its
+   * per-item failures, and atomically folds its counts into the job
+   * (`completedChunks`, `succeeded`, `failed`). Returns the updated job so
+   * the caller can detect the final chunk and finalize.
+   */
+  completeChunk(
+    scope: Scope,
+    jobId: string,
+    chunkId: string,
+    outcome: {
+      status: Extract<BulkChunkStatus, 'completed' | 'failed'>;
+      succeeded: number;
+      failed: number;
+      failures: readonly { id: string; error: string }[];
+    },
+  ): Promise<BulkJob>;
+  /** Transitions a running job terminal; no-ops (returns null) otherwise. */
+  finalizeJob(scope: Scope, id: string, status: BulkJobStatus, at: Date): Promise<BulkJob | null>;
+  /**
+   * Reverts a `running` claim to `pending` (a chunk transaction failed and
+   * the claimer wants queue retries to do real work instead of losing the
+   * CAS until the stale window passes). No-ops unless currently `running`.
+   */
+  releaseChunk(scope: Scope, jobId: string, chunkId: string): Promise<void>;
+  /**
+   * Chunks needing a nudge across ALL scopes: `pending` or stale-`running`
+   * ones belonging to `running` jobs, created/claimed before `staleBefore`.
+   * The crash-recovery sweep re-enqueues their chunk_due events.
+   */
+  findStalledChunks(staleBefore: Date, limit: number): Promise<ScopedBulkChunkRef[]>;
+  /**
+   * Jobs still `running` whose chunks are ALL terminal (a crash between the
+   * last completeChunk and finalize) across all scopes — the sweep finalizes
+   * them so `bulk.job_completed` is never permanently lost.
+   */
+  findUnfinalizedJobs(limit: number): Promise<{ scope: Scope; jobId: string }[]>;
 }
 
 /** A row in the transactional outbox awaiting relay to the event bus/queue. */

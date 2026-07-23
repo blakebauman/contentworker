@@ -79,5 +79,15 @@ export function createKvCache(kv: KvBinding): Cache {
     async invalidateTag(tag) {
       await kv.put(tagKey(tag), uuidv7(), { expirationTtl: TAG_VERSION_TTL_SECONDS });
     },
+
+    async invalidateTags(tags) {
+      // Dedupe is the win here (KV has no batched write): a bulk batch's
+      // overlapping closures collapse to one version bump per distinct tag.
+      await Promise.all(
+        [...new Set(tags)].map((tag) =>
+          kv.put(tagKey(tag), uuidv7(), { expirationTtl: TAG_VERSION_TTL_SECONDS }),
+        ),
+      );
+    },
   };
 }

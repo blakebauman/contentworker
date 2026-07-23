@@ -36,6 +36,9 @@ import type {
   AssetRepo,
   AuditRepo,
   AuthRepo,
+  BulkJob,
+  BulkJobChunk,
+  BulkJobRepo,
   CommentRepo,
   ContentStore,
   ContentStoreTx,
@@ -639,6 +642,278 @@ function makeReferenceRepo(db: Db): ReferenceRepo {
         .from(schema.references)
         .where(and(scopeFilter(schema.references, scope), eq(schema.references.toId, toId)));
       return rows.map(toEdge);
+    },
+    async findReverseClosure(scope, toIds, opts) {
+      if (toIds.length === 0) return [];
+      // One recursive CTE over the (space, env, to_id) index replaces a
+      // breadth-first walk of per-node round-trips. Working rows are
+      // (entry_id, depth) tuples, so a cycle produces rows at increasing
+      // depths — the `depth < maxDepth` bound is what terminates it (UNION
+      // dedupe only collapses same-depth revisits); the outer LIMIT caps the
+      // result set. Seeds are excluded from the output.
+      const seeds = sql.join(
+        [...new Set(toIds)].map((id) => sql`(${id}::text)`),
+        sql`, `,
+      );
+      const result = await db.execute<{ entry_id: string }>(sql`
+        WITH RECURSIVE closure(entry_id, depth) AS (
+          SELECT r.from_entry_id, 1
+          FROM ${schema.references} r
+          JOIN (VALUES ${seeds}) AS seed(id) ON r.to_id = seed.id
+          WHERE r.space_id = ${scope.spaceId} AND r.environment_id = ${scope.environmentId}
+          UNION
+          SELECT r.from_entry_id, c.depth + 1
+          FROM ${schema.references} r
+          JOIN closure c ON r.to_id = c.entry_id
+          WHERE r.space_id = ${scope.spaceId} AND r.environment_id = ${scope.environmentId}
+            AND c.depth < ${opts.maxDepth}
+        )
+        SELECT DISTINCT entry_id FROM closure
+        WHERE entry_id NOT IN (SELECT id FROM (VALUES ${seeds}) AS seed(id))
+        LIMIT ${opts.maxEntries}
+      `);
+      return [...result].map((r) => r.entry_id);
+    },
+  };
+}
+
+function makeBulkJobRepo(db: Db): BulkJobRepo {
+  const toJob = (row: typeof schema.bulkJobs.$inferSelect): BulkJob => ({
+    id: row.id,
+    action: row.action,
+    status: row.status,
+    totalItems: row.totalItems,
+    totalChunks: row.totalChunks,
+    completedChunks: row.completedChunks,
+    succeeded: row.succeeded,
+    failed: row.failed,
+    createdAt: row.createdAt.toISOString(),
+    ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+  });
+  const toChunk = (row: typeof schema.bulkJobChunks.$inferSelect): BulkJobChunk => ({
+    jobId: row.jobId,
+    chunkId: row.chunkId,
+    entryIds: row.entryIds,
+    status: row.status,
+    attempts: row.attempts,
+    failures: row.failures,
+  });
+
+  return {
+    async createJob(scope, job) {
+      await db.insert(schema.bulkJobs).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: job.id,
+        action: job.action,
+        status: job.status,
+        totalItems: job.totalItems,
+        totalChunks: job.totalChunks,
+        completedChunks: job.completedChunks,
+        succeeded: job.succeeded,
+        failed: job.failed,
+        createdAt: new Date(job.createdAt),
+      });
+    },
+    async getJob(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.bulkJobs)
+        .where(and(scopeFilter(schema.bulkJobs, scope), eq(schema.bulkJobs.id, id)));
+      return row ? toJob(row) : null;
+    },
+    async listJobs(scope, opts) {
+      const rows = await db
+        .select()
+        .from(schema.bulkJobs)
+        .where(scopeFilter(schema.bulkJobs, scope))
+        .orderBy(desc(schema.bulkJobs.createdAt), desc(schema.bulkJobs.id))
+        .limit(opts?.limit ?? 50);
+      return rows.map(toJob);
+    },
+    async createChunks(scope, chunks) {
+      if (chunks.length === 0) return;
+      // Multi-row insert in slices (each row carries a jsonb id list; slices
+      // keep statement size and parameter counts bounded).
+      const SLICE = 200;
+      for (let at = 0; at < chunks.length; at += SLICE) {
+        await db.insert(schema.bulkJobChunks).values(
+          chunks.slice(at, at + SLICE).map((c) => ({
+            spaceId: scope.spaceId,
+            environmentId: scope.environmentId,
+            jobId: c.jobId,
+            chunkId: c.chunkId,
+            entryIds: [...c.entryIds],
+            status: c.status,
+            attempts: c.attempts,
+            failures: [...c.failures],
+          })),
+        );
+      }
+    },
+    async listChunks(scope, jobId) {
+      const rows = await db
+        .select()
+        .from(schema.bulkJobChunks)
+        .where(and(scopeFilter(schema.bulkJobChunks, scope), eq(schema.bulkJobChunks.jobId, jobId)))
+        .orderBy(asc(schema.bulkJobChunks.chunkId));
+      return rows.map(toChunk);
+    },
+    async claimChunk(scope, jobId, chunkId, opts) {
+      // Single-statement CAS: only a pending chunk or a stale running claim
+      // transitions; a concurrent claimer's UPDATE matches zero rows.
+      const claimed = await db
+        .update(schema.bulkJobChunks)
+        .set({ status: 'running', claimedAt: opts.now, attempts: sql`attempts + 1` })
+        .where(
+          and(
+            scopeFilter(schema.bulkJobChunks, scope),
+            eq(schema.bulkJobChunks.jobId, jobId),
+            eq(schema.bulkJobChunks.chunkId, chunkId),
+            or(
+              eq(schema.bulkJobChunks.status, 'pending'),
+              and(
+                eq(schema.bulkJobChunks.status, 'running'),
+                lt(schema.bulkJobChunks.claimedAt, opts.staleBefore),
+              ),
+            ),
+          ),
+        )
+        .returning();
+      return claimed[0] ? toChunk(claimed[0]) : null;
+    },
+    async completeChunk(scope, jobId, chunkId, outcome) {
+      return db.transaction(async (txdb) => {
+        const [chunk] = await txdb
+          .update(schema.bulkJobChunks)
+          .set({
+            status: outcome.status,
+            failures: [...outcome.failures],
+            completedAt: new Date(),
+          })
+          .where(
+            and(
+              scopeFilter(schema.bulkJobChunks, scope),
+              eq(schema.bulkJobChunks.jobId, jobId),
+              eq(schema.bulkJobChunks.chunkId, chunkId),
+              // Guard: only the running claim completes; a duplicate
+              // completion (redelivered event) must not double-count.
+              eq(schema.bulkJobChunks.status, 'running'),
+            ),
+          )
+          .returning();
+        if (chunk) {
+          const [job] = await txdb
+            .update(schema.bulkJobs)
+            .set({
+              completedChunks: sql`completed_chunks + 1`,
+              succeeded: sql`succeeded + ${outcome.succeeded}`,
+              failed: sql`failed + ${outcome.failed}`,
+            })
+            .where(and(scopeFilter(schema.bulkJobs, scope), eq(schema.bulkJobs.id, jobId)))
+            .returning();
+          if (!job) throw new Error(`Bulk job ${jobId} not found for completed chunk`);
+          return toJob(job);
+        }
+        // Chunk was not in `running` (already completed by another worker):
+        // return the job as-is so the caller can still check completion.
+        // txdb, not db — a second pooled connection inside a transaction is
+        // a pool-exhaustion footgun.
+        const [job] = await txdb
+          .select()
+          .from(schema.bulkJobs)
+          .where(and(scopeFilter(schema.bulkJobs, scope), eq(schema.bulkJobs.id, jobId)));
+        if (!job) throw new Error(`Bulk job ${jobId} not found`);
+        return toJob(job);
+      });
+    },
+    async finalizeJob(scope, id, status, at) {
+      const [row] = await db
+        .update(schema.bulkJobs)
+        .set({ status, completedAt: at })
+        .where(
+          and(
+            scopeFilter(schema.bulkJobs, scope),
+            eq(schema.bulkJobs.id, id),
+            eq(schema.bulkJobs.status, 'running'),
+          ),
+        )
+        .returning();
+      return row ? toJob(row) : null;
+    },
+    async releaseChunk(scope, jobId, chunkId) {
+      await db
+        .update(schema.bulkJobChunks)
+        .set({ status: 'pending', claimedAt: null })
+        .where(
+          and(
+            scopeFilter(schema.bulkJobChunks, scope),
+            eq(schema.bulkJobChunks.jobId, jobId),
+            eq(schema.bulkJobChunks.chunkId, chunkId),
+            eq(schema.bulkJobChunks.status, 'running'),
+          ),
+        );
+    },
+    async findStalledChunks(staleBefore, limit) {
+      // Open chunks past the threshold, joined to their (running) jobs so a
+      // cancelled job's leftovers are never re-nudged.
+      const rows = await db
+        .select({
+          spaceId: schema.bulkJobChunks.spaceId,
+          environmentId: schema.bulkJobChunks.environmentId,
+          jobId: schema.bulkJobChunks.jobId,
+          chunkId: schema.bulkJobChunks.chunkId,
+        })
+        .from(schema.bulkJobChunks)
+        .innerJoin(
+          schema.bulkJobs,
+          and(
+            eq(schema.bulkJobChunks.spaceId, schema.bulkJobs.spaceId),
+            eq(schema.bulkJobChunks.environmentId, schema.bulkJobs.environmentId),
+            eq(schema.bulkJobChunks.jobId, schema.bulkJobs.id),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.bulkJobs.status, 'running'),
+            or(
+              and(
+                eq(schema.bulkJobChunks.status, 'pending'),
+                lt(schema.bulkJobChunks.createdAt, staleBefore),
+              ),
+              and(
+                eq(schema.bulkJobChunks.status, 'running'),
+                lt(schema.bulkJobChunks.claimedAt, staleBefore),
+              ),
+            ),
+          ),
+        )
+        .limit(limit);
+      return rows.map((r) => ({
+        scope: { spaceId: r.spaceId, environmentId: r.environmentId },
+        jobId: r.jobId,
+        chunkId: r.chunkId,
+      }));
+    },
+    async findUnfinalizedJobs(limit) {
+      const rows = await db
+        .select({
+          spaceId: schema.bulkJobs.spaceId,
+          environmentId: schema.bulkJobs.environmentId,
+          id: schema.bulkJobs.id,
+        })
+        .from(schema.bulkJobs)
+        .where(
+          and(
+            eq(schema.bulkJobs.status, 'running'),
+            gte(schema.bulkJobs.completedChunks, schema.bulkJobs.totalChunks),
+          ),
+        )
+        .limit(limit);
+      return rows.map((r) => ({
+        scope: { spaceId: r.spaceId, environmentId: r.environmentId },
+        jobId: r.id,
+      }));
     },
   };
 }
@@ -2080,6 +2355,7 @@ export function createPostgresStore(
     tasks: makeTaskRepo(db),
     workflows: makeWorkflowRepo(db),
     taxonomy: makeTaxonomyRepo(db),
+    bulkJobs: makeBulkJobRepo(db),
     outbox: makeOutboxRepo(db),
     async withTransaction<T>(fn: (tx: ContentStoreTx) => Promise<T>): Promise<T> {
       return db.transaction(async (txdb) => {
@@ -2090,6 +2366,7 @@ export function createPostgresStore(
           references: makeReferenceRepo(txdb as unknown as Db),
           releases: makeReleaseRepo(txdb as unknown as Db),
           taxonomy: makeTaxonomyRepo(txdb as unknown as Db),
+          bulkJobs: makeBulkJobRepo(txdb as unknown as Db),
           outbox: makeOutboxRepo(txdb as unknown as Db),
         };
         return fn(tx);

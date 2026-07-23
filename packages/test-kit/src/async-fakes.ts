@@ -106,6 +106,10 @@ export class InMemoryCache implements Cache {
     this.tags.delete(tag);
   }
 
+  async invalidateTags(tags: readonly string[]): Promise<void> {
+    for (const tag of new Set(tags)) await this.invalidateTag(tag);
+  }
+
   get size(): number {
     return this.store.size;
   }

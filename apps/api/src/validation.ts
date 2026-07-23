@@ -1,4 +1,4 @@
-import { AGENT_WORKFLOWS } from '@cw/application';
+import { AGENT_WORKFLOWS, BULK_JOB_MAX_ITEMS } from '@cw/application';
 import { ValidationError } from '@cw/domain';
 import type { Context } from 'hono';
 import { z } from 'zod';
@@ -155,6 +155,13 @@ export const appExtensionBody = z.object({
 });
 export const bulkEntriesBody = z.object({ items: z.array(createEntryBody).max(1000).optional() });
 export const idsBody = z.object({ ids: zIdList.optional() });
+// Durable bulk jobs accept far larger id sets than the synchronous bulk
+// routes (the practical ceiling is the request body limit, then chunked
+// server-side); the shared application cap keeps both surfaces in lockstep.
+export const bulkJobBody = z.object({
+  action: z.enum(['publish', 'unpublish']),
+  entryIds: z.array(zId).min(1).max(BULK_JOB_MAX_ITEMS),
+});
 export const auditBody = z.object({
   createTasks: z.boolean().optional(),
   taskSeverity: z.enum(['error', 'warning', 'info']).optional(),

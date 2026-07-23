@@ -100,6 +100,9 @@ export async function unpublishEntryTx(
 /** Per-item outcome split of a batched publish/unpublish. */
 export interface BatchPublishResult {
   readonly published: Entry[];
+  /** Items already in the target state, counted as no-op successes (only
+   *  populated under {@link BatchPublishOptions.idempotent}). */
+  readonly unchanged: string[];
   /** Items that failed validation; the rest of the batch still committed. */
   readonly failures: { id: string; error: string }[];
 }
@@ -118,11 +121,29 @@ const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e)
  * same behavior as a release publish; the delivery keyset cursor breaks ties
  * by entryId.
  */
+export interface BatchPublishOptions {
+  /**
+   * Emit one `entry.published`/`entry.unpublished` outbox event per item
+   * (default). Bulk jobs pass false — they append ONE coalesced
+   * `entries.published_bulk` event for the chunk instead, so a 100k-entry job
+   * produces ~500 events rather than 100k.
+   */
+  readonly emitPerEntryEvents?: boolean;
+  /**
+   * Treat items already in the target state as no-op successes (`unchanged`)
+   * instead of failures. Bulk-job chunks pass true: an at-least-once re-run
+   * of a committed unpublish chunk must not record its items as failures in
+   * the compliance report. (Publish is naturally idempotent domain-side.)
+   */
+  readonly idempotent?: boolean;
+}
+
 export async function publishEntriesTx(
   ctx: AppContext,
   tx: ContentStoreTx,
   scope: Scope,
   ids: readonly string[],
+  opts: BatchPublishOptions = {},
 ): Promise<BatchPublishResult> {
   const uniqueIds = [...new Set(ids)];
   const failures: { id: string; error: string }[] = [];
@@ -201,7 +222,7 @@ export async function publishEntriesTx(
     }
   }
 
-  if (publishable.length === 0) return { published: [], failures };
+  if (publishable.length === 0) return { published: [], unchanged: [], failures };
 
   const okIds = publishable.map((c) => c.published.id);
   const metadataByEntry = new Map(
@@ -228,20 +249,22 @@ export async function publishEntriesTx(
     scope,
     publishable.map((c) => ({ fromEntryId: c.published.id, edges: c.edges })),
   );
-  await tx.outbox.appendMany(
-    publishable.map((c) => ({
-      id: ctx.ids.newId(),
-      type: 'entry.published' as const,
-      scope,
-      occurredAt: publishedAt,
-      entryId: c.published.id,
-      contentTypeApiId: c.published.contentTypeApiId,
-      version: c.published.currentVersion,
-      fields: c.item.fields,
-    })),
-  );
+  if (opts.emitPerEntryEvents !== false) {
+    await tx.outbox.appendMany(
+      publishable.map((c) => ({
+        id: ctx.ids.newId(),
+        type: 'entry.published' as const,
+        scope,
+        occurredAt: publishedAt,
+        entryId: c.published.id,
+        contentTypeApiId: c.published.contentTypeApiId,
+        version: c.published.currentVersion,
+        fields: c.item.fields,
+      })),
+    );
+  }
 
-  return { published: publishable.map((c) => c.published), failures };
+  return { published: publishable.map((c) => c.published), unchanged: [], failures };
 }
 
 /**
@@ -254,6 +277,7 @@ export async function unpublishEntriesTx(
   tx: ContentStoreTx,
   scope: Scope,
   ids: readonly string[],
+  opts: BatchPublishOptions = {},
 ): Promise<BatchPublishResult> {
   const uniqueIds = [...new Set(ids)];
   const failures: { id: string; error: string }[] = [];
@@ -261,6 +285,7 @@ export async function unpublishEntriesTx(
   const byId = new Map(found.map((f) => [f.entry.id, f]));
 
   const unpublishable: Entry[] = [];
+  const unchanged: string[] = [];
   for (const id of uniqueIds) {
     const item = byId.get(id);
     if (!item) {
@@ -268,7 +293,10 @@ export async function unpublishEntriesTx(
       continue;
     }
     if (item.entry.publishedVersion === null) {
-      failures.push({ id, error: 'Entry is not published' });
+      // Under `idempotent` (bulk re-runs) an already-unpublished entry is a
+      // no-op success, not a failure — the first run's commit did the work.
+      if (opts.idempotent) unchanged.push(id);
+      else failures.push({ id, error: 'Entry is not published' });
       continue;
     }
     try {
@@ -278,7 +306,7 @@ export async function unpublishEntriesTx(
     }
   }
 
-  if (unpublishable.length === 0) return { published: [], failures };
+  if (unpublishable.length === 0) return { published: [], unchanged, failures };
 
   const occurredAt = ctx.clock.now().toISOString();
   await tx.entries.saveAggregateMany(scope, unpublishable);
@@ -291,18 +319,20 @@ export async function unpublishEntriesTx(
     scope,
     unpublishable.map((e) => ({ fromEntryId: e.id, edges: [] })),
   );
-  await tx.outbox.appendMany(
-    unpublishable.map((e) => ({
-      id: ctx.ids.newId(),
-      type: 'entry.unpublished' as const,
-      scope,
-      occurredAt,
-      entryId: e.id,
-      contentTypeApiId: e.contentTypeApiId,
-    })),
-  );
+  if (opts.emitPerEntryEvents !== false) {
+    await tx.outbox.appendMany(
+      unpublishable.map((e) => ({
+        id: ctx.ids.newId(),
+        type: 'entry.unpublished' as const,
+        scope,
+        occurredAt,
+        entryId: e.id,
+        contentTypeApiId: e.contentTypeApiId,
+      })),
+    );
+  }
 
-  return { published: unpublishable, failures };
+  return { published: unpublishable, unchanged, failures };
 }
 
 /**

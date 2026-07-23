@@ -38,6 +38,9 @@ import type {
   AuditEntry,
   AuditRepo,
   AuthRepo,
+  BulkJob,
+  BulkJobChunk,
+  BulkJobRepo,
   CommentRepo,
   ContentStore,
   ContentStoreTx,
@@ -378,6 +381,36 @@ export class InMemoryContentStore implements ContentStore {
         out.push(...edges.filter((e) => e.toId === toId));
       }
       return out;
+    },
+    findReverseClosure: async (scope, toIds, opts) => {
+      // BFS mirror of the Postgres recursive CTE: bounded by depth and count,
+      // cycle-safe via the visited set, seeds excluded from the output.
+      const prefix = `${scopeKey(scope)}::`;
+      const reverse = new Map<string, string[]>();
+      for (const [k, edges] of this.referenceData.entries()) {
+        if (!k.startsWith(prefix)) continue;
+        for (const e of edges) {
+          const list = reverse.get(e.toId) ?? [];
+          list.push(e.fromEntryId);
+          reverse.set(e.toId, list);
+        }
+      }
+      const seeds = new Set(toIds);
+      const visited = new Set<string>();
+      let frontier = [...seeds];
+      for (let depth = 0; depth < opts.maxDepth && frontier.length > 0; depth++) {
+        const next: string[] = [];
+        for (const id of frontier) {
+          for (const from of reverse.get(id) ?? []) {
+            if (seeds.has(from) || visited.has(from)) continue;
+            if (visited.size >= opts.maxEntries) return [...visited];
+            visited.add(from);
+            next.push(from);
+          }
+        }
+        frontier = next;
+      }
+      return [...visited];
     },
   };
 
@@ -877,6 +910,125 @@ export class InMemoryContentStore implements ContentStore {
     },
   };
 
+  private readonly bulkJobData = new Map<string, BulkJob>();
+  private readonly bulkChunkData = new Map<
+    string,
+    BulkJobChunk & { createdAtMs: number; claimedAtMs?: number }
+  >();
+
+  readonly bulkJobs: BulkJobRepo = {
+    createJob: async (scope, job) => {
+      this.bulkJobData.set(`${scopeKey(scope)}::${job.id}`, job);
+    },
+    getJob: async (scope, id) => this.bulkJobData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    listJobs: async (scope, opts) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.bulkJobData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+        .slice(0, opts?.limit ?? 50);
+    },
+    createChunks: async (scope, chunks) => {
+      for (const c of chunks) {
+        this.bulkChunkData.set(`${scopeKey(scope)}::${c.jobId}::${c.chunkId}`, {
+          ...c,
+          createdAtMs: this.nowMs(),
+        });
+      }
+    },
+    listChunks: async (scope, jobId) => {
+      const prefix = `${scopeKey(scope)}::${jobId}::`;
+      return [...this.bulkChunkData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v)
+        .sort((a, b) => a.chunkId.localeCompare(b.chunkId));
+    },
+    claimChunk: async (scope, jobId, chunkId, opts) => {
+      const key = `${scopeKey(scope)}::${jobId}::${chunkId}`;
+      const chunk = this.bulkChunkData.get(key);
+      if (!chunk) return null;
+      const stale =
+        chunk.status === 'running' && (chunk.claimedAtMs ?? 0) < opts.staleBefore.getTime();
+      if (chunk.status !== 'pending' && !stale) return null;
+      const claimed = {
+        ...chunk,
+        status: 'running' as const,
+        attempts: chunk.attempts + 1,
+        claimedAtMs: opts.now.getTime(),
+      };
+      this.bulkChunkData.set(key, claimed);
+      return claimed;
+    },
+    completeChunk: async (scope, jobId, chunkId, outcome) => {
+      const jobKey = `${scopeKey(scope)}::${jobId}`;
+      const job = this.bulkJobData.get(jobKey);
+      if (!job) throw new Error(`Bulk job ${jobId} not found`);
+      const chunkKey = `${scopeKey(scope)}::${jobId}::${chunkId}`;
+      const chunk = this.bulkChunkData.get(chunkKey);
+      // Only a running claim completes — a duplicate completion never
+      // double-counts (mirrors the Postgres status guard).
+      if (!chunk || chunk.status !== 'running') return job;
+      this.bulkChunkData.set(chunkKey, {
+        ...chunk,
+        status: outcome.status,
+        failures: [...outcome.failures],
+      });
+      const updated: BulkJob = {
+        ...job,
+        completedChunks: job.completedChunks + 1,
+        succeeded: job.succeeded + outcome.succeeded,
+        failed: job.failed + outcome.failed,
+      };
+      this.bulkJobData.set(jobKey, updated);
+      return updated;
+    },
+    finalizeJob: async (scope, id, status, at) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const job = this.bulkJobData.get(key);
+      if (!job || job.status !== 'running') return null;
+      const updated: BulkJob = { ...job, status, completedAt: at.toISOString() };
+      this.bulkJobData.set(key, updated);
+      return updated;
+    },
+    releaseChunk: async (scope, jobId, chunkId) => {
+      const key = `${scopeKey(scope)}::${jobId}::${chunkId}`;
+      const chunk = this.bulkChunkData.get(key);
+      if (chunk?.status !== 'running') return;
+      const { claimedAtMs: _dropped, ...rest } = chunk;
+      this.bulkChunkData.set(key, { ...rest, status: 'pending' });
+    },
+    findStalledChunks: async (staleBefore, limit) => {
+      const cutoff = staleBefore.getTime();
+      const out: { scope: Scope; jobId: string; chunkId: string }[] = [];
+      for (const [key, chunk] of this.bulkChunkData.entries()) {
+        if (out.length >= limit) break;
+        const [spaceId, environmentId] = key.split('::');
+        if (!spaceId || !environmentId) continue;
+        const scope = { spaceId, environmentId };
+        const job = this.bulkJobData.get(`${scopeKey(scope)}::${chunk.jobId}`);
+        if (job?.status !== 'running') continue;
+        const stalePending = chunk.status === 'pending' && chunk.createdAtMs < cutoff;
+        const staleRunning = chunk.status === 'running' && (chunk.claimedAtMs ?? 0) < cutoff;
+        if (stalePending || staleRunning) {
+          out.push({ scope, jobId: chunk.jobId, chunkId: chunk.chunkId });
+        }
+      }
+      return out;
+    },
+    findUnfinalizedJobs: async (limit) => {
+      const out: { scope: Scope; jobId: string }[] = [];
+      for (const [key, job] of this.bulkJobData.entries()) {
+        if (out.length >= limit) break;
+        if (job.status !== 'running' || job.completedChunks < job.totalChunks) continue;
+        const [spaceId, environmentId] = key.split('::');
+        if (!spaceId || !environmentId) continue;
+        out.push({ scope: { spaceId, environmentId }, jobId: job.id });
+      }
+      return out;
+    },
+  };
+
   readonly outbox: OutboxRepo = {
     append: async (event) => {
       this.outboxData.push({ event, relayed: false });
@@ -924,6 +1076,8 @@ export class InMemoryContentStore implements ContentStore {
       this.referenceData,
       this.releaseData,
       this.releaseItemData,
+      this.bulkJobData,
+      this.bulkChunkData,
     ] as Map<string, unknown>[];
   }
 
@@ -949,6 +1103,7 @@ export class InMemoryContentStore implements ContentStore {
         references: this.references,
         releases: this.releases,
         taxonomy: this.taxonomy,
+        bulkJobs: this.bulkJobs,
         outbox: this.outbox,
       });
     } catch (err) {

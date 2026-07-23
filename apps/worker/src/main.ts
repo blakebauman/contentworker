@@ -20,6 +20,7 @@ import { type AgentRuntime, InProcessAgentRuntime, makeActivities } from '@cw/ag
 import { AGENT_TASK_QUEUE, TemporalAgentRuntime } from '@cw/agent-runtime/temporal';
 import {
   type AppContext,
+  BULK_TOPIC,
   EVENTS_TOPIC,
   type RagDeps,
   agentBudgetLimits,
@@ -28,6 +29,7 @@ import {
   consumeEvent,
   pruneEventHistory,
   relayOutbox,
+  resumeStalledBulkJobs,
   runDueAgentSchedules,
   runDueScheduledActions,
 } from '@cw/application';
@@ -181,7 +183,9 @@ async function main() {
 
   // Consume relayed events: webhook fan-out + cache invalidation + RAG embedding,
   // then run the configured agents (enrich, moderate) on newly-published entries.
-  queue.process(EVENTS_TOPIC, async (payload) => {
+  // The bulk topic runs the identical body on its own BullMQ queue so chunk
+  // processing scales/retries independently of interactive event delivery.
+  const handleEvent = async (payload: unknown) => {
     const ev = payload as DomainEvent;
     const entryId = 'entryId' in ev ? ev.entryId : undefined;
     await withSpan(
@@ -224,7 +228,9 @@ async function main() {
       },
       { 'event.type': ev.type, ...(entryId ? { 'entry.id': entryId } : {}) },
     );
-  });
+  };
+  queue.process(EVENTS_TOPIC, handleEvent);
+  queue.process(BULK_TOPIC, handleEvent);
   logger.info(
     {
       topic: EVENTS_TOPIC,
@@ -260,7 +266,8 @@ async function main() {
   const relayTimer = setInterval(tick, RELAY_INTERVAL_MS);
   logger.info({ intervalMs: RELAY_INTERVAL_MS }, 'worker relaying outbox');
 
-  // Scheduled-actions loop: fire any publish/unpublish whose time has arrived.
+  // Scheduled-actions loop: fire any publish/unpublish whose time has arrived,
+  // and re-nudge stalled bulk-job chunks (crash recovery; normally 0 rows).
   const scheduleTick = async () => {
     try {
       const { executed, failed } = await runDueScheduledActions(ctx);
@@ -269,6 +276,12 @@ async function main() {
       if (executed > 0 || failed > 0) logger.info({ executed, failed }, 'scheduled actions run');
     } catch (err) {
       logger.error({ err }, 'scheduled actions error');
+    }
+    try {
+      const resumed = await resumeStalledBulkJobs(ctx);
+      if (resumed > 0) logger.info({ resumed }, 'stalled bulk chunks re-nudged');
+    } catch (err) {
+      logger.error({ err }, 'bulk stall sweep error');
     }
   };
   const scheduleTimer = setInterval(scheduleTick, SCHEDULE_INTERVAL_MS);

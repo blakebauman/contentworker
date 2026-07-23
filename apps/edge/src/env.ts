@@ -22,6 +22,12 @@ export interface EdgeEnv {
    * has to fit N agent workflows inside one consumer invocation.
    */
   readonly AGENTS_QUEUE?: Queue;
+  /**
+   * Producer side of the `cw-bulk` queue. When bound, `bulk.chunk_due`
+   * control events route here instead of `cw-events`, so a 100k-entry bulk
+   * job's chunks drain on their own consumer without starving event delivery.
+   */
+  readonly BULK_QUEUE?: Queue;
   /** Delivery cache (tag-versioned; see @cw/adapter-cache-kv). */
   readonly KV_CACHE?: KVNamespace;
   /** Vectorize index for RAG/semantic search (1536 dims, cosine). */

@@ -229,6 +229,122 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
     expect(await store.entries.getPublishedMany(scope, [c.entry.id])).toHaveLength(1);
   });
 
+  it('round-trips the bulk-job repo (CAS claim, atomic counters, stall sweep)', async () => {
+    const jobId = uuidv7();
+    const now = clock.now();
+    await store.bulkJobs.createJob(scope, {
+      id: jobId,
+      action: 'publish',
+      status: 'running',
+      totalItems: 3,
+      totalChunks: 2,
+      completedChunks: 0,
+      succeeded: 0,
+      failed: 0,
+      createdAt: now.toISOString(),
+    });
+    await store.bulkJobs.createChunks(scope, [
+      {
+        jobId,
+        chunkId: 'c00000',
+        entryIds: ['a', 'b'],
+        status: 'pending',
+        attempts: 0,
+        failures: [],
+      },
+      { jobId, chunkId: 'c00001', entryIds: ['c'], status: 'pending', attempts: 0, failures: [] },
+    ]);
+
+    // CAS claim: first wins, second (not stale) loses.
+    const staleBefore = new Date(now.getTime() - 60_000);
+    const claimed = await store.bulkJobs.claimChunk(scope, jobId, 'c00000', { now, staleBefore });
+    expect(claimed?.attempts).toBe(1);
+    expect(
+      await store.bulkJobs.claimChunk(scope, jobId, 'c00000', { now, staleBefore }),
+    ).toBeNull();
+    // A stale claim IS re-claimable.
+    const futureStale = new Date(now.getTime() + 60_000);
+    const reclaimed = await store.bulkJobs.claimChunk(scope, jobId, 'c00000', {
+      now,
+      staleBefore: futureStale,
+    });
+    expect(reclaimed?.attempts).toBe(2);
+
+    // The stall sweep sees the running-stale chunk and the aging pending one.
+    // (Pending age uses the DB-stamped created_at — real time — while the
+    // claim stamp came from the fixed test clock, so cut off after both.)
+    const sweepCutoff = new Date(Date.now() + 60_000);
+    const stalled = await store.bulkJobs.findStalledChunks(sweepCutoff, 1000);
+    const ours = stalled.filter((s) => s.jobId === jobId);
+    expect(ours.map((s) => s.chunkId).sort()).toEqual(['c00000', 'c00001']);
+
+    // Complete folds counters atomically; a duplicate completion no-ops.
+    const afterFirst = await store.bulkJobs.completeChunk(scope, jobId, 'c00000', {
+      status: 'completed',
+      succeeded: 2,
+      failed: 0,
+      failures: [],
+    });
+    expect(afterFirst).toMatchObject({ completedChunks: 1, succeeded: 2, failed: 0 });
+    const dup = await store.bulkJobs.completeChunk(scope, jobId, 'c00000', {
+      status: 'completed',
+      succeeded: 2,
+      failed: 0,
+      failures: [],
+    });
+    expect(dup.completedChunks).toBe(1); // unchanged
+
+    await store.bulkJobs.claimChunk(scope, jobId, 'c00001', { now, staleBefore });
+    const afterSecond = await store.bulkJobs.completeChunk(scope, jobId, 'c00001', {
+      status: 'failed',
+      succeeded: 0,
+      failed: 1,
+      failures: [{ id: 'c', error: 'boom' }],
+    });
+    expect(afterSecond).toMatchObject({ completedChunks: 2, succeeded: 2, failed: 1 });
+
+    // Finalize CAS: once, then null.
+    expect(await store.bulkJobs.finalizeJob(scope, jobId, 'completed', now)).toBeTruthy();
+    expect(await store.bulkJobs.finalizeJob(scope, jobId, 'completed', now)).toBeNull();
+    const chunks = await store.bulkJobs.listChunks(scope, jobId);
+    expect(chunks.find((c) => c.chunkId === 'c00001')?.failures).toEqual([
+      { id: 'c', error: 'boom' },
+    ]);
+  });
+
+  it('computes the reverse reference closure with one recursive query', async () => {
+    // c <- b <- a  and  c <- d (direct): closure of [c] = {a, b, d}.
+    const put = (fromEntryId: string, toId: string) =>
+      store.references.replaceForEntry(scope, fromEntryId, [
+        { fromEntryId, fromField: 'ref', toId, toType: 'Entry' },
+      ]);
+    await put('closure-b', 'closure-c');
+    await put('closure-a', 'closure-b');
+    await put('closure-d', 'closure-c');
+
+    const closure = await store.references.findReverseClosure(scope, ['closure-c'], {
+      maxDepth: 5,
+      maxEntries: 100,
+    });
+    expect(closure.sort()).toEqual(['closure-a', 'closure-b', 'closure-d']);
+
+    // Depth bound: depth 1 sees only direct embedders.
+    const shallow = await store.references.findReverseClosure(scope, ['closure-c'], {
+      maxDepth: 1,
+      maxEntries: 100,
+    });
+    expect(shallow.sort()).toEqual(['closure-b', 'closure-d']);
+
+    // Cycle safety: a <-> b terminates.
+    await put('cyc-a', 'cyc-b');
+    await put('cyc-b', 'cyc-a');
+    const cyc = await store.references.findReverseClosure(scope, ['cyc-a'], {
+      maxDepth: 10,
+      maxEntries: 100,
+    });
+    expect(cyc).toEqual(['cyc-b']);
+  });
+
   it('getPublishedMany returns present snapshots only, scoped', async () => {
     const otherScope = { spaceId: `t-${uuidv7()}`, environmentId: 'main' };
     await createSpace(ctx, {
