@@ -14,6 +14,27 @@ export const REVIEW_DECISION_SIGNAL = 'review-decision';
 /** Deterministic watcher instance id — decision senders derive it too. */
 export const reviewWorkflowId = (reviewId: string) => `review-${reviewId}`;
 
+/**
+ * Engine-specific orchestration for the on-publish pass. Starting the detached
+ * HITL watcher means starting ANOTHER durable instance (`wf.create` on
+ * Workflows, a child workflow on Temporal), which is orchestration rather than
+ * an activity — so it is injected like {@link DurableWaits}, not folded into
+ * {@link Activities} (where an optional member also breaks Temporal's
+ * `ActivityInterfaceFor` mapping).
+ */
+export interface PublishAgentsHooks {
+  startReviewWatcher?(scope: Scope, reviewId: string, entryId: string): Promise<void>;
+}
+
+/** Input for a durably-started on-publish agent pass over a chunk of entries. */
+export interface PublishRunsInput {
+  readonly scope: Scope;
+  readonly entryIds: readonly string[];
+  readonly enrich: boolean;
+  readonly moderate: boolean;
+  readonly autoApply?: boolean;
+}
+
 /** Input of the detached review-watcher workflow. */
 export interface ReviewWatchInput {
   readonly scope: Scope;
@@ -79,6 +100,27 @@ export interface Activities {
   ): Promise<{ reviewId: string }>;
   /** CAS-arms the review's durable watcher; returns the status when not armed. */
   armReview(scope: Scope, reviewId: string): Promise<'armed' | 'pending' | 'approved' | 'rejected'>;
+  /**
+   * Records one finished agent run in the ledger. Moved into the workflow so
+   * the on-publish pass is fully durable: the consumer starts an instance and
+   * acks, instead of holding an invocation open polling for the result.
+   */
+  recordRun(
+    scope: Scope,
+    run: {
+      // Literal unions, not `string`: a typo must not reach the ledger.
+      workflow: Exclude<WorkflowName, 'review'>;
+      entryId: string;
+      status: AgentRunResult['status'];
+      decisions: string[];
+      usage: Usage;
+    },
+  ): Promise<void>;
+  /**
+   * Retracts a flagged entry from the delivery read model. Moderation runs
+   * post-publish, so a held entry is briefly live; this is what takes it down.
+   */
+  retractEntry(scope: Scope, entryId: string): Promise<void>;
   /** Settles a watcher outcome: apply-once on approval, record, or stand down. */
   settleReview(
     scope: Scope,
@@ -115,6 +157,17 @@ export interface Usage {
 /** The engine-agnostic facade. InProcess for dev/tests; Temporal in production. */
 export interface AgentRuntime {
   run(workflow: WorkflowName, input: WorkflowInput): Promise<AgentRunResult>;
+  /**
+   * Starts the on-publish agent pass for a set of entries and returns as soon
+   * as it is DURABLY started — the run records its own outcome (see
+   * `publishAgentsWorkflow`), so no caller has to await the result.
+   *
+   * This is what keeps agent-enabled publishing scalable: awaiting a result on
+   * Workflows means polling `instance.status()`, which pins a queue-consumer
+   * invocation open per entry. Absent on runtimes with no durable start, where
+   * the caller falls back to running the pass inline.
+   */
+  startPublishRuns?(input: PublishRunsInput): Promise<void>;
   /**
    * Starts the detached review watcher for a pending review (fire-and-forget;
    * deterministic instance id `review-<reviewId>`). Absent on non-durable

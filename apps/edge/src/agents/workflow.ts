@@ -10,17 +10,20 @@ import {
   curateWorkflow,
   enrichWorkflow,
   moderateWorkflow,
+  publishAgentsWorkflow,
   repurposeWorkflow,
   reviewWorkflow,
 } from '@cw/agent-runtime/workflows';
 import { type AppContext, type FakeAdapterBinding, assertNoFakeAdapters } from '@cw/application';
+import type { Scope } from '@cw/domain';
 import type { AIProvider, ContentStore, IdGenerator } from '@cw/ports';
 import { InMemoryContentStore } from '@cw/test-kit';
 import { v7 as uuidv7 } from 'uuid';
 import { doAgentCostGuardFromEnv } from '../do/cost-guard.js';
 import type { EdgeEnv } from '../env.js';
+import { makeMetrics } from '../metrics.js';
 import { makeAI } from '../wire.js';
-import { type AgentWfParams, REVIEW_DECISION_EVENT } from './runtime.js';
+import { type AgentWfParams, REVIEW_DECISION_EVENT, reviewInstanceId } from './runtime.js';
 
 const workflows = {
   enrich: enrichWorkflow,
@@ -57,6 +60,8 @@ function stepActivities(step: WorkflowStep, real: Activities): Activities {
     createReview: wrap('createReview', real.createReview.bind(real)),
     armReview: wrap('armReview', real.armReview.bind(real)),
     settleReview: wrap('settleReview', real.settleReview.bind(real)),
+    recordRun: wrap('recordRun', real.recordRun.bind(real)),
+    retractEntry: wrap('retractEntry', real.retractEntry.bind(real)),
   };
 }
 
@@ -71,17 +76,22 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
   override async run(
     event: WorkflowEvent<AgentWfParams>,
     step: WorkflowStep,
-  ): Promise<AgentRunResult> {
+    // A chunked publish_agents pass returns one result PER entry; the
+    // single-entry workflows return one.
+  ): Promise<AgentRunResult | AgentRunResult[]> {
     const { workflow, input } = event.payload;
-    const run = workflow === 'review' ? undefined : workflows[workflow];
-    if (workflow !== 'review' && !run) throw new Error(`unknown agent workflow "${workflow}"`);
+    // `review` and `publish_agents` are dispatched explicitly below; the map
+    // holds only the single-entry workflows.
+    const isMapped = workflow !== 'review' && workflow !== 'publish_agents';
+    const run = isMapped ? workflows[workflow] : undefined;
+    if (isMapped && !run) throw new Error(`unknown agent workflow "${workflow}"`);
 
     // Durable runs need the shared database: without HYPERDRIVE this store is
     // a fresh empty in-memory one (the demo store lives in the fetch isolate),
     // so demo deployments keep AGENT_RUNTIME unset and run agents in-process.
     const connectionString = this.env.HYPERDRIVE?.connectionString ?? this.env.DATABASE_URL;
     const store: ContentStore = connectionString
-      ? createPostgresStore(connectionString, { max: 2, fetchTypes: false })
+      ? createPostgresStore(connectionString, { max: 1, fetchTypes: false })
       : (new InMemoryContentStore() as ContentStore);
     // Same fail-closed policy as wireEdge: a durable run against the real
     // database must not persist StubAIProvider placeholders. Workflow
@@ -100,7 +110,51 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
     const ctx: AppContext = { store, clock: { now: () => new Date() }, ids, costGuard };
 
     try {
+      // Wrapped in a step: un-stepped side effects re-execute on replay. The
+      // instance id is deterministic and "already exists" is swallowed, so a
+      // replay is harmless either way — but the step keeps it durable and
+      // independently retried like every other effect.
+      const startWatcher = this.env.AGENT_WF
+        ? (scope: Scope, reviewId: string, entryId: string): Promise<void> =>
+            step.do(`startReviewWatcher#${reviewId}`, STEP_CONFIG, async () => {
+              const wf = this.env.AGENT_WF as Workflow;
+              await wf
+                .create({
+                  id: reviewInstanceId(reviewId),
+                  params: { workflow: 'review', input: { scope, reviewId, entryId } },
+                })
+                .catch((err: unknown) => {
+                  // A watcher already started (duplicate delivery) is fine.
+                  const m = String(err);
+                  if (!m.includes('already') && !m.includes('exists')) throw err;
+                });
+            })
+        : undefined;
       const activities = stepActivities(step, makeActivities({ ctx, ai }));
+      if (event.payload.workflow === 'publish_agents') {
+        const input = event.payload.input;
+        const runs = await publishAgentsWorkflow(activities, input, {
+          ...(startWatcher ? { startReviewWatcher: startWatcher } : {}),
+        });
+        // The consumer acked at START, so it can no longer report outcomes —
+        // without a terminal signal here, a chunk that fails entirely looks
+        // identical to one that never ran.
+        const metrics = makeMetrics(this.env.METRICS);
+        metrics.count('cw_agent_chunk_entries_total', input.entryIds.length, {
+          outcome: 'processed',
+        });
+        const held = runs.filter((r) => r.status === 'held').length;
+        if (held > 0) metrics.count('cw_agent_runs_held_total', held);
+        console.log(
+          JSON.stringify({
+            msg: 'publish agents chunk complete',
+            entries: input.entryIds.length,
+            runs: runs.length,
+            held,
+          }),
+        );
+        return runs;
+      }
       if (event.payload.workflow === 'review') {
         // HITL watcher: the human decision arrives as a Workflow event;
         // waitForEvent parks durably (days) and rejects on timeout → null.

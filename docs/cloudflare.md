@@ -224,11 +224,22 @@ The full side-by-side matrix (including the Node column) lives in
 - **Vectorize indexing lag:** upserts/deletes are async-indexed (seconds), so
   search-after-publish is not immediate — same class of lag as queue-driven
   embedding on the Node path.
-- **Agent runs consume from their own queue:** `cw-events` forwards each
-  published entry's agent work to `cw-agents` (batch size 1), so a batch of
-  events never has to fit N polled Workflow runs inside one consumer
-  invocation. Without the `AGENTS_QUEUE` binding, agents run inline in the
-  events consumer (dev/demo parity).
+- **Agent runs are fire-and-forget:** `cw-events` forwards each published
+  entry's agent work to `cw-agents`, whose consumer STARTS a durable workflow
+  instance and acks. The whole on-publish pass (enrich → moderate → record the
+  runs → retract a held entry) runs inside that instance, so nothing has to
+  await a result — which matters because Workflows has no blocking result API,
+  and the previous model polled `instance.status()` every 2s, pinning one
+  consumer invocation per entry for up to ten minutes. One instance covers a
+  chunk of entries (25, sized against the per-instance step ceiling at ~13
+  steps per entry worst case), so 100k published entries cost ~4k instances
+  rather than 100k+, and `max_concurrency` on the consumer bounds the
+  instance-creation rate under a bulk publish. Entries within a chunk are
+  processed sequentially and each has its own error boundary, so one failing
+  entry never drops the rest — but a flagged entry's retraction waits on its
+  predecessors, so moderation-critical deployments should lower the chunk size. Without the `AGENTS_QUEUE`
+  binding — or on a runtime with no durable start — agents run inline
+  (dev/demo parity).
 - **Bulk jobs run on their own queue:** `bulk.chunk_due` control events route
   to `cw-bulk` (one ~200-entry chunk transaction per invocation, bounded
   consumer concurrency), so a 100k-entry job drains without starving

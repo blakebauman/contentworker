@@ -2,6 +2,8 @@ import type {
   Activities,
   AgentRunResult,
   DurableWaits,
+  PublishAgentsHooks,
+  PublishRunsInput,
   ReviewWatchInput,
   WorkflowInput,
 } from './types.js';
@@ -334,4 +336,103 @@ export async function moderateWorkflow(
     decisions: ['clean'],
     usage,
   };
+}
+
+/**
+ * The full on-publish agent pass, as durable orchestration.
+ *
+ * This used to live in the queue consumer (`runPublishAgents`), which meant the
+ * consumer had to await each run's RESULT to record it, arm the HITL watcher,
+ * and retract held entries — and on Cloudflare Workflows "await the result"
+ * means polling `instance.status()`, holding an invocation open for up to ten
+ * minutes per entry. Moving the whole pass in here lets the consumer create the
+ * instance and ack immediately: the run records its own outcome.
+ *
+ * It processes a CHUNK of entries so one instance covers many publishes. The
+ * host picks the chunk size against the per-instance STEP ceiling — worst case
+ * is ~13 steps per entry (see AGENT_CHUNK in apps/edge/src/main.ts).
+ */
+export async function publishAgentsWorkflow(
+  act: Activities,
+  input: PublishRunsInput,
+  hooks: PublishAgentsHooks = {},
+): Promise<AgentRunResult[]> {
+  const names: ('enrich' | 'moderate')[] = [];
+  if (input.enrich) names.push('enrich');
+  if (input.moderate) names.push('moderate');
+
+  const results: AgentRunResult[] = [];
+  for (const entryId of input.entryIds) {
+    // Per-entry error boundary. The consumer acked every message in the chunk
+    // when it started this instance, so an exception escaping here would abort
+    // the remaining entries with no retry and no dead-letter — and the most
+    // likely failure is deterministic, not transient (an over-budget entry
+    // raises RateLimitedError on every attempt, precisely under the bulk
+    // publishes chunking exists for). One bad entry must not take the rest.
+    try {
+      results.push(...(await runEntryPass(act, input, entryId, names, hooks)));
+    } catch (err) {
+      await act
+        .recordRun(input.scope, {
+          workflow: names[0] ?? 'enrich',
+          entryId,
+          status: 'skipped',
+          decisions: [`agent pass failed: ${err instanceof Error ? err.message : String(err)}`],
+          usage: ZERO,
+        })
+        .catch(() => {});
+    }
+  }
+  return results;
+}
+
+/** One entry's pass: enrich (first, so moderation sees enriched content), then
+ *  moderate, recording each run and retracting anything held. */
+async function runEntryPass(
+  act: Activities,
+  input: PublishRunsInput,
+  entryId: string,
+  names: readonly ('enrich' | 'moderate')[],
+  hooks: PublishAgentsHooks,
+): Promise<AgentRunResult[]> {
+  {
+    const perEntry: AgentRunResult[] = [];
+    for (const name of names) {
+      // Enrich before moderate so moderation sees the enriched content.
+      const run =
+        name === 'enrich'
+          ? await enrichWorkflow(act, { scope: input.scope, entryId, autoApply: input.autoApply })
+          : await moderateWorkflow(act, { scope: input.scope, entryId });
+
+      if (run.status === 'needs_review' && run.reviewId) {
+        // Best-effort: without a watcher the decision still applies through the
+        // direct path, so a failure here must not fail the pass.
+        await hooks.startReviewWatcher?.(input.scope, run.reviewId, entryId).catch(() => {});
+      }
+      await act.recordRun(input.scope, {
+        workflow: name,
+        entryId,
+        status: run.status,
+        decisions: [...run.decisions],
+        usage: run.usage,
+      });
+      perEntry.push(run);
+    }
+
+    // A held entry is already live (agents run off entry.published), so take it
+    // out of delivery rather than only noting the hold.
+    if (perEntry.some((r) => r.workflow === 'moderate' && r.status === 'held')) {
+      // Record the retraction only AFTER it succeeds: the ledger must not
+      // claim flagged content was pulled from delivery when it wasn't.
+      await act.retractEntry(input.scope, entryId);
+      await act.recordRun(input.scope, {
+        workflow: 'moderate',
+        entryId,
+        status: 'held',
+        decisions: ['retracted from delivery pending review'],
+        usage: ZERO,
+      });
+    }
+    return perEntry;
+  }
 }

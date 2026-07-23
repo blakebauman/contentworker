@@ -15,6 +15,7 @@ import {
   runDueScheduledActions,
   runPublishAgents,
 } from '@cw/application';
+import type { Scope } from '@cw/domain';
 import type { McpDeps } from '@cw/mcp-server/wire';
 import { seedConfigFrom, seedDev } from '@cw/seed';
 import { Hono } from 'hono';
@@ -167,9 +168,31 @@ async function consumeEvents(batch: MessageBatch, env: EdgeEnv, wired: EdgeWired
 }
 
 /**
- * cw-agents consumer body: runs the on-publish agents for one entry per
- * message. runPublishAgents owns the post-run behavior (AgentRun records,
- * moderation retraction), so those survive the move off the events consumer.
+ * Entries per durable agent-workflow instance.
+ *
+ * Sized against the per-instance STEP ceiling (~1024 on Workflows). Worst case
+ * per entry is ~13 steps: enrich (loadEntry, generateFields, record,
+ * createReview) + moderate (loadEntry, classify, record) + one recordRun per
+ * workflow + the watcher start + the retract path (retractEntry, recordRun).
+ * 25 × 13 ≈ 325 leaves room for a future activity without silently pushing an
+ * instance over the limit — and still cuts instance count 25×, so 100k
+ * published entries cost ~4k instances instead of 100k+.
+ */
+const AGENT_CHUNK = 25;
+
+/**
+ * cw-agents consumer body.
+ *
+ * Fire-and-forget: the whole on-publish pass (enrich → moderate → record →
+ * retract) now runs INSIDE the durable workflow, so this only has to start
+ * instances and ack. It used to call `runPublishAgents`, which awaited each
+ * run's result — and awaiting a result on Workflows means polling
+ * `instance.status()`, pinning one consumer invocation per entry for up to ten
+ * minutes. At 100k published entries that model needed 100k+ instances each
+ * holding an invocation; this needs one instance per {@link AGENT_CHUNK}
+ * entries and holds nothing.
+ *
+ * Runtimes without a durable start (in-process, dev/demo) keep the inline path.
  */
 async function consumeAgentJobs(
   batch: MessageBatch,
@@ -179,36 +202,75 @@ async function consumeAgentJobs(
   const metrics = makeMetrics(env.METRICS);
   const agentConfig = agentConfigFromEnv(env);
   const agents = makeAgents(env, wired.ctx, wired.ai);
-  for (const msg of batch.messages) {
-    if (!isAgentJob(msg.body)) {
-      console.error('dropping malformed agent job', { id: msg.id });
-      metrics.count('cw_agent_jobs_total', 1, { outcome: 'dropped' });
-      msg.ack();
-      continue;
+
+  const jobs = batch.messages.filter((m) => {
+    if (isAgentJob(m.body)) return true;
+    console.error('dropping malformed agent job', { id: m.id });
+    metrics.count('cw_agent_jobs_total', 1, { outcome: 'dropped' });
+    m.ack();
+    return false;
+  });
+  if (jobs.length === 0) return;
+  if (!agents) {
+    // Agents were disabled after the jobs were enqueued — drop, don't retry.
+    for (const m of jobs) m.ack();
+    metrics.count('cw_agent_jobs_total', jobs.length, { outcome: 'disabled' });
+    return;
+  }
+
+  if (agents.startPublishRuns) {
+    // Group by scope: one instance covers entries from a single space/env.
+    const byScope = new Map<string, { scope: Scope; ids: string[]; msgs: Message[] }>();
+    for (const m of jobs) {
+      const job = m.body as AgentJobMessage;
+      const key = `${job.scope.spaceId}::${job.scope.environmentId}`;
+      const bucket = byScope.get(key) ?? { scope: job.scope, ids: [], msgs: [] };
+      bucket.ids.push(job.entryId);
+      bucket.msgs.push(m);
+      byScope.set(key, bucket);
     }
-    if (!agents) {
-      // Agents were disabled after the job was enqueued — drop, don't retry.
-      metrics.count('cw_agent_jobs_total', 1, { outcome: 'disabled' });
-      msg.ack();
-      continue;
-    }
-    try {
-      const runs = await runPublishAgents(
-        wired.ctx,
-        agents,
-        msg.body.scope,
-        msg.body.entryId,
-        agentConfig,
-      );
-      for (const r of runs) {
-        console.log(JSON.stringify({ msg: `${r.workflow} complete`, ...r }));
+    for (const bucket of byScope.values()) {
+      // Ack/retry PER CHUNK, not per bucket: retrying messages whose instance
+      // already started would re-run their agents, and the pass now performs a
+      // real state change (retracting a held entry), so duplicates are not
+      // free the way recorded proposals were.
+      for (let at = 0; at < bucket.ids.length; at += AGENT_CHUNK) {
+        const ids = bucket.ids.slice(at, at + AGENT_CHUNK);
+        const msgs = bucket.msgs.slice(at, at + AGENT_CHUNK);
+        try {
+          await agents.startPublishRuns({
+            scope: bucket.scope,
+            entryIds: ids,
+            enrich: agentConfig.enrich,
+            moderate: agentConfig.moderate,
+            ...(agentConfig.autoApply !== undefined ? { autoApply: agentConfig.autoApply } : {}),
+          });
+          for (const m of msgs) m.ack();
+          metrics.count('cw_agent_jobs_total', msgs.length, { outcome: 'started' });
+        } catch (err) {
+          // Instance creation failed (rate limit, transient) — only this
+          // chunk's messages redeliver.
+          console.error('agent workflow start failed; retrying chunk', err);
+          for (const m of msgs) m.retry();
+          metrics.count('cw_agent_jobs_total', msgs.length, { outcome: 'error' });
+        }
       }
+    }
+    return;
+  }
+
+  // Non-durable runtime: run the pass inline, one entry at a time.
+  for (const m of jobs) {
+    const job = m.body as AgentJobMessage;
+    try {
+      const runs = await runPublishAgents(wired.ctx, agents, job.scope, job.entryId, agentConfig);
+      for (const r of runs) console.log(JSON.stringify({ msg: `${r.workflow} complete`, ...r }));
       metrics.count('cw_agent_jobs_total', 1, { outcome: 'ok' });
-      msg.ack();
+      m.ack();
     } catch (err) {
       console.error('agent job failed; retrying', err);
       metrics.count('cw_agent_jobs_total', 1, { outcome: 'error' });
-      msg.retry();
+      m.retry();
     }
   }
 }
