@@ -39,14 +39,35 @@ export interface QueryOrder {
   readonly direction: 'asc' | 'desc';
 }
 
-/** Resolves the comparable scalar for a localized value at the given locale. */
-export function comparableValue(lv: LocalizedValue | undefined, locale?: LocaleCode): unknown {
+/**
+ * Resolves the comparable scalar for a localized value: the requested locale,
+ * then each locale in `fallbacks` (the space's default-locale chain), then any
+ * remaining locale in SORTED key order.
+ *
+ * The sort matters for correctness, not tidiness: Postgres stores localized
+ * values as jsonb, which does NOT preserve key insertion order (it orders keys
+ * by length then bytewise), while the in-memory store keeps insertion order.
+ * Iterating raw key order would therefore resolve a different locale per
+ * backend for any field missing the requested locale — the same query
+ * returning different rows depending on the store. Sorting makes the fallback
+ * deterministic everywhere; `fallbacks` makes it semantically right.
+ */
+export function comparableValue(
+  lv: LocalizedValue | undefined,
+  locale?: LocaleCode,
+  fallbacks?: readonly LocaleCode[],
+): unknown {
   if (!lv) return undefined;
-  if (locale && lv[locale] !== undefined && lv[locale] !== null) return lv[locale];
+  const present = (loc: string) => lv[loc] !== undefined && lv[loc] !== null;
+  if (locale && present(locale)) return lv[locale];
+  for (const f of fallbacks ?? []) {
+    if (present(f)) return lv[f];
+  }
   // Non-localized fields hold a single (default-locale) value; localized fields
-  // missing the requested locale degrade to whatever value is present.
-  for (const v of Object.values(lv)) {
-    if (v !== undefined && v !== null) return v;
+  // missing every preferred locale degrade to the first value in sorted key
+  // order — arbitrary but identical across stores.
+  for (const k of Object.keys(lv).sort()) {
+    if (present(k)) return lv[k];
   }
   return undefined;
 }
@@ -149,12 +170,13 @@ function resolveField(
   fields: EntryFields,
   sys: Record<string, unknown>,
   locale?: LocaleCode,
+  fallbacks?: readonly LocaleCode[],
 ): unknown {
   // `sys.*` and `metadata.*` are pseudo-fields backed by the row's sys record
   // (which carries both, keyed by the bare name / the full `metadata.*` key).
   if (field.startsWith('sys.')) return sys[field.slice(4)];
   if (field.startsWith('metadata.')) return sys[field];
-  return comparableValue(fields[field], locale);
+  return comparableValue(fields[field], locale, fallbacks);
 }
 
 /** True if every filter matches the entry's fields. */
@@ -163,15 +185,23 @@ function matchesFilters(
   sys: Record<string, unknown>,
   filters: readonly QueryFilter[],
   locale?: LocaleCode,
+  fallbacks?: readonly LocaleCode[],
 ): boolean {
-  return filters.every((f) => matchOp(f.op, resolveField(f.field, fields, sys, locale), f.value));
+  return filters.every((f) =>
+    matchOp(f.op, resolveField(f.field, fields, sys, locale, fallbacks), f.value),
+  );
 }
 
 /** True if `search` (case-insensitive) appears in any string field value. */
-function matchesSearch(fields: EntryFields, search: string, locale?: LocaleCode): boolean {
+function matchesSearch(
+  fields: EntryFields,
+  search: string,
+  locale?: LocaleCode,
+  fallbacks?: readonly LocaleCode[],
+): boolean {
   const needle = search.toLowerCase();
   for (const lv of Object.values(fields)) {
-    const v = comparableValue(lv, locale);
+    const v = comparableValue(lv, locale, fallbacks);
     if (typeof v === 'string' && v.toLowerCase().includes(needle)) return true;
   }
   return false;
@@ -196,6 +226,10 @@ export interface EntryQueryInput {
   readonly limit?: number;
   /** Locale used to resolve field values for comparison. */
   readonly locale?: LocaleCode;
+  /** Ordered fallback locales (the space's default-locale chain) tried when
+   *  `locale` has no value for a field — keeps resolution deterministic and
+   *  identical across stores. */
+  readonly fallbackLocales?: readonly LocaleCode[];
 }
 
 /**
@@ -216,18 +250,38 @@ export function runEntryQuery<T>(
 
   if (query.filters?.length) {
     result = result.filter((r) =>
-      matchesFilters(fieldsOf(r), sysOf(r), query.filters as QueryFilter[], query.locale),
+      matchesFilters(
+        fieldsOf(r),
+        sysOf(r),
+        query.filters as QueryFilter[],
+        query.locale,
+        query.fallbackLocales,
+      ),
     );
   }
   if (query.search) {
-    result = result.filter((r) => matchesSearch(fieldsOf(r), query.search as string, query.locale));
+    result = result.filter((r) =>
+      matchesSearch(fieldsOf(r), query.search as string, query.locale, query.fallbackLocales),
+    );
   }
   if (query.order?.length) {
     const order = query.order;
     result.sort((a, b) => {
       for (const o of order) {
-        const av = resolveField(o.field, fieldsOf(a), sysOf(a), query.locale);
-        const bv = resolveField(o.field, fieldsOf(b), sysOf(b), query.locale);
+        const av = resolveField(
+          o.field,
+          fieldsOf(a),
+          sysOf(a),
+          query.locale,
+          query.fallbackLocales,
+        );
+        const bv = resolveField(
+          o.field,
+          fieldsOf(b),
+          sysOf(b),
+          query.locale,
+          query.fallbackLocales,
+        );
         const cmp = compareValues(av, bv);
         if (cmp !== 0) return o.direction === 'desc' ? -cmp : cmp;
       }

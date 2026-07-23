@@ -43,6 +43,22 @@ export class InvalidStateError extends DomainError {
   }
 }
 
+/**
+ * A field-level query matched more candidate rows than the store will pull
+ * into memory to evaluate exactly (maps to HTTP 400). Reported instead of
+ * silently truncating: a delivery client must never receive a partial result
+ * that looks complete. Narrow with `content_type` or an additional filter.
+ */
+export class QueryTooBroadError extends DomainError {
+  constructor(scanLimit: number) {
+    super(
+      'query_too_broad',
+      `Query matched more than ${scanLimit} candidate entries to evaluate; narrow it with content_type, a more selective filter, or paginate with a cursor (sorting a large set requires narrowing it first)`,
+      { scanLimit },
+    );
+  }
+}
+
 /** A per-tenant rate/budget ceiling was exceeded (maps to HTTP 429). */
 export class RateLimitedError extends DomainError {
   readonly retryAfterSeconds?: number;

@@ -516,6 +516,14 @@ export interface EntryQuery {
   readonly search?: string;
   /** Locale used to resolve field values for filtering/ordering/search. */
   readonly locale?: LocaleCode;
+  /**
+   * Ordered fallback locales tried when `locale` has no value for a field —
+   * normally the space's default-locale chain. Without it, fallback resolution
+   * depends on the backend's key ordering (Postgres jsonb does not preserve
+   * insertion order), so the same query could resolve a different locale per
+   * store. Populated by the delivery/preview use-cases from SpaceConfig.
+   */
+  readonly fallbackLocales?: readonly LocaleCode[];
 }
 
 /** One ranked full-text match from the published read model. */
