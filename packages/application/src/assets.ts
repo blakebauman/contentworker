@@ -89,28 +89,49 @@ export async function listAssets(
 
 /** Publishes an asset — writes the denormalized snapshot served by Delivery. */
 export async function publishAsset(ctx: AppContext, scope: Scope, id: string): Promise<Asset> {
-  const asset = await ctx.store.assets.get(scope, id);
-  if (!asset) throw new NotFoundError('Asset', id);
-  const published = publishAssetState(asset);
-  await ctx.store.assets.save(scope, published);
-  await ctx.store.assets.putPublished(scope, {
-    assetId: published.id,
-    file: published.file,
-    title: published.title,
-    description: published.description,
-    metadata: published.metadata,
-    publishedAt: ctx.clock.now().toISOString(),
+  return ctx.store.withTransaction(async (tx) => {
+    const asset = await tx.assets.get(scope, id);
+    if (!asset) throw new NotFoundError('Asset', id);
+    const published = publishAssetState(asset);
+    await tx.assets.save(scope, published);
+    await tx.assets.putPublished(scope, {
+      assetId: published.id,
+      file: published.file,
+      title: published.title,
+      description: published.description,
+      metadata: published.metadata,
+      publishedAt: ctx.clock.now().toISOString(),
+    });
+    // Same transaction as the write: delivery renders embed this asset's
+    // file/title/description into linking entries, so the invalidation event
+    // must be enqueued iff the publish commits.
+    await tx.outbox.append({
+      id: ctx.ids.newId(),
+      type: 'asset.published',
+      scope,
+      occurredAt: ctx.clock.now().toISOString(),
+      assetId: published.id,
+    });
+    return published;
   });
-  return published;
 }
 
 export async function unpublishAsset(ctx: AppContext, scope: Scope, id: string): Promise<Asset> {
-  const asset = await ctx.store.assets.get(scope, id);
-  if (!asset) throw new NotFoundError('Asset', id);
-  const updated = unpublishAssetState(asset);
-  await ctx.store.assets.save(scope, updated);
-  await ctx.store.assets.removePublished(scope, id);
-  return updated;
+  return ctx.store.withTransaction(async (tx) => {
+    const asset = await tx.assets.get(scope, id);
+    if (!asset) throw new NotFoundError('Asset', id);
+    const updated = unpublishAssetState(asset);
+    await tx.assets.save(scope, updated);
+    await tx.assets.removePublished(scope, id);
+    await tx.outbox.append({
+      id: ctx.ids.newId(),
+      type: 'asset.unpublished',
+      scope,
+      occurredAt: ctx.clock.now().toISOString(),
+      assetId: id,
+    });
+    return updated;
+  });
 }
 
 export async function getPublishedAsset(

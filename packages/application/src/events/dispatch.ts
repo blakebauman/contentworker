@@ -123,6 +123,34 @@ export async function dispatchEvent(
     }
   }
 
+  // 2b. Asset events: delivery renders EMBED an asset's file/title/description
+  // into every entry that links it, so an asset change must invalidate those
+  // entries — nothing else would. The reference graph already stores asset
+  // edges, so the same bounded reverse closure finds the embedders (including
+  // transitively, e.g. page -> card -> asset).
+  if (deps.cache && (event.type === 'asset.published' || event.type === 'asset.unpublished')) {
+    const embedders = await ctx.store.references.findReverseClosure(scope, [event.assetId], {
+      maxDepth: MAX_INVALIDATION_DEPTH,
+      maxEntries: MAX_INVALIDATION_ENTRIES,
+    });
+    if (embedders.length > 0) {
+      // Per-entry tags cover cached single-entry renders. Cached LISTS carry
+      // no tag for a resolved member, so the embedders' content types are
+      // needed too — one batched read, bounded by the closure cap.
+      const snapshots = await ctx.store.entries.getPublishedMany(scope, embedders);
+      const types = new Set(snapshots.map((e) => e.contentTypeApiId));
+      const tags = [
+        ...embedders.map((id) => cacheTag(scope, id)),
+        ...[...types].map((t) => contentTypeTag(scope, t)),
+      ];
+      const fresh = deps.invalidatedTags ? tags.filter((t) => !deps.invalidatedTags?.has(t)) : tags;
+      if (fresh.length > 0) {
+        await deps.cache.invalidateTags(fresh);
+        for (const t of fresh) deps.invalidatedTags?.add(t);
+      }
+    }
+  }
+
   // Terminal bulk-job fact: the unconditional scope-epoch bump — the
   // correctness backstop for any bump missed while the job ran. (Webhook
   // fan-out above already delivered the job summary to subscribers.)
