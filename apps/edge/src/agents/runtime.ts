@@ -1,6 +1,7 @@
 import type {
   AgentRunResult,
   AgentRuntime,
+  PublishRunsInput,
   ReviewWatchInput,
   WorkflowInput,
   WorkflowName,
@@ -13,7 +14,8 @@ const MAX_WAIT_MS = 10 * 60_000;
 /** Parameters passed to the AgentWorkflow entrypoint (see agents/workflow.ts). */
 export type AgentWfParams =
   | { readonly workflow: Exclude<WorkflowName, 'review'>; readonly input: WorkflowInput }
-  | { readonly workflow: 'review'; readonly input: ReviewWatchInput };
+  | { readonly workflow: 'review'; readonly input: ReviewWatchInput }
+  | { readonly workflow: 'publish_agents'; readonly input: PublishRunsInput };
 
 /** Event type delivering a human review decision to the watcher instance. */
 export const REVIEW_DECISION_EVENT = 'review-decision';
@@ -60,6 +62,19 @@ export class CloudflareWorkflowsAgentRuntime implements AgentRuntime {
       }
       await sleep(POLL_INTERVAL_MS);
     }
+  }
+
+  /**
+   * Fire-and-forget start of the on-publish agent pass for a chunk of entries.
+   *
+   * Deliberately does NOT poll: the run records its own outcome (see
+   * publishAgentsWorkflow), so this returns as soon as the instance exists.
+   * `run()` above still polls, but only serves low-volume interactive actions
+   * whose caller genuinely needs the result in the response.
+   */
+  async startPublishRuns(input: PublishRunsInput): Promise<void> {
+    const params: AgentWfParams = { workflow: 'publish_agents', input };
+    await this.wf.create({ id: `publish-agents-${this.ids.newId()}`, params });
   }
 
   /** Fire-and-forget start of the durable review watcher (idempotent id). */

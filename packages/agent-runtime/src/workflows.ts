@@ -1,7 +1,9 @@
+import type { Scope } from '@cw/domain';
 import type {
   Activities,
   AgentRunResult,
   DurableWaits,
+  PublishAgentsHooks,
   ReviewWatchInput,
   WorkflowInput,
 } from './types.js';
@@ -334,4 +336,78 @@ export async function moderateWorkflow(
     decisions: ['clean'],
     usage,
   };
+}
+
+/** Input for the on-publish agent pass over a CHUNK of entries. */
+export interface PublishAgentsInput {
+  readonly scope: Scope;
+  readonly entryIds: readonly string[];
+  readonly enrich: boolean;
+  readonly moderate: boolean;
+  readonly autoApply?: boolean;
+}
+
+/**
+ * The full on-publish agent pass, as durable orchestration.
+ *
+ * This used to live in the queue consumer (`runPublishAgents`), which meant the
+ * consumer had to await each run's RESULT to record it, arm the HITL watcher,
+ * and retract held entries — and on Cloudflare Workflows "await the result"
+ * means polling `instance.status()`, holding an invocation open for up to ten
+ * minutes per entry. Moving the whole pass in here lets the consumer create the
+ * instance and ack immediately: the run records its own outcome.
+ *
+ * It processes a CHUNK of entries so one instance covers many publishes —
+ * ~8 steps per entry against the per-instance step ceiling, so a chunk of ~50
+ * stays well inside it while cutting instance count by the same factor.
+ */
+export async function publishAgentsWorkflow(
+  act: Activities,
+  input: PublishAgentsInput,
+  hooks: PublishAgentsHooks = {},
+): Promise<AgentRunResult[]> {
+  const names: ('enrich' | 'moderate')[] = [];
+  if (input.enrich) names.push('enrich');
+  if (input.moderate) names.push('moderate');
+
+  const results: AgentRunResult[] = [];
+  for (const entryId of input.entryIds) {
+    const perEntry: AgentRunResult[] = [];
+    for (const name of names) {
+      // Enrich before moderate so moderation sees the enriched content.
+      const run =
+        name === 'enrich'
+          ? await enrichWorkflow(act, { scope: input.scope, entryId, autoApply: input.autoApply })
+          : await moderateWorkflow(act, { scope: input.scope, entryId });
+
+      if (run.status === 'needs_review' && run.reviewId) {
+        // Best-effort: without a watcher the decision still applies through the
+        // direct path, so a failure here must not fail the pass.
+        await hooks.startReviewWatcher?.(input.scope, run.reviewId, entryId).catch(() => {});
+      }
+      await act.recordRun(input.scope, {
+        workflow: name,
+        entryId,
+        status: run.status,
+        decisions: [...run.decisions],
+        usage: run.usage,
+      });
+      perEntry.push(run);
+    }
+
+    // A held entry is already live (agents run off entry.published), so take it
+    // out of delivery rather than only noting the hold.
+    if (perEntry.some((r) => r.workflow === 'moderate' && r.status === 'held')) {
+      await act.retractEntry(input.scope, entryId);
+      await act.recordRun(input.scope, {
+        workflow: 'moderate',
+        entryId,
+        status: 'held',
+        decisions: ['retracted from delivery pending review'],
+        usage: ZERO,
+      });
+    }
+    results.push(...perEntry);
+  }
+  return results;
 }

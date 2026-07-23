@@ -10,17 +10,19 @@ import {
   curateWorkflow,
   enrichWorkflow,
   moderateWorkflow,
+  publishAgentsWorkflow,
   repurposeWorkflow,
   reviewWorkflow,
 } from '@cw/agent-runtime/workflows';
 import { type AppContext, type FakeAdapterBinding, assertNoFakeAdapters } from '@cw/application';
+import type { Scope } from '@cw/domain';
 import type { AIProvider, ContentStore, IdGenerator } from '@cw/ports';
 import { InMemoryContentStore } from '@cw/test-kit';
 import { v7 as uuidv7 } from 'uuid';
 import { doAgentCostGuardFromEnv } from '../do/cost-guard.js';
 import type { EdgeEnv } from '../env.js';
 import { makeAI } from '../wire.js';
-import { type AgentWfParams, REVIEW_DECISION_EVENT } from './runtime.js';
+import { type AgentWfParams, REVIEW_DECISION_EVENT, reviewInstanceId } from './runtime.js';
 
 const workflows = {
   enrich: enrichWorkflow,
@@ -57,6 +59,8 @@ function stepActivities(step: WorkflowStep, real: Activities): Activities {
     createReview: wrap('createReview', real.createReview.bind(real)),
     armReview: wrap('armReview', real.armReview.bind(real)),
     settleReview: wrap('settleReview', real.settleReview.bind(real)),
+    recordRun: wrap('recordRun', real.recordRun.bind(real)),
+    retractEntry: wrap('retractEntry', real.retractEntry.bind(real)),
   };
 }
 
@@ -71,17 +75,22 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
   override async run(
     event: WorkflowEvent<AgentWfParams>,
     step: WorkflowStep,
-  ): Promise<AgentRunResult> {
+    // A chunked publish_agents pass returns one result PER entry; the
+    // single-entry workflows return one.
+  ): Promise<AgentRunResult | AgentRunResult[]> {
     const { workflow, input } = event.payload;
-    const run = workflow === 'review' ? undefined : workflows[workflow];
-    if (workflow !== 'review' && !run) throw new Error(`unknown agent workflow "${workflow}"`);
+    // `review` and `publish_agents` are dispatched explicitly below; the map
+    // holds only the single-entry workflows.
+    const isMapped = workflow !== 'review' && workflow !== 'publish_agents';
+    const run = isMapped ? workflows[workflow] : undefined;
+    if (isMapped && !run) throw new Error(`unknown agent workflow "${workflow}"`);
 
     // Durable runs need the shared database: without HYPERDRIVE this store is
     // a fresh empty in-memory one (the demo store lives in the fetch isolate),
     // so demo deployments keep AGENT_RUNTIME unset and run agents in-process.
     const connectionString = this.env.HYPERDRIVE?.connectionString ?? this.env.DATABASE_URL;
     const store: ContentStore = connectionString
-      ? createPostgresStore(connectionString, { max: 2, fetchTypes: false })
+      ? createPostgresStore(connectionString, { max: 1, fetchTypes: false })
       : (new InMemoryContentStore() as ContentStore);
     // Same fail-closed policy as wireEdge: a durable run against the real
     // database must not persist StubAIProvider placeholders. Workflow
@@ -100,7 +109,27 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
     const ctx: AppContext = { store, clock: { now: () => new Date() }, ids, costGuard };
 
     try {
+      const startWatcher = this.env.AGENT_WF
+        ? async (scope: Scope, reviewId: string, entryId: string) => {
+            const wf = this.env.AGENT_WF as Workflow;
+            await wf
+              .create({
+                id: reviewInstanceId(reviewId),
+                params: { workflow: 'review', input: { scope, reviewId, entryId } },
+              })
+              .catch((err: unknown) => {
+                // A watcher already started (duplicate delivery) is fine.
+                const m = String(err);
+                if (!m.includes('already') && !m.includes('exists')) throw err;
+              });
+          }
+        : undefined;
       const activities = stepActivities(step, makeActivities({ ctx, ai }));
+      if (event.payload.workflow === 'publish_agents') {
+        return await publishAgentsWorkflow(activities, event.payload.input, {
+          ...(startWatcher ? { startReviewWatcher: startWatcher } : {}),
+        });
+      }
       if (event.payload.workflow === 'review') {
         // HITL watcher: the human decision arrives as a Workflow event;
         // waitForEvent parks durably (days) and rejects on timeout → null.

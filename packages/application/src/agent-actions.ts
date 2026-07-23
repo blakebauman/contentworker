@@ -26,6 +26,20 @@ export interface AgentRunner {
     input: { readonly scope: Scope; readonly entryId: string; readonly autoApply?: boolean },
   ): Promise<AgentRunOutcome>;
   /**
+   * Optional (durable runtimes only): starts the whole on-publish agent pass
+   * for a chunk of entries and returns as soon as it is durably started — the
+   * run records its own outcome. Callers that have it should prefer it over
+   * {@link runPublishAgents}, which must await each result and therefore pins
+   * the calling invocation open. Absent, the inline path applies.
+   */
+  startPublishRuns?(input: {
+    readonly scope: Scope;
+    readonly entryIds: readonly string[];
+    readonly enrich: boolean;
+    readonly moderate: boolean;
+    readonly autoApply?: boolean;
+  }): Promise<void>;
+  /**
    * Optional (durable runtimes only): starts the detached HITL watcher for a
    * pending review, which waits for the human decision as a signal/event and
    * applies on approval. Absent, decisions apply through the direct path.

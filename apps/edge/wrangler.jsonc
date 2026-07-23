@@ -108,12 +108,16 @@
         "dead_letter_queue": "cw-events-dlq"
       },
       {
-        // One agent job per invocation: each can await durable Workflow runs
-        // for minutes without starving event delivery.
+        // The consumer no longer awaits runs — it starts durable workflow
+        // instances and acks — so it batches like any other queue. Batching is
+        // what lets one instance cover many entries; max_concurrency bounds
+        // the instance-creation rate (and so the agent fan-out) under a bulk
+        // publish.
         "queue": "cw-agents",
-        "max_batch_size": 1,
-        "max_batch_timeout": 1,
+        "max_batch_size": 25,
+        "max_batch_timeout": 5,
         "max_retries": 3,
+        "max_concurrency": 4,
         "dead_letter_queue": "cw-events-dlq"
       },
       {
@@ -397,10 +401,12 @@
             "dead_letter_queue": "cw-events-dlq"
           },
           {
+            // Fire-and-forget starts: batch, and cap the creation rate.
             "queue": "cw-agents",
-            "max_batch_size": 1,
-            "max_batch_timeout": 1,
+            "max_batch_size": 25,
+            "max_batch_timeout": 5,
             "max_retries": 3,
+            "max_concurrency": 4,
             "dead_letter_queue": "cw-events-dlq"
           },
           { "queue": "cw-events-dlq", "max_batch_size": 25, "max_batch_timeout": 5 }

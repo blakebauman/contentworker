@@ -4,7 +4,9 @@ import {
   applyProposedFields,
   createAgentReview,
   generateWithBudget,
+  recordAgentRun,
   settleReviewOutcome,
+  unpublishEntry,
   wrapUntrusted,
 } from '@cw/application';
 import type { EntryFields, Scope } from '@cw/domain';
@@ -30,6 +32,14 @@ export function makeActivities(deps: ActivitiesDeps): Activities {
   }
 
   return {
+    async recordRun(scope, run) {
+      await recordAgentRun(ctx, scope, run as Parameters<typeof recordAgentRun>[2]);
+    },
+    async retractEntry(scope, entryId) {
+      // Already unpublished or gone is a no-op, not a failure — the workflow
+      // only needs the entry to END UP out of delivery.
+      await unpublishEntry(ctx, scope, entryId).catch(() => {});
+    },
     async loadEntry(scope, entryId): Promise<LoadedEntry | null> {
       const found = await ctx.store.entries.get(scope, entryId);
       if (!found) return null;
