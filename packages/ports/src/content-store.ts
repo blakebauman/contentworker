@@ -158,6 +158,11 @@ export interface TaxonomyRepo {
   deleteTag(scope: Scope, id: string): Promise<void>;
   // Per-entry associations.
   getEntryMetadata(scope: Scope, entryId: string): Promise<EntryMetadata | null>;
+  /** Batch read of entry associations; entries without metadata are absent. */
+  getEntryMetadataMany(
+    scope: Scope,
+    entryIds: readonly string[],
+  ): Promise<{ entryId: string; metadata: EntryMetadata }[]>;
   setEntryMetadata(scope: Scope, entryId: string, metadata: EntryMetadata): Promise<void>;
 }
 
@@ -250,6 +255,8 @@ export interface PublishedAsset {
 
 export interface AssetRepo {
   get(scope: Scope, id: string): Promise<Asset | null>;
+  /** Batch point-read of assets (draft or published); missing ids are absent. */
+  getMany(scope: Scope, ids: readonly string[]): Promise<Asset[]>;
   /** Lists all assets (draft + published) for the media library. */
   list(scope: Scope, query: { limit?: number; skip?: number }): Promise<Asset[]>;
   create(scope: Scope, asset: Asset): Promise<void>;
@@ -518,6 +525,11 @@ export interface TextSearchHit {
 
 export interface EntryRepo {
   get(scope: Scope, id: string): Promise<EntryWithFields | null>;
+  /**
+   * Batch point-read of draft/current entries — one backend round-trip for
+   * the whole id set (bulk publish). Missing ids are absent; order unspecified.
+   */
+  getMany(scope: Scope, ids: readonly string[]): Promise<EntryWithFields[]>;
   /** Lists draft/current entries (the Preview read path), newest-affected first. */
   list(scope: Scope, query: EntryQuery): Promise<EntryWithFields[]>;
   /** Persists a new entry and its first version. */
@@ -526,6 +538,8 @@ export interface EntryRepo {
   saveVersion(scope: Scope, entry: Entry, version: EntryVersion): Promise<void>;
   /** Updates only the aggregate (status/pointers) — no new version. */
   saveAggregate(scope: Scope, entry: Entry): Promise<void>;
+  /** Batch {@link saveAggregate} — one statement for the whole set. */
+  saveAggregateMany(scope: Scope, entries: readonly Entry[]): Promise<void>;
 
   /** Lists every saved version of an entry, newest first. */
   listVersions(scope: Scope, entryId: string): Promise<EntryVersion[]>;
@@ -534,7 +548,11 @@ export interface EntryRepo {
 
   /** Writes the published read model for an entry. */
   putPublished(scope: Scope, snapshot: PublishedEntry): Promise<void>;
+  /** Batch {@link putPublished} — one upsert statement for the whole set. */
+  putPublishedMany(scope: Scope, snapshots: readonly PublishedEntry[]): Promise<void>;
   removePublished(scope: Scope, entryId: string): Promise<void>;
+  /** Batch {@link removePublished} — one delete statement for the whole set. */
+  removePublishedMany(scope: Scope, entryIds: readonly string[]): Promise<void>;
   getPublished(scope: Scope, id: string): Promise<PublishedEntry | null>;
   /**
    * Batch point-read of published snapshots — one backend query for the whole
@@ -556,6 +574,15 @@ export interface ReferenceRepo {
     scope: Scope,
     fromEntryId: string,
     edges: readonly ReferenceEdge[],
+  ): Promise<void>;
+  /**
+   * Batch {@link replaceForEntry}: one delete for the whole from-set plus one
+   * bulk edge insert. An entry listed with no edges simply has its edges
+   * cleared (which is how a batch unpublish drops them too).
+   */
+  replaceForEntries(
+    scope: Scope,
+    replacements: readonly { fromEntryId: string; edges: readonly ReferenceEdge[] }[],
   ): Promise<void>;
   /** Removes all outgoing edges for an entry (called on unpublish/delete). */
   removeForEntry(scope: Scope, fromEntryId: string): Promise<void>;
@@ -603,6 +630,8 @@ export interface OutboxRecord {
 export interface OutboxRepo {
   /** Appends an event; must be called within the same tx as the state change. */
   append(event: DomainEvent): Promise<void>;
+  /** Batch {@link append} — one insert statement for the whole set. */
+  appendMany(events: readonly DomainEvent[]): Promise<void>;
   /** Reads up to `limit` un-relayed events, oldest first. */
   readPending(limit: number): Promise<DomainEvent[]>;
   /** Marks events as relayed so they are not re-published. */

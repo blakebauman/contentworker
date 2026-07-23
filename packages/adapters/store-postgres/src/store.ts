@@ -147,6 +147,40 @@ function makeContentTypeRepo(db: Db): ContentTypeRepo {
 }
 
 function makeEntryRepo(db: Db): EntryRepo {
+  const putPublishedMany = async (
+    scope: Scope,
+    snapshots: readonly PublishedEntry[],
+  ): Promise<void> => {
+    if (snapshots.length === 0) return;
+    await db
+      .insert(schema.entryPublished)
+      .values(snapshots.map((s) => publishedRow(scope, s)))
+      .onConflictDoUpdate({
+        target: [
+          schema.entryPublished.spaceId,
+          schema.entryPublished.environmentId,
+          schema.entryPublished.entryId,
+        ],
+        set: {
+          contentTypeApiId: sql`excluded.content_type_api_id`,
+          version: sql`excluded.version`,
+          fields: sql`excluded.fields`,
+          metadata: sql`excluded.metadata`,
+          publishedAt: sql`excluded.published_at`,
+        },
+      });
+  };
+  const removePublishedMany = async (scope: Scope, entryIds: readonly string[]): Promise<void> => {
+    if (entryIds.length === 0) return;
+    await db
+      .delete(schema.entryPublished)
+      .where(
+        and(
+          scopeFilter(schema.entryPublished, scope),
+          inArray(schema.entryPublished.entryId, [...entryIds]),
+        ),
+      );
+  };
   return {
     async get(scope, id) {
       const [entry] = await db
@@ -167,6 +201,18 @@ function makeEntryRepo(db: Db): EntryRepo {
       const result: EntryWithFields = { entry: toEntry(entry), fields: version?.fields ?? {} };
       return result;
     },
+    async getMany(scope, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.entries)
+        .where(and(scopeFilter(schema.entries, scope), inArray(schema.entries.id, [...ids])));
+      const fieldsByEntry = await currentVersionFields(db, scope, rows);
+      return rows.map((row) => ({
+        entry: toEntry(row),
+        fields: fieldsByEntry.get(row.id) ?? {},
+      }));
+    },
     async list(scope, query: EntryQuery) {
       const advanced = isAdvancedQuery(query);
       const conditions = [scopeFilter(schema.entries, scope)];
@@ -182,33 +228,7 @@ function makeEntryRepo(db: Db): EntryRepo {
       // SQL pagination is only valid when there are no JS-side field predicates.
       if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
       const rows = await select;
-      // Fetch listed entries' current-version fields in batched queries (was
-      // one query per row). The OR-of-(entryId, version) pairs stays on the
-      // (scope, entryId, version) index and never drags in historical
-      // versions; chunking keeps an advanced (unpaginated) listing under the
-      // Postgres wire-protocol parameter cap.
-      const PAIR_CHUNK = 1000;
-      const fieldsByEntry = new Map<string, EntryFields>();
-      for (let at = 0; at < rows.length; at += PAIR_CHUNK) {
-        const chunk = rows.slice(at, at + PAIR_CHUNK);
-        const versionRows = await db
-          .select()
-          .from(schema.entryVersions)
-          .where(
-            and(
-              scopeFilter(schema.entryVersions, scope),
-              or(
-                ...chunk.map((r) =>
-                  and(
-                    eq(schema.entryVersions.entryId, r.id),
-                    eq(schema.entryVersions.version, r.currentVersion),
-                  ),
-                ),
-              ),
-            ),
-          );
-        for (const v of versionRows) fieldsByEntry.set(v.entryId, v.fields);
-      }
+      const fieldsByEntry = await currentVersionFields(db, scope, rows);
       const results: EntryWithFields[] = rows.map((row) => ({
         entry: toEntry(row),
         fields: fieldsByEntry.get(row.id) ?? {},
@@ -237,6 +257,31 @@ function makeEntryRepo(db: Db): EntryRepo {
     async saveAggregate(scope, entry) {
       await saveEntryAggregate(db, scope, entry);
     },
+    async saveAggregateMany(scope, entries) {
+      if (entries.length === 0) return;
+      // One UPDATE ... FROM (VALUES ...) for the whole set. Deliberately an
+      // UPDATE, not an upsert: like the single-item saveEntryAggregate, a row
+      // deleted by a concurrent transaction must silently no-op, never be
+      // re-created as a versionless zombie by an insert arm.
+      const values = sql.join(
+        entries.map(
+          (e) =>
+            sql`(${e.id}::text, ${e.status}::text, ${e.currentVersion}::integer, ${e.publishedVersion ?? null}::integer)`,
+        ),
+        sql`, `,
+      );
+      await db.execute(sql`
+        UPDATE ${schema.entries} AS t
+        SET status = v.status,
+            current_version = v.current_version,
+            published_version = v.published_version,
+            updated_at = now()
+        FROM (VALUES ${values}) AS v(id, status, current_version, published_version)
+        WHERE t.space_id = ${scope.spaceId}
+          AND t.environment_id = ${scope.environmentId}
+          AND t.id = v.id
+      `);
+    },
     async listVersions(scope, entryId) {
       const rows = await db
         .select()
@@ -261,46 +306,13 @@ function makeEntryRepo(db: Db): EntryRepo {
       return row ? toVersion(row) : null;
     },
     async putPublished(scope, snapshot) {
-      const values = {
-        spaceId: scope.spaceId,
-        environmentId: scope.environmentId,
-        entryId: snapshot.entryId,
-        contentTypeApiId: snapshot.contentTypeApiId,
-        version: snapshot.version,
-        fields: snapshot.fields,
-        metadata: snapshot.metadata
-          ? { tags: [...snapshot.metadata.tags], concepts: [...snapshot.metadata.concepts] }
-          : null,
-        publishedAt: new Date(snapshot.publishedAt),
-      };
-      await db
-        .insert(schema.entryPublished)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [
-            schema.entryPublished.spaceId,
-            schema.entryPublished.environmentId,
-            schema.entryPublished.entryId,
-          ],
-          set: {
-            contentTypeApiId: values.contentTypeApiId,
-            version: values.version,
-            fields: values.fields,
-            metadata: values.metadata,
-            publishedAt: values.publishedAt,
-          },
-        });
+      await putPublishedMany(scope, [snapshot]);
     },
+    putPublishedMany,
     async removePublished(scope, entryId) {
-      await db
-        .delete(schema.entryPublished)
-        .where(
-          and(
-            scopeFilter(schema.entryPublished, scope),
-            eq(schema.entryPublished.entryId, entryId),
-          ),
-        );
+      await removePublishedMany(scope, [entryId]);
     },
+    removePublishedMany,
     async getPublished(scope, id) {
       const [row] = await db
         .select()
@@ -447,6 +459,21 @@ function makeAssetRepo(db: Db): AssetRepo {
           }
         : null;
     },
+    async getMany(scope, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.assets)
+        .where(and(scopeFilter(schema.assets, scope), inArray(schema.assets.id, [...ids])));
+      return rows.map((r) => ({
+        id: r.id,
+        status: r.status,
+        file: r.file,
+        title: r.title,
+        description: r.description,
+        metadata: r.metadata,
+      }));
+    },
     async list(scope, query) {
       const rows = await db
         .select()
@@ -560,6 +587,30 @@ function makeReferenceRepo(db: Db): ReferenceRepo {
         })),
       );
     },
+    async replaceForEntries(scope, replacements) {
+      if (replacements.length === 0) return;
+      await db.delete(schema.references).where(
+        and(
+          scopeFilter(schema.references, scope),
+          inArray(
+            schema.references.fromEntryId,
+            replacements.map((r) => r.fromEntryId),
+          ),
+        ),
+      );
+      const edges = replacements.flatMap((r) => r.edges);
+      if (edges.length === 0) return;
+      await db.insert(schema.references).values(
+        edges.map((e) => ({
+          spaceId: scope.spaceId,
+          environmentId: scope.environmentId,
+          fromEntryId: e.fromEntryId,
+          fromField: e.fromField,
+          toId: e.toId,
+          toType: e.toType,
+        })),
+      );
+    },
     async removeForEntry(scope, fromEntryId) {
       await db
         .delete(schema.references)
@@ -593,15 +644,22 @@ function makeReferenceRepo(db: Db): ReferenceRepo {
 }
 
 function makeOutboxRepo(db: Db): OutboxRepo {
-  return {
-    async append(event) {
-      await db.insert(schema.outbox).values({
+  const appendMany = async (events: readonly DomainEvent[]): Promise<void> => {
+    if (events.length === 0) return;
+    await db.insert(schema.outbox).values(
+      events.map((event) => ({
         id: event.id,
         type: event.type,
         payload: event,
         occurredAt: new Date(event.occurredAt),
-      });
+      })),
+    );
+  };
+  return {
+    async append(event) {
+      await appendMany([event]);
     },
+    appendMany,
     async readPending(limit) {
       // SKIP LOCKED: concurrent relayers (edge nudge vs cron sweeper, multiple
       // workers) claim disjoint rows for the duration of their transaction.
@@ -1932,6 +1990,22 @@ function makeTaxonomyRepo(db: Db): TaxonomyRepo {
         );
       return row ? { tags: row.tags, concepts: row.concepts } : null;
     },
+    async getEntryMetadataMany(scope, entryIds) {
+      if (entryIds.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.entryMetadata)
+        .where(
+          and(
+            scopeFilter(schema.entryMetadata, scope),
+            inArray(schema.entryMetadata.entryId, [...entryIds]),
+          ),
+        );
+      return rows.map((row) => ({
+        entryId: row.entryId,
+        metadata: { tags: row.tags, concepts: row.concepts },
+      }));
+    },
     async setEntryMetadata(scope, entryId, metadata: EntryMetadata) {
       const values = {
         spaceId: scope.spaceId,
@@ -2123,6 +2197,19 @@ const toPublished = (r: PubRow): PublishedEntry => ({
   ...(r.metadata ? { metadata: r.metadata } : {}),
 });
 
+const publishedRow = (scope: Scope, snapshot: PublishedEntry) => ({
+  spaceId: scope.spaceId,
+  environmentId: scope.environmentId,
+  entryId: snapshot.entryId,
+  contentTypeApiId: snapshot.contentTypeApiId,
+  version: snapshot.version,
+  fields: snapshot.fields,
+  metadata: snapshot.metadata
+    ? { tags: [...snapshot.metadata.tags], concepts: [...snapshot.metadata.concepts] }
+    : null,
+  publishedAt: new Date(snapshot.publishedAt),
+});
+
 const entryRow = (scope: Scope, entry: Entry) => ({
   spaceId: scope.spaceId,
   environmentId: scope.environmentId,
@@ -2152,6 +2239,43 @@ const toVersion = (r: EntryVersionRow): EntryVersion => ({
   fields: r.fields,
   createdAt: r.createdAt.toISOString(),
 });
+
+/**
+ * Fetches the current-version fields for a set of entry rows in batched
+ * queries (not one per row). The OR-of-(entryId, version) pairs stays on the
+ * (scope, entryId, version) index and never drags in historical versions;
+ * chunking keeps an unbounded row set under the Postgres wire-protocol
+ * parameter cap.
+ */
+async function currentVersionFields(
+  db: Db,
+  scope: Scope,
+  rows: readonly { id: string; currentVersion: number }[],
+): Promise<Map<string, EntryFields>> {
+  const PAIR_CHUNK = 1000;
+  const fieldsByEntry = new Map<string, EntryFields>();
+  for (let at = 0; at < rows.length; at += PAIR_CHUNK) {
+    const chunk = rows.slice(at, at + PAIR_CHUNK);
+    const versionRows = await db
+      .select()
+      .from(schema.entryVersions)
+      .where(
+        and(
+          scopeFilter(schema.entryVersions, scope),
+          or(
+            ...chunk.map((r) =>
+              and(
+                eq(schema.entryVersions.entryId, r.id),
+                eq(schema.entryVersions.version, r.currentVersion),
+              ),
+            ),
+          ),
+        ),
+      );
+    for (const v of versionRows) fieldsByEntry.set(v.entryId, v.fields);
+  }
+  return fieldsByEntry;
+}
 
 async function saveEntryAggregate(db: Db, scope: Scope, entry: Entry): Promise<void> {
   await db

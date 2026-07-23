@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { AppContext } from '@cw/application';
 import {
   authenticate,
+  bulkEntryAction,
   createAgentReview,
   createAgentSchedule,
   createApiKey,
@@ -181,6 +182,51 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
     await publishEntry(ctx, scope, e.entry.id);
     const pending = await store.outbox.readPending(100);
     expect(pending.some((ev) => ev.type === 'entry.published')).toBe(true);
+  });
+
+  it('bulk publishes and unpublishes through the batched statements', async () => {
+    const mk = (title: string) =>
+      createEntry(ctx, scope, {
+        contentTypeApiId: 'article',
+        fields: { title: { 'en-US': title } },
+      });
+    const [a, b, c] = await Promise.all([mk('Bulk A'), mk('Bulk B'), mk('Bulk C')]);
+
+    // Publish: exercises getMany, saveAggregateMany (multi-value upsert),
+    // putPublishedMany, replaceForEntries, appendMany — plus a per-item
+    // failure partitioned inside the committed batch.
+    const summary = await bulkEntryAction(ctx, scope, 'publish', [
+      a.entry.id,
+      b.entry.id,
+      c.entry.id,
+      'missing-entry-id',
+    ]);
+    expect(summary.succeeded).toBe(3);
+    expect(summary.failed).toBe(1);
+
+    const published = await store.entries.getPublishedMany(scope, [
+      a.entry.id,
+      b.entry.id,
+      c.entry.id,
+    ]);
+    expect(published).toHaveLength(3);
+    // One shared publish instant across the chunk.
+    expect(new Set(published.map((p) => p.publishedAt)).size).toBe(1);
+    const drafts = await store.entries.getMany(scope, [a.entry.id, b.entry.id]);
+    expect(drafts.every((d) => d.entry.status === 'published')).toBe(true);
+    const events = await store.outbox.readPending(1000);
+    const ourPublishes = events.filter(
+      (ev) =>
+        ev.type === 'entry.published' &&
+        [a.entry.id, b.entry.id, c.entry.id].includes((ev as { entryId: string }).entryId),
+    );
+    expect(ourPublishes).toHaveLength(3);
+
+    // Unpublish: exercises removePublishedMany + edge clearing.
+    const undo = await bulkEntryAction(ctx, scope, 'unpublish', [a.entry.id, b.entry.id]);
+    expect(undo.succeeded).toBe(2);
+    expect(await store.entries.getPublishedMany(scope, [a.entry.id, b.entry.id])).toHaveLength(0);
+    expect(await store.entries.getPublishedMany(scope, [c.entry.id])).toHaveLength(1);
   });
 
   it('getPublishedMany returns present snapshots only, scoped', async () => {

@@ -1,4 +1,5 @@
 import {
+  type ContentType,
   type Entry,
   InvalidStateError,
   NotFoundError,
@@ -9,7 +10,7 @@ import {
   publish,
   unpublish,
 } from '@cw/domain';
-import type { ContentStoreTx, PublishedEntry } from '@cw/ports';
+import type { ContentStoreTx, EntryWithFields, PublishedEntry } from '@cw/ports';
 import type { AppContext } from './context.js';
 
 /**
@@ -94,6 +95,214 @@ export async function unpublishEntryTx(
     contentTypeApiId: updated.contentTypeApiId,
   });
   return updated;
+}
+
+/** Per-item outcome split of a batched publish/unpublish. */
+export interface BatchPublishResult {
+  readonly published: Entry[];
+  /** Items that failed validation; the rest of the batch still committed. */
+  readonly failures: { id: string; error: string }[];
+}
+
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Publishes many entries inside one transaction with a bounded statement
+ * count: batch reads (entries, reference targets, taxonomy) + one multi-row
+ * write per table + one outbox row per entry — ~10 statements per chunk
+ * instead of ~8 per entry. Per-item validation failures (missing entry,
+ * invalid state, dangling links) are partitioned into `failures` without
+ * aborting the transaction, so one bad item never sinks its chunk.
+ *
+ * Every published entry in the chunk shares one `publishedAt` instant — the
+ * same behavior as a release publish; the delivery keyset cursor breaks ties
+ * by entryId.
+ */
+export async function publishEntriesTx(
+  ctx: AppContext,
+  tx: ContentStoreTx,
+  scope: Scope,
+  ids: readonly string[],
+): Promise<BatchPublishResult> {
+  const uniqueIds = [...new Set(ids)];
+  const failures: { id: string; error: string }[] = [];
+
+  const found = await tx.entries.getMany(scope, uniqueIds);
+  const byId = new Map(found.map((f) => [f.entry.id, f]));
+
+  // Load each distinct content type once for the whole chunk.
+  const typeIds = [...new Set(found.map((f) => f.entry.contentTypeApiId))];
+  const types = new Map<string, ContentType>();
+  for (const apiId of typeIds) {
+    const contentType = await tx.contentTypes.get(scope, apiId);
+    if (contentType) types.set(apiId, contentType);
+  }
+
+  // Validate per item: existence, state machine, reference extraction.
+  const candidates: { item: EntryWithFields; published: Entry; edges: ReferenceEdge[] }[] = [];
+  for (const id of uniqueIds) {
+    const item = byId.get(id);
+    if (!item) {
+      failures.push({ id, error: errorMessage(new NotFoundError('Entry', id)) });
+      continue;
+    }
+    try {
+      // Same order as publishEntryTx: the state machine runs before the
+      // content-type check, so an archived entry with a missing type reports
+      // the same error on either path.
+      const published = publish(item.entry);
+      const contentType = types.get(item.entry.contentTypeApiId);
+      if (!contentType) {
+        failures.push({
+          id,
+          error: errorMessage(new NotFoundError('ContentType', item.entry.contentTypeApiId)),
+        });
+        continue;
+      }
+      const edges = extractReferences(published.id, item.fields, contentType);
+      candidates.push({ item, published, edges });
+    } catch (e) {
+      failures.push({ id, error: errorMessage(e) });
+    }
+  }
+
+  // Referential integrity, batched: one existence read per target repo for
+  // the chunk's whole edge set (a target inside this same batch counts — it
+  // exists as a draft, exactly as the single-item path sees it).
+  const entryTargets = new Set<string>();
+  const assetTargets = new Set<string>();
+  for (const c of candidates) {
+    for (const edge of c.edges) {
+      if (edge.toType === 'Entry') entryTargets.add(edge.toId);
+      else if (edge.toType === 'Asset') assetTargets.add(edge.toId);
+    }
+  }
+  const existingEntries = new Set(
+    (await tx.entries.getMany(scope, [...entryTargets])).map((f) => f.entry.id),
+  );
+  const existingAssets = new Set(
+    (await tx.assets.getMany(scope, [...assetTargets])).map((a) => a.id),
+  );
+  const publishable: typeof candidates = [];
+  for (const c of candidates) {
+    const issues = c.edges.flatMap((edge) => {
+      if (edge.toType === 'Entry' && !existingEntries.has(edge.toId)) {
+        return [{ field: edge.fromField, message: `Linked entry "${edge.toId}" does not exist` }];
+      }
+      if (edge.toType === 'Asset' && !existingAssets.has(edge.toId)) {
+        return [{ field: edge.fromField, message: `Linked asset "${edge.toId}" does not exist` }];
+      }
+      return [];
+    });
+    if (issues.length > 0) {
+      failures.push({ id: c.published.id, error: errorMessage(new ValidationError(issues)) });
+    } else {
+      publishable.push(c);
+    }
+  }
+
+  if (publishable.length === 0) return { published: [], failures };
+
+  const okIds = publishable.map((c) => c.published.id);
+  const metadataByEntry = new Map(
+    (await tx.taxonomy.getEntryMetadataMany(scope, okIds)).map((m) => [m.entryId, m.metadata]),
+  );
+
+  const publishedAt = ctx.clock.now().toISOString();
+  await tx.entries.saveAggregateMany(
+    scope,
+    publishable.map((c) => c.published),
+  );
+  await tx.entries.putPublishedMany(
+    scope,
+    publishable.map((c) => ({
+      entryId: c.published.id,
+      contentTypeApiId: c.published.contentTypeApiId,
+      version: c.published.currentVersion,
+      fields: c.item.fields,
+      publishedAt,
+      metadata: metadataByEntry.get(c.published.id),
+    })),
+  );
+  await tx.references.replaceForEntries(
+    scope,
+    publishable.map((c) => ({ fromEntryId: c.published.id, edges: c.edges })),
+  );
+  await tx.outbox.appendMany(
+    publishable.map((c) => ({
+      id: ctx.ids.newId(),
+      type: 'entry.published' as const,
+      scope,
+      occurredAt: publishedAt,
+      entryId: c.published.id,
+      contentTypeApiId: c.published.contentTypeApiId,
+      version: c.published.currentVersion,
+      fields: c.item.fields,
+    })),
+  );
+
+  return { published: publishable.map((c) => c.published), failures };
+}
+
+/**
+ * Withdraws many entries' published versions inside one transaction — the
+ * batched counterpart of {@link unpublishEntryTx}, with the same per-item
+ * failure partitioning as {@link publishEntriesTx}.
+ */
+export async function unpublishEntriesTx(
+  ctx: AppContext,
+  tx: ContentStoreTx,
+  scope: Scope,
+  ids: readonly string[],
+): Promise<BatchPublishResult> {
+  const uniqueIds = [...new Set(ids)];
+  const failures: { id: string; error: string }[] = [];
+  const found = await tx.entries.getMany(scope, uniqueIds);
+  const byId = new Map(found.map((f) => [f.entry.id, f]));
+
+  const unpublishable: Entry[] = [];
+  for (const id of uniqueIds) {
+    const item = byId.get(id);
+    if (!item) {
+      failures.push({ id, error: errorMessage(new NotFoundError('Entry', id)) });
+      continue;
+    }
+    if (item.entry.publishedVersion === null) {
+      failures.push({ id, error: 'Entry is not published' });
+      continue;
+    }
+    try {
+      unpublishable.push(unpublish(item.entry));
+    } catch (e) {
+      failures.push({ id, error: errorMessage(e) });
+    }
+  }
+
+  if (unpublishable.length === 0) return { published: [], failures };
+
+  const occurredAt = ctx.clock.now().toISOString();
+  await tx.entries.saveAggregateMany(scope, unpublishable);
+  await tx.entries.removePublishedMany(
+    scope,
+    unpublishable.map((e) => e.id),
+  );
+  // Empty edge sets: replaceForEntries deletes without re-inserting.
+  await tx.references.replaceForEntries(
+    scope,
+    unpublishable.map((e) => ({ fromEntryId: e.id, edges: [] })),
+  );
+  await tx.outbox.appendMany(
+    unpublishable.map((e) => ({
+      id: ctx.ids.newId(),
+      type: 'entry.unpublished' as const,
+      scope,
+      occurredAt,
+      entryId: e.id,
+      contentTypeApiId: e.contentTypeApiId,
+    })),
+  );
+
+  return { published: unpublishable, failures };
 }
 
 /**

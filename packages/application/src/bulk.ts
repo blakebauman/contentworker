@@ -1,10 +1,18 @@
 import { type EntryFields, type Scope, ValidationError } from '@cw/domain';
 import type { AppContext } from './context.js';
 import { type CreateEntryInput, createEntry } from './entries.js';
-import { publishEntry, unpublishEntry } from './publishing.js';
+import {
+  publishEntriesTx,
+  publishEntry,
+  unpublishEntriesTx,
+  unpublishEntry,
+} from './publishing.js';
 
 /** Largest batch a single bulk call accepts. */
 export const BULK_LIMIT = 1000;
+
+/** Ids per transaction inside a bulk call — bounds statement/lock footprint. */
+export const BULK_TX_CHUNK = 200;
 
 export type BulkEntryAction = 'publish' | 'unpublish';
 
@@ -38,6 +46,12 @@ function summarize(action: string, results: BulkItemResult[]): BulkSummary {
 /**
  * Publishes or unpublishes many entries in one call. Each item is independent:
  * one failure never aborts the rest, and the per-item outcome is returned.
+ *
+ * Items are processed in chunked batch transactions (~10 statements per
+ * {@link BULK_TX_CHUNK} ids instead of ~8 per id). Validation failures are
+ * partitioned inside the batch; if a chunk fails at the database level, it
+ * falls back to the single-item path so one poison row is isolated instead of
+ * failing its 199 neighbors.
  */
 export async function bulkEntryAction(
   ctx: AppContext,
@@ -46,14 +60,32 @@ export async function bulkEntryAction(
   ids: readonly string[],
 ): Promise<BulkSummary> {
   assertBatch(ids.length);
-  const run = action === 'publish' ? publishEntry : unpublishEntry;
+  const runTx = action === 'publish' ? publishEntriesTx : unpublishEntriesTx;
+  const runOne = action === 'publish' ? publishEntry : unpublishEntry;
   const results: BulkItemResult[] = [];
-  for (const id of ids) {
+  for (let at = 0; at < ids.length; at += BULK_TX_CHUNK) {
+    const chunk = ids.slice(at, at + BULK_TX_CHUNK);
     try {
-      await run(ctx, scope, id);
-      results.push({ id, ok: true });
-    } catch (e) {
-      results.push({ id, ok: false, error: e instanceof Error ? e.message : String(e) });
+      const batch = await ctx.store.withTransaction((tx) => runTx(ctx, tx, scope, chunk));
+      const errorById = new Map(batch.failures.map((f) => [f.id, f.error]));
+      for (const id of chunk) {
+        const error = errorById.get(id);
+        results.push(error ? { id, ok: false, error } : { id, ok: true });
+      }
+    } catch {
+      // The chunk transaction itself failed (constraint violation, connection
+      // loss mid-batch): retry item-by-item to isolate the poison row. If the
+      // failure was actually a lost COMMIT ack, the retry re-publishes
+      // already-published entries and emits duplicate outbox events — safe
+      // under the platform's at-least-once delivery + idempotent consumers.
+      for (const id of chunk) {
+        try {
+          await runOne(ctx, scope, id);
+          results.push({ id, ok: true });
+        } catch (e) {
+          results.push({ id, ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
     }
   }
   return summarize(action, results);

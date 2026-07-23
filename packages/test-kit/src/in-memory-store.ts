@@ -139,6 +139,16 @@ export class InMemoryContentStore implements ContentStore {
       const result: EntryWithFields = { entry, fields: current?.fields ?? {} };
       return result;
     },
+    getMany: async (scope, ids) =>
+      // Dedupe first: Postgres inArray returns each matching row once, so
+      // duplicate input ids must not yield duplicate rows here either.
+      [...new Set(ids)].flatMap((id) => {
+        const entry = this.entryData.get(`${scopeKey(scope)}::${id}`);
+        if (!entry) return [];
+        const versions = this.versionData.get(`${scopeKey(scope)}::${id}`) ?? [];
+        const current = versions.find((v) => v.version === entry.currentVersion);
+        return [{ entry, fields: current?.fields ?? {} }];
+      }),
     list: async (scope, query: EntryQuery) => {
       const prefix = `${scopeKey(scope)}::`;
       let entries = [...this.entryData.entries()]
@@ -178,6 +188,9 @@ export class InMemoryContentStore implements ContentStore {
     saveAggregate: async (scope, entry) => {
       this.entryData.set(`${scopeKey(scope)}::${entry.id}`, entry);
     },
+    saveAggregateMany: async (scope, entries) => {
+      for (const entry of entries) this.entryData.set(`${scopeKey(scope)}::${entry.id}`, entry);
+    },
     listVersions: async (scope, entryId) =>
       [...(this.versionData.get(`${scopeKey(scope)}::${entryId}`) ?? [])].sort(
         (a, b) => b.version - a.version,
@@ -188,12 +201,18 @@ export class InMemoryContentStore implements ContentStore {
     putPublished: async (scope, snapshot) => {
       this.publishedData.set(`${scopeKey(scope)}::${snapshot.entryId}`, snapshot);
     },
+    putPublishedMany: async (scope, snapshots) => {
+      for (const s of snapshots) this.publishedData.set(`${scopeKey(scope)}::${s.entryId}`, s);
+    },
     removePublished: async (scope, entryId) => {
       this.publishedData.delete(`${scopeKey(scope)}::${entryId}`);
     },
+    removePublishedMany: async (scope, entryIds) => {
+      for (const id of entryIds) this.publishedData.delete(`${scopeKey(scope)}::${id}`);
+    },
     getPublished: async (scope, id) => this.publishedData.get(`${scopeKey(scope)}::${id}`) ?? null,
     getPublishedMany: async (scope, ids) =>
-      ids.flatMap((id) => this.publishedData.get(`${scopeKey(scope)}::${id}`) ?? []),
+      [...new Set(ids)].flatMap((id) => this.publishedData.get(`${scopeKey(scope)}::${id}`) ?? []),
     listPublished: async (scope, query: EntryQuery) => {
       const prefix = `${scopeKey(scope)}::`;
       let rows = [...this.publishedData.entries()]
@@ -297,6 +316,8 @@ export class InMemoryContentStore implements ContentStore {
 
   readonly assets: AssetRepo = {
     get: async (scope, id) => this.assetData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    getMany: async (scope, ids) =>
+      [...new Set(ids)].flatMap((id) => this.assetData.get(`${scopeKey(scope)}::${id}`) ?? []),
     list: async (scope, query) => {
       const prefix = `${scopeKey(scope)}::`;
       const rows = [...this.assetData.entries()]
@@ -320,7 +341,9 @@ export class InMemoryContentStore implements ContentStore {
     getPublished: async (scope, id) =>
       this.publishedAssetData.get(`${scopeKey(scope)}::${id}`) ?? null,
     getPublishedMany: async (scope, ids) =>
-      ids.flatMap((id) => this.publishedAssetData.get(`${scopeKey(scope)}::${id}`) ?? []),
+      [...new Set(ids)].flatMap(
+        (id) => this.publishedAssetData.get(`${scopeKey(scope)}::${id}`) ?? [],
+      ),
     listPublished: async (scope, query) => {
       const prefix = `${scopeKey(scope)}::`;
       const rows = [...this.publishedAssetData.entries()]
@@ -336,6 +359,11 @@ export class InMemoryContentStore implements ContentStore {
   readonly references: ReferenceRepo = {
     replaceForEntry: async (scope, fromEntryId, edges) => {
       this.referenceData.set(`${scopeKey(scope)}::${fromEntryId}`, [...edges]);
+    },
+    replaceForEntries: async (scope, replacements) => {
+      for (const r of replacements) {
+        this.referenceData.set(`${scopeKey(scope)}::${r.fromEntryId}`, [...r.edges]);
+      }
     },
     removeForEntry: async (scope, fromEntryId) => {
       this.referenceData.delete(`${scopeKey(scope)}::${fromEntryId}`);
@@ -756,6 +784,11 @@ export class InMemoryContentStore implements ContentStore {
     },
     getEntryMetadata: async (scope, entryId) =>
       this.entryMetadataData.get(`${scopeKey(scope)}::${entryId}`) ?? null,
+    getEntryMetadataMany: async (scope, entryIds) =>
+      [...new Set(entryIds)].flatMap((entryId) => {
+        const metadata = this.entryMetadataData.get(`${scopeKey(scope)}::${entryId}`);
+        return metadata ? [{ entryId, metadata }] : [];
+      }),
     setEntryMetadata: async (scope, entryId, metadata) => {
       this.entryMetadataData.set(`${scopeKey(scope)}::${entryId}`, metadata);
     },
@@ -847,6 +880,9 @@ export class InMemoryContentStore implements ContentStore {
   readonly outbox: OutboxRepo = {
     append: async (event) => {
       this.outboxData.push({ event, relayed: false });
+    },
+    appendMany: async (events) => {
+      for (const event of events) this.outboxData.push({ event, relayed: false });
     },
     readPending: async (limit) =>
       this.outboxData
