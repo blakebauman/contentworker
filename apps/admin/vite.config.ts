@@ -27,26 +27,11 @@ export default defineConfig({
   resolve: { alias: { '@': path.resolve(__dirname, './src') } },
   server: { port, strictPort, proxy, watch },
   preview: { port, strictPort, proxy },
-  // Split rarely-changing vendor code into long-cacheable chunks so an app-code
-  // change doesn't bust the framework bundle. (Route code is split via React.lazy.)
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return undefined;
-          if (/[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) {
-            return 'react-vendor';
-          }
-          if (id.includes('@radix-ui')) return 'radix';
-          if (id.includes('@tiptap') || id.includes('prosemirror')) return 'editor';
-          if (id.includes('recharts') || id.includes('/d3-') || id.includes('victory')) {
-            return 'charts';
-          }
-          return undefined;
-        },
-      },
-    },
-  },
+  // No manualChunks: hand-rolled vendor buckets created circular chunk imports
+  // (Rollup merged shared helper modules into the charts chunk, which then
+  // initialized before React — `undefined.forwardRef` at runtime). Route code
+  // is already split via React.lazy, which keeps recharts/tiptap out of the
+  // entry chunk without manual bucketing.
   // Unit/component tests live in test/; e2e/ is driven by Playwright, not Vitest.
   test: { include: ['test/**/*.test.{ts,tsx}'], environment: 'jsdom' },
 });
