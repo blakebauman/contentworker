@@ -12,7 +12,9 @@ const WINDOW_MS = 300;
 // (the upstream "isolated storage failed" issue — flaky on slow CI runners).
 // Delete (not run) the alarm: the handler re-arms itself when windows remain.
 afterEach(async () => {
-  for (const id of await listDurableObjectIds(env.AUTH_LIMITER)) {
+  // listDurableObjectIds is typed for an untyped namespace; ours is typed.
+  const ns = env.AUTH_LIMITER as unknown as DurableObjectNamespace;
+  for (const id of await listDurableObjectIds(ns)) {
     await runInDurableObject(env.AUTH_LIMITER.get(id), (_instance, state) =>
       state.storage.deleteAlarm(),
     );

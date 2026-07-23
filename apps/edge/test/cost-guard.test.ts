@@ -17,7 +17,9 @@ const WINDOW_MS = 2_000;
 // stack (flaky "isolated storage failed" on slow runners). Delete, don't run:
 // the alarm handler re-arms itself when live windows remain.
 afterEach(async () => {
-  for (const id of await listDurableObjectIds(env.AI_BUDGET)) {
+  // listDurableObjectIds is typed for an untyped namespace; ours is typed.
+  const ns = env.AI_BUDGET as unknown as DurableObjectNamespace;
+  for (const id of await listDurableObjectIds(ns)) {
     await runInDurableObject(env.AI_BUDGET.get(id), (_instance, state) =>
       state.storage.deleteAlarm(),
     );
