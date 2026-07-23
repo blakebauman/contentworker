@@ -1,12 +1,16 @@
 import { logger } from '@cw/telemetry';
 import {
+  CITIES,
   WORDS,
   assetLink,
   ensurePublishedEntry,
   entryLink,
+  isoDate,
   localized,
   pick,
+  prose,
   richTextDoc,
+  richTextGuide,
   richTextKitchenSink,
   seedGeneratedEntries,
   statusFor,
@@ -19,19 +23,21 @@ export interface CorpusSeed {
   readonly productIds: readonly string[];
   /** Ids of generated entries left as drafts (scheduling/publish demos). */
   readonly draftArticleIds: readonly string[];
+  /** Ids of published generated entries (scheduled-unpublish demos). */
+  readonly publishedArticleIds: readonly string[];
 }
 
 /** Generated-type volumes; the bulk types scale linearly for benchmarking. */
 export function volumes(scale: number) {
   return {
-    authors: 12,
-    categories: 12,
-    articles: 100 * scale,
-    products: 30 * scale,
-    events: 25 * scale,
-    recipes: 20 * scale,
-    pages: 12,
-    landingPages: 8,
+    authors: 24,
+    categories: 18,
+    articles: 250 * scale,
+    products: 80 * scale,
+    events: 60 * scale,
+    recipes: 50 * scale,
+    pages: 30,
+    landingPages: 15,
   };
 }
 
@@ -89,18 +95,38 @@ export async function seedCorpus(
   // --- authors --------------------------------------------------------------
   const authorIds = await seedGeneratedEntries(run, 'author', 'name', vol.authors, (i) => {
     const first = pick(['Jordan', 'Alex', 'Sam', 'Riley', 'Casey', 'Morgan'] as const, i);
-    const last = pick(['Lee', 'Kim', 'Rivera', 'Patel', 'Nguyen', 'Okafor'] as const, i * 5 + 1);
+    const last = pick(
+      ['Lee', 'Kim', 'Rivera', 'Patel', 'Nguyen', 'Okafor', 'Sørensen', 'Haddad'] as const,
+      i * 5 + 1,
+    );
     const name = `${first} ${last}`;
     return {
       matchValue: name,
       status: 'published',
       fields: {
         name: localized(locale, name),
-        role: localized(locale, pick(['Staff writer', 'Editor', 'Guest author'] as const, i)),
+        role: localized(
+          locale,
+          pick(
+            [
+              'Staff writer',
+              'Editor',
+              'Guest author',
+              'Developer advocate',
+              'Contributor',
+            ] as const,
+            i,
+          ),
+        ),
         bio: localized(
           locale,
-          `Writes about ${pick(WORDS.topics, i)} and ${pick(WORDS.topics, i + 3)}.`,
-          hasDe ? { 'de-DE': `Schreibt über ${pick(WORDS.topics, i)}.` } : undefined,
+          `${name} writes about ${pick(WORDS.topics, i)} and ${pick(WORDS.topics, i + 3)}, ` +
+            `mostly for ${pick(WORDS.audiences, i)}. Based in ${pick(CITIES, i).name}.`,
+          hasDe
+            ? {
+                'de-DE': `${name} schreibt über ${pick(WORDS.topics, i)} — aus ${pick(CITIES, i).name}.`,
+              }
+            : undefined,
         ),
       },
     };
@@ -108,37 +134,58 @@ export async function seedCorpus(
 
   // --- products -------------------------------------------------------------
   const productIds = await seedGeneratedEntries(run, 'product', 'name', vol.products, (i) => {
-    const name = `${pick(WORDS.adjectives, i)} ${pick(['Workspace', 'Toolkit', 'Console', 'Bundle', 'Kit'] as const, i)} ${i}`;
+    const line = pick(
+      ['Workspace', 'Toolkit', 'Console', 'Bundle', 'Kit', 'Studio', 'Field Kit'] as const,
+      i,
+    );
+    const name = `${pick(WORDS.adjectives, i)} ${line} ${i}`;
+    const price = 9 + (i % 40) * 10 + (i % 3) * 0.99;
     return {
       matchValue: name,
       status: statusFor(i),
       fields: {
-        name: localized(locale, name),
-        description: localized(locale, `The ${name} for ${pick(WORDS.topics, i)} teams.`),
-        price: localized(locale, 9 + (i % 20) * 10),
+        name: localized(
+          locale,
+          name,
+          hasDe && i % 2 === 0 ? { 'de-DE': `${name} (DE-Ausgabe)` } : undefined,
+        ),
+        description: localized(
+          locale,
+          `The ${line.toLowerCase()} built for ${pick(WORDS.audiences, i)} who care about ` +
+            `${pick(WORDS.topics, i)}. Designed to ${pick(WORDS.outcomes, i)}.`,
+        ),
+        price: localized(locale, Math.round(price * 100) / 100),
         inStock: localized(locale, i % 4 !== 0),
         sku: localized(locale, `${pick(['CW', 'PR', 'KT'] as const, i)}-${String(1000 + i)}`),
         images: localized(locale, [asset(i), asset(i + 1)].filter(Boolean)),
         specs: localized(locale, {
           weightKg: (i % 5) + 0.5,
-          dimensions: { w: 10 + i, h: 20, d: 5 },
-          materials: [pick(['aluminium', 'walnut', 'recycled-abs'] as const, i)],
+          dimensions: { w: 10 + (i % 30), h: 20 + (i % 12), d: 5 + (i % 4) },
+          materials: [
+            pick(['aluminium', 'walnut', 'recycled-abs', 'steel', 'cork'] as const, i),
+            pick(['felt', 'glass', 'bamboo'] as const, i + 1),
+          ],
+          warrantyYears: (i % 3) + 1,
+          madeIn: pick(CITIES, i).name,
         }),
         availability: localized(
           locale,
           pick(['in-stock', 'backorder', 'discontinued'] as const, i % 9 === 0 ? 2 : i % 2),
         ),
       },
-      patch: { price: localized(locale, 9 + (i % 20) * 10 + 5) },
+      patch: { price: localized(locale, Math.round((price + 5) * 100) / 100) },
     };
   });
 
   // --- articles (the big block; carries taxonomy metadata + all links) ------
+  const now = run.ctx.clock.now();
   const draftArticleIds: string[] = [];
   const articleIds = await seedGeneratedEntries(run, 'article', 'title', vol.articles, (i) => {
     const title = `${pick(WORDS.verbs, i)} ${pick(WORDS.topics, i)} — part ${Math.floor(i / WORDS.topics.length) + 1}`;
     const status = statusFor(i);
-    const withMeta = i % 10 === 1;
+    // Every 4th entry carries taxonomy metadata so tag/concept filters return
+    // meaningful result sets at any scale.
+    const withMeta = i % 4 === 1;
     return {
       matchValue: title,
       status,
@@ -152,55 +199,77 @@ export async function seedCorpus(
         title: localized(
           locale,
           title,
-          hasDe && i % 3 === 0 ? { 'de-DE': `${title} (DE)` } : undefined,
+          hasDe && i % 2 === 0
+            ? {
+                'de-DE': `${pick(WORDS.topics, i)} verstehen — Teil ${Math.floor(i / WORDS.topics.length) + 1}`,
+              }
+            : undefined,
         ),
-        body: localized(
+        body: localized(locale, prose(i)),
+        summary: localized(
           locale,
-          `${pick(WORDS.adjectives, i)} guidance on ${pick(WORDS.topics, i)}. ` +
-            `Covers ${pick(WORDS.topics, i + 1)} and ${pick(WORDS.topics, i + 2)} in depth.`,
+          `How ${pick(WORDS.audiences, i)} ${pick(WORDS.outcomes, i)} — field notes on ${pick(WORDS.topics, i)}.`,
+          hasDe && i % 2 === 0
+            ? { 'de-DE': `Praxisnotizen zu ${pick(WORDS.topics, i)}.` }
+            : undefined,
         ),
-        summary: localized(locale, `Field notes on ${pick(WORDS.topics, i)}.`),
         author: localized(locale, entryLink(pick(authorIds, i))),
-        views: localized(locale, (i * 137) % 5000),
+        views: localized(locale, (i * 137) % 25000),
         featured: localized(locale, i % 6 === 0),
-        publishedDate: localized(
+        // Published dates spread over the past year relative to the clock, so
+        // date-range filters and "recent" sorts always have fresh material.
+        publishedDate: localized(locale, isoDate(now, -((i * 3) % 365), 9)),
+        keywords: localized(
           locale,
-          `2026-0${(i % 6) + 1}-${String((i % 27) + 1).padStart(2, '0')}T09:00:00.000Z`,
+          [pick(WORDS.topics, i), pick(WORDS.topics, i + 4), pick(WORDS.audiences, i)].slice(
+            0,
+            (i % 3) + 1,
+          ),
         ),
-        keywords: localized(locale, [pick(WORDS.topics, i), pick(WORDS.topics, i + 4)]),
         ...(asset(i) ? { heroImage: localized(locale, asset(i)) } : {}),
-        category: localized(locale, entryLink(pick(categoryIds, i))),
+        // A slice of articles without category exercises absent-optional-field
+        // rendering and `exists` filters.
+        ...(i % 13 === 0 ? {} : { category: localized(locale, entryLink(pick(categoryIds, i))) }),
         readingTime: localized(locale, (i % 25) + 2),
       },
       patch: {
-        summary: localized(locale, `Updated field notes on ${pick(WORDS.topics, i)} (v2).`),
+        summary: localized(
+          locale,
+          `Revised: what ${pick(WORDS.audiences, i)} learned about ${pick(WORDS.topics, i)} in production.`,
+        ),
       },
     };
   });
+  const publishedArticleIds: string[] = [];
   for (let i = 0; i < vol.articles; i++) {
-    if (statusFor(i) === 'draft' && articleIds[i]) draftArticleIds.push(articleIds[i]!);
+    const id = articleIds[i];
+    if (!id) continue;
+    if (statusFor(i) === 'draft') draftArticleIds.push(id);
+    else if (statusFor(i) === 'published') publishedArticleIds.push(id);
   }
 
   // --- events ---------------------------------------------------------------
   await seedGeneratedEntries(run, 'event', 'title', vol.events, (i) => {
-    const title = `${pick(['Summit', 'Meetup', 'Workshop', 'Webinar'] as const, i)}: ${pick(WORDS.topics, i)} ${i}`;
+    const city = pick(CITIES, i);
+    const kind = pick(['Summit', 'Meetup', 'Workshop', 'Webinar', 'Office hours'] as const, i);
+    const title = `${city.name} ${kind}: ${pick(WORDS.topics, i)}`;
+    // Events spread from 60 days back to ~10 months out relative to the clock,
+    // so past/upcoming filters both return material on any demo day.
+    const dayOffset = -60 + ((i * 11) % 360);
     return {
       matchValue: title,
       status: statusFor(i),
       fields: {
-        title: localized(locale, title),
-        startDate: localized(
+        title: localized(
           locale,
-          `2026-1${i % 2}-${String((i % 27) + 1).padStart(2, '0')}T18:00:00.000Z`,
+          title,
+          hasDe && i % 2 === 0
+            ? { 'de-DE': `${city.name} ${kind}: ${pick(WORDS.topics, i)} (DE)` }
+            : undefined,
         ),
-        endDate: localized(
-          locale,
-          `2026-1${i % 2}-${String((i % 27) + 1).padStart(2, '0')}T21:00:00.000Z`,
-        ),
-        venue: localized(locale, {
-          lat: 37.77 + (i % 10) * 0.5,
-          lon: -122.42 + (i % 10) * 0.7,
-        }),
+        startDate: localized(locale, isoDate(now, dayOffset, 18)),
+        endDate: localized(locale, isoDate(now, dayOffset, 21)),
+        venue: localized(locale, { lat: city.lat, lon: city.lon }),
         capacity: localized(locale, 50 + (i % 20) * 25),
         status: localized(
           locale,
@@ -209,6 +278,7 @@ export async function seedCorpus(
         speakers: localized(locale, [
           entryLink(pick(authorIds, i)),
           entryLink(pick(authorIds, i + 5)),
+          ...(i % 3 === 0 ? [entryLink(pick(authorIds, i + 11))] : []),
         ]),
       },
       patch: { capacity: localized(locale, 50 + (i % 20) * 25 + 10) },
@@ -217,7 +287,15 @@ export async function seedCorpus(
 
   // --- recipes --------------------------------------------------------------
   await seedGeneratedEntries(run, 'recipe', 'name', vol.recipes, (i) => {
-    const name = `${pick(['Roasted', 'Charred', 'Braised', 'Fresh'] as const, i)} ${pick(['squash', 'salmon', 'greens', 'noodles', 'flatbread'] as const, i)} No. ${i}`;
+    const method = pick(
+      ['Roasted', 'Charred', 'Braised', 'Fresh', 'Smoked', 'Pickled'] as const,
+      i,
+    );
+    const base = pick(
+      ['squash', 'salmon', 'greens', 'noodles', 'flatbread', 'mushrooms', 'citrus'] as const,
+      i,
+    );
+    const name = `${method} ${base} No. ${i}`;
     return {
       matchValue: name,
       status: statusFor(i),
@@ -225,11 +303,31 @@ export async function seedCorpus(
         name: localized(locale, name),
         instructions: localized(
           locale,
-          richTextDoc(`Prepare the ${name.toLowerCase()} in three steps.`),
+          richTextGuide(
+            name,
+            [
+              `Prep the ${base} and pat dry.`,
+              `${method === 'Fresh' ? 'Dress' : method.replace(/ed$/, '')} over medium-high heat for ${8 + (i % 10)} minutes.`,
+              `Season, rest for ${2 + (i % 4)} minutes, and serve warm.`,
+            ],
+            i,
+          ),
+          hasDe && i % 3 === 0
+            ? { 'de-DE': richTextDoc(`${name} — Zubereitung in drei Schritten.`) }
+            : undefined,
         ),
-        nutrition: localized(locale, { calories: 180 + (i % 12) * 40, protein: 6 + (i % 9) }),
+        nutrition: localized(locale, {
+          calories: 180 + (i % 12) * 40,
+          protein: 6 + (i % 9),
+          carbs: 12 + (i % 20),
+          fat: 4 + (i % 11),
+          allergens: i % 4 === 0 ? ['gluten'] : [],
+        }),
         servings: localized(locale, (i % 6) + 2),
-        relatedProducts: localized(locale, [entryLink(pick(productIds, i))]),
+        relatedProducts: localized(locale, [
+          entryLink(pick(productIds, i)),
+          ...(i % 2 === 0 ? [entryLink(pick(productIds, i + 7))] : []),
+        ]),
       },
       patch: { servings: localized(locale, (i % 6) + 4) },
     };
@@ -261,10 +359,28 @@ export async function seedCorpus(
       matchValue: title,
       status: statusFor(i),
       fields: {
-        title: localized(locale, title),
+        title: localized(
+          locale,
+          title,
+          hasDe && i % 2 === 0 ? { 'de-DE': `Leitfaden: ${pick(WORDS.topics, i)}` } : undefined,
+        ),
         slug: localized(locale, `guide-${i}`),
-        body: localized(locale, richTextDoc(`Long-form guide on ${pick(WORDS.topics, i)}.`)),
-        seoDescription: localized(locale, `Guide #${i}.`),
+        body: localized(
+          locale,
+          richTextGuide(
+            title,
+            [
+              `Audit how your team handles ${pick(WORDS.topics, i)} today.`,
+              'Model the target state as content types, not documents.',
+              'Migrate one environment, measure, then roll forward.',
+            ],
+            i,
+          ),
+        ),
+        seoDescription: localized(
+          locale,
+          `A practical guide to ${pick(WORDS.topics, i)} for ${pick(WORDS.audiences, i)}.`,
+        ),
       },
       patch: { seoDescription: localized(locale, `Guide #${i} (revised).`) },
     };
@@ -277,7 +393,14 @@ export async function seedCorpus(
     const body =
       i === 0 && articleIds[1] && assetIds[0]
         ? richTextKitchenSink(articleIds[1], assetIds[0])
-        : richTextDoc(`Landing page ${i} hero copy.`);
+        : richTextGuide(
+            `${title} — campaign brief`,
+            [
+              `Lead with the ${pick(WORDS.topics, i)} story.`,
+              `Route sign-ups to the ${pick(WORDS.audiences, i)} nurture track.`,
+            ],
+            i,
+          );
     return {
       matchValue: title,
       status: i === 0 ? 'published' : statusFor(i),
@@ -287,6 +410,7 @@ export async function seedCorpus(
         body: localized(locale, body),
         sections: localized(locale, [
           entryLink(pick(articleIds, i * 2 + 1)),
+          entryLink(pick(articleIds, i * 3 + 2)),
           entryLink(pick(pageIds, i)),
         ]),
         ...(asset(i) ? { hero: localized(locale, asset(i)) } : {}),
@@ -299,5 +423,5 @@ export async function seedCorpus(
     { articles: vol.articles, products: vol.products, events: vol.events, recipes: vol.recipes },
     'seed: corpus ensured',
   );
-  return { articleIds, productIds, draftArticleIds };
+  return { articleIds, productIds, draftArticleIds, publishedArticleIds };
 }

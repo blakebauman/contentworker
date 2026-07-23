@@ -18,9 +18,9 @@ export interface SeedConfig {
   /** Optional pepper applied to token hashing (must match the API's). */
   readonly tokenPepper?: string;
   /**
-   * Corpus multiplier: 1 (default) seeds the demo dataset (~200 generated
+   * Corpus multiplier: 1 (default) seeds the demo dataset (~550 generated
    * entries); larger values scale the generated types linearly for load and
-   * pagination benchmarks (e.g. 100 → ~18k entries).
+   * pagination benchmarks (e.g. 100 → ~44k entries).
    */
   readonly scale?: number;
 }

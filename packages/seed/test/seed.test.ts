@@ -50,13 +50,15 @@ describe('seedDev', () => {
 
     expect((await listAssets(ctx, scope)).length).toBeGreaterThan(0);
     expect((await listReleases(ctx, scope)).map((r) => r.title)).toContain('Autumn launch');
-    expect((await listWorkflows(ctx, scope)).length).toBe(1);
-    expect((await listWebhooks(ctx, scope)).length).toBe(2);
+    expect((await listWorkflows(ctx, scope)).length).toBe(2);
+    expect((await listWebhooks(ctx, scope)).length).toBe(3);
     expect((await listScheduledActions(ctx, scope)).length).toBeGreaterThan(0);
     expect((await listAgentRuns(ctx, scope, {})).length).toBeGreaterThan(0);
     expect((await listAuditLog(ctx, config.spaceId)).length).toBeGreaterThan(0);
     // The completion marker lands last.
-    expect((await listTags(ctx, scope)).map((t) => t.name)).toContain('demo-seed-v2');
+    expect((await listTags(ctx, scope)).map((t) => t.name)).toContain('demo-seed-v3');
+    // All three scheduled actions: release publish, entry publish, entry unpublish.
+    expect((await listScheduledActions(ctx, scope)).length).toBe(3);
   });
 
   it('is idempotent — a second run creates nothing new', async () => {

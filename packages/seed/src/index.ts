@@ -28,7 +28,7 @@ export { volumes } from './corpus.js';
  * subsequent boot to a single query and self-heals after a crashed partial
  * seed (it is created last).
  */
-const MARKER_TAG = 'demo-seed-v2';
+const MARKER_TAG = 'demo-seed-v3';
 
 /**
  * Idempotently bootstraps a fully-populated dev environment: the seed space,
@@ -101,7 +101,14 @@ export async function seedDev(
   const corpus = await seedCorpus(run, assetIds, taxonomy);
   const releases = await seedReleases(run, corpus.articleIds, corpus.productIds);
   await seedCollaboration(run, corpus.articleIds);
-  await seedAutomation(run, releases.autumnReleaseId, corpus.draftArticleIds[0] ?? null);
+  await seedAutomation(
+    run,
+    releases.autumnReleaseId,
+    corpus.draftArticleIds[0] ?? null,
+    // An article deep in the published set, so the scheduled unpublish never
+    // collides with the entries used by workflows/comments/reviews demos.
+    corpus.publishedArticleIds[20] ?? null,
+  );
   await seedAgents(run, corpus.articleIds);
   await seedGovernance(run, config);
 

@@ -26,6 +26,12 @@ export const WORDS = {
     'Complete',
     'Effortless',
     'Scalable',
+    'Resilient',
+    'Composable',
+    'Incremental',
+    'Field-tested',
+    'Opinionated',
+    'Minimal',
   ],
   topics: [
     'content modeling',
@@ -39,9 +45,87 @@ export const WORDS = {
     'semantic search',
     'API design',
     'multi-tenancy',
+    'reference integrity',
+    'draft workflows',
+    'asset pipelines',
+    'schema migrations',
+    'cache invalidation',
+    'webhooks at scale',
+    'editorial review',
+    'access control',
   ],
-  verbs: ['Mastering', 'Understanding', 'Exploring', 'Rethinking', 'Debugging'],
+  verbs: [
+    'Mastering',
+    'Understanding',
+    'Exploring',
+    'Rethinking',
+    'Debugging',
+    'Scaling',
+    'Migrating to',
+    'Auditing',
+    'Shipping',
+  ],
+  audiences: [
+    'platform teams',
+    'editorial teams',
+    'solo developers',
+    'agencies',
+    'enterprise architects',
+    'growth teams',
+  ],
+  outcomes: [
+    'cut publish latency in half',
+    'ship localized content without release trains',
+    'let agents draft while humans decide',
+    'keep every environment reproducible',
+    'stop cache stampedes before they start',
+    'roll out schema changes with zero downtime',
+  ],
 } as const;
+
+/**
+ * Deterministic multi-paragraph prose for entry bodies. Varies structure by
+ * index (2–4 paragraphs, different sentence templates) so lists, search, and
+ * AI summarization demos have realistic, non-repetitive material.
+ */
+export function prose(i: number): string {
+  const topic = pick(WORDS.topics, i);
+  const other = pick(WORDS.topics, i + 5);
+  const audience = pick(WORDS.audiences, i);
+  const outcome = pick(WORDS.outcomes, i);
+  const paragraphs = [
+    `${pick(WORDS.adjectives, i)} ${topic} is what separates teams that ship weekly from teams that ship quarterly. For ${audience}, the difference shows up the first time a launch spans more than one locale, one environment, or one approval chain.`,
+    `The pattern that works: model ${topic} explicitly, keep ${other} out of the write path, and let the platform enforce the rules people forget under deadline. Teams that adopted this ${outcome}.`,
+    'Start small — one content type, one environment, one workflow step. Measure publish latency and editorial cycle time before and after; the numbers make the case better than any architecture diagram.',
+    `A note on ${other}: it interacts with ${topic} more than most teams expect. Budget a spike for it in the first sprint, not the last one.`,
+  ];
+  const count = 2 + (i % 3);
+  return paragraphs.slice(0, count).join('\n\n');
+}
+
+/** Real-city coordinates for Location fields — plausible map pins in demos. */
+export const CITIES = [
+  { name: 'San Francisco', lat: 37.7749, lon: -122.4194 },
+  { name: 'New York', lat: 40.7128, lon: -74.006 },
+  { name: 'London', lat: 51.5074, lon: -0.1278 },
+  { name: 'Berlin', lat: 52.52, lon: 13.405 },
+  { name: 'Amsterdam', lat: 52.3676, lon: 4.9041 },
+  { name: 'Tokyo', lat: 35.6762, lon: 139.6503 },
+  { name: 'Singapore', lat: 1.3521, lon: 103.8198 },
+  { name: 'Sydney', lat: -33.8688, lon: 151.2093 },
+  { name: 'Toronto', lat: 43.6532, lon: -79.3832 },
+  { name: 'São Paulo', lat: -23.5505, lon: -46.6333 },
+  { name: 'Nairobi', lat: -1.2921, lon: 36.8219 },
+  { name: 'Lisbon', lat: 38.7223, lon: -9.1393 },
+] as const;
+
+/** ISO date `daysOffset` days from `now` (negative = past), deterministic time. */
+export function isoDate(now: Date, daysOffset: number, hour = 9): string {
+  const d = new Date(now);
+  d.setDate(d.getDate() + daysOffset);
+  d.setHours(hour, 0, 0, 0);
+  return d.toISOString();
+}
 
 export function localized(
   defaultLocale: string,
@@ -77,6 +161,37 @@ const text = (value: string, marks: readonly { type: string }[] = []) => ({
   marks,
 });
 const paragraph = (...content: unknown[]) => ({ nodeType: 'paragraph', content });
+
+/**
+ * A structured guide document — heading, intro, subheadings, a list, and a
+ * closing note with marks. Richer than `richTextDoc` without the kitchen
+ * sink's embeds, so generated pages/recipes render like real authored content.
+ */
+export function richTextGuide(title: string, steps: readonly string[], i: number): unknown {
+  const topic = pick(WORDS.topics, i);
+  return {
+    nodeType: 'document',
+    content: [
+      { nodeType: 'heading-2', content: [text(title)] },
+      paragraph(
+        text(`Everything here is deterministic demo content about ${topic}, written to look like `),
+        text('real editorial material', [{ type: 'italic' }]),
+        text(' rather than lorem ipsum.'),
+      ),
+      { nodeType: 'heading-3', content: [text('Steps')] },
+      {
+        nodeType: 'ordered-list',
+        content: steps.map((s) => ({ nodeType: 'list-item', content: [paragraph(text(s))] })),
+      },
+      { nodeType: 'blockquote', content: [paragraph(text(pick(WORDS.outcomes, i)))] },
+      paragraph(
+        text('Questions? Check the '),
+        text('documentation', [{ type: 'bold' }]),
+        text(' or ask in the community.'),
+      ),
+    ],
+  };
+}
 
 /**
  * One document exercising every node the admin's rich-text mapper supports:

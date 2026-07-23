@@ -22,6 +22,7 @@ export async function seedAutomation(
   run: SeedRun,
   autumnReleaseId: string | null,
   draftEntryId: string | null,
+  publishedEntryId: string | null,
 ): Promise<void> {
   const { ctx, scope } = run;
   const now = run.ctx.clock.now();
@@ -33,9 +34,15 @@ export async function seedAutomation(
       secret: 'dev-webhook-secret',
     });
     await createWebhook(ctx, scope, {
+      url: 'https://example.com/hooks/unpublish-audit',
+      topics: ['entry.unpublished'],
+      secret: 'dev-webhook-secret-2',
+      headers: { 'x-team': 'compliance' },
+    });
+    await createWebhook(ctx, scope, {
       url: 'https://example.com/hooks/firehose',
       topics: ['*'],
-      secret: 'dev-webhook-secret-2',
+      secret: 'dev-webhook-secret-3',
       active: false,
       headers: { 'x-demo': 'contentworker' },
     });
@@ -46,6 +53,11 @@ export async function seedAutomation(
       name: 'Sync search index',
       eventPattern: 'entry.*',
       url: 'https://example.com/functions/sync-search',
+    });
+    await createFunction(ctx, scope, {
+      name: 'Warm edge cache',
+      eventPattern: 'content_type.published',
+      url: 'https://example.com/functions/warm-cache',
     });
     await createFunction(ctx, scope, {
       name: 'Notify on release',
@@ -84,6 +96,13 @@ export async function seedAutomation(
       promptTemplate: 'Rewrite this in a {{tone}} tone for {{audience}}:\n\n{{body}}',
       tier: 'balanced',
     });
+    await createAIAction(ctx, scope, {
+      name: 'SEO keywords',
+      description: 'Propose search keywords from the body and title.',
+      promptTemplate:
+        'Given the title "{{title}}" and body below, list 5 SEO keywords:\n\n{{body}}',
+      tier: 'flagship',
+    });
   }
 
   if ((await listScheduledActions(ctx, scope)).length === 0) {
@@ -107,6 +126,14 @@ export async function seedAutomation(
         entityType: 'Entry',
         entityId: draftEntryId,
         scheduledFor: at(2),
+      });
+    }
+    if (publishedEntryId) {
+      await scheduleAction(ctx, scope, {
+        action: 'unpublish',
+        entityType: 'Entry',
+        entityId: publishedEntryId,
+        scheduledFor: at(14),
       });
     }
   }
