@@ -17,32 +17,22 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Bot, SearchX } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import type { AgentRun, ManagementClient, SearchHit } from '../lib/management.js';
+import { useState } from 'react';
+import { useClient } from '../lib/client-context.js';
+import type { SearchHit } from '../lib/management.js';
+import { useAgentRunsQuery } from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 
 /** Agent/cost dashboard + semantic search over published content. */
-export function Dashboard(props: { client: ManagementClient }) {
-  const { client } = props;
+export function Dashboard() {
+  const { client } = useClient();
   const toast = useToast();
-  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const runs = useAgentRunsQuery().data ?? [];
 
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searched, setSearched] = useState(false);
   const [searching, setSearching] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      setRuns(await client.listAgentRuns());
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  }, [client, toast]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const runSearch = async (e: React.FormEvent) => {
     e.preventDefault();

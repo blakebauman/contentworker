@@ -41,22 +41,18 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { KeyRound } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useClient } from '../lib/client-context.js';
 import {
   type ApiKeyKind,
-  type ApiKeySummary,
-  type AuditEntry,
   type Connection,
   type CreatedApiKey,
-  type Environment,
-  type EnvironmentAlias,
   type ManagementClient,
-  type RoleSummary,
   WEBHOOK_TOPICS,
   type WebhookSummary,
   type WebhookTopic,
 } from '../lib/management.js';
+import { useInvalidate, useScopedQuery } from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 
 /**
@@ -125,29 +121,18 @@ export function Settings(props: {
 function Environments(props: { client: ManagementClient }) {
   const { client } = props;
   const toast = useToast();
-  const [environments, setEnvironments] = useState<Environment[]>([]);
-  const [aliases, setAliases] = useState<EnvironmentAlias[]>([]);
+  const invalidate = useInvalidate();
   const [alias, setAlias] = useState('');
-  const [target, setTarget] = useState('');
+  const [pickedTarget, setPickedTarget] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [envs, als] = await Promise.all([
-        client.listEnvironments(),
-        client.listEnvironmentAliases(),
-      ]);
-      setEnvironments(envs);
-      setAliases(als);
-      setTarget((t) => t || envs[0]?.id || '');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  }, [client, toast]);
+  const environments = useScopedQuery(['environments'], () => client.listEnvironments()).data ?? [];
+  const aliases =
+    useScopedQuery(['environment-aliases'], () => client.listEnvironmentAliases()).data ?? [];
+  // Default the target picker to the first environment until the user chooses.
+  const target = pickedTarget || environments[0]?.id || '';
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const reload = () => invalidate(['environments'], ['environment-aliases']);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,7 +140,7 @@ function Environments(props: { client: ManagementClient }) {
     try {
       await client.setEnvironmentAlias(alias.trim(), target);
       setAlias('');
-      await load();
+      await reload();
       toast.success(`Alias “${alias.trim()}” → ${target}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -167,7 +152,7 @@ function Environments(props: { client: ManagementClient }) {
   const remove = async (name: string) => {
     try {
       await client.deleteEnvironmentAlias(name);
-      await load();
+      await reload();
       toast.success('Alias deleted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -177,7 +162,7 @@ function Environments(props: { client: ManagementClient }) {
   const repoint = async (name: string, targetEnvironmentId: string) => {
     try {
       await client.setEnvironmentAlias(name, targetEnvironmentId);
-      await load();
+      await reload();
       toast.success(`“${name}” → ${targetEnvironmentId}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -226,7 +211,7 @@ function Environments(props: { client: ManagementClient }) {
             </div>
             <div className="space-y-1.5">
               <Label>Target environment</Label>
-              <Select value={target} onValueChange={setTarget}>
+              <Select value={target} onValueChange={setPickedTarget}>
                 <SelectTrigger className="w-[200px]">
                   <SelectValue placeholder="Environment" />
                 </SelectTrigger>
@@ -302,24 +287,18 @@ function Environments(props: { client: ManagementClient }) {
 /** Append-only audit trail of mutating API actions (governance; space:admin). */
 function AuditLog(props: { client: ManagementClient }) {
   const { client } = props;
-  const toast = useToast();
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const invalidate = useInvalidate();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setEntries(await client.listAuditLog({ limit: 200 }));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [client, toast]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  // The audit log grows on every mutation, so always revalidate on mount.
+  const auditQuery = useScopedQuery(['audit-log'], () => client.listAuditLog({ limit: 200 }), {
+    staleTime: 0,
+  });
+  const entries = auditQuery.data ?? [];
+  const loading = auditQuery.isPending;
+  // isFetching (not isPending) so the Refresh button also disables during
+  // button-triggered refetches, not just the first load.
+  const refreshing = auditQuery.isFetching;
+  const load = () => void invalidate(['audit-log']);
 
   return (
     <Card>
@@ -330,7 +309,7 @@ function AuditLog(props: { client: ManagementClient }) {
             Every mutating API action in this space, newest first.
           </p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
+        <Button type="button" variant="outline" size="sm" onClick={load} disabled={refreshing}>
           Refresh
         </Button>
       </CardHeader>
@@ -383,17 +362,11 @@ const ROLE_NONE = '__none__';
 
 function RolesSettings(props: { client: ManagementClient }) {
   const toast = useToast();
-  const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const invalidate = useInvalidate();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setRoles(await props.client.listRoles());
-  }, [props.client]);
-
-  useEffect(() => {
-    load().catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
-  }, [load, toast]);
+  const roles = useScopedQuery(['roles'], () => props.client.listRoles()).data ?? [];
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -406,7 +379,7 @@ function RolesSettings(props: { client: ManagementClient }) {
         contentGrants: [{ contentTypeApiId: '*', actions: ['read', 'write'] }],
       });
       setName('');
-      await load();
+      await invalidate(['roles']);
       toast.success('Role created');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -418,7 +391,7 @@ function RolesSettings(props: { client: ManagementClient }) {
   const remove = async (id: string) => {
     try {
       await props.client.deleteRole(id);
-      await load();
+      await invalidate(['roles']);
       toast.success('Role deleted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -474,8 +447,7 @@ function RolesSettings(props: { client: ManagementClient }) {
 function ApiKeys(props: { client: ManagementClient }) {
   const { client } = props;
   const toast = useToast();
-  const [keys, setKeys] = useState<ApiKeySummary[]>([]);
-  const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const invalidate = useInvalidate();
   const [kind, setKind] = useState<ApiKeyKind>('cda');
   const [roleId, setRoleId] = useState<string>(ROLE_NONE);
   const [name, setName] = useState('');
@@ -483,24 +455,13 @@ function ApiKeys(props: { client: ManagementClient }) {
   // The raw token is shown exactly once, right after minting.
   const [minted, setMinted] = useState<CreatedApiKey>();
 
+  const keys = useScopedQuery(['api-keys'], () => client.listApiKeys()).data ?? [];
+  const roles = useScopedQuery(['roles'], () => client.listRoles()).data ?? [];
+
   const roleName = useMemo(() => {
     const byId = new Map(roles.map((r) => [r.id, r.name]));
     return (id?: string) => (id ? (byId.get(id) ?? id) : undefined);
   }, [roles]);
-
-  const load = useCallback(async () => {
-    try {
-      const [keyItems, roleItems] = await Promise.all([client.listApiKeys(), client.listRoles()]);
-      setKeys(keyItems);
-      setRoles(roleItems);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  }, [client, toast]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -514,7 +475,7 @@ function ApiKeys(props: { client: ManagementClient }) {
       setMinted(created);
       setName('');
       setRoleId(ROLE_NONE);
-      await load();
+      await invalidate(['api-keys']);
       toast.success(`${created.kind.toUpperCase()} key created`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -526,7 +487,7 @@ function ApiKeys(props: { client: ManagementClient }) {
   const revoke = async (id: string) => {
     try {
       await client.revokeApiKey(id);
-      await load();
+      await invalidate(['api-keys']);
       toast.success('Key revoked');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -681,7 +642,7 @@ function RevokeKeyButton(props: { name: string; onConfirm: () => void }) {
 function Webhooks(props: { client: ManagementClient }) {
   const { client } = props;
   const toast = useToast();
-  const [hooks, setHooks] = useState<WebhookSummary[]>([]);
+  const invalidate = useInvalidate();
   const [url, setUrl] = useState('');
   const [secret, setSecret] = useState('');
   const [topics, setTopics] = useState<WebhookTopic[]>(['*']);
@@ -689,22 +650,13 @@ function Webhooks(props: { client: ManagementClient }) {
   const [editing, setEditing] = useState<WebhookSummary | null>(null);
   const [deliveriesFor, setDeliveriesFor] = useState<WebhookSummary | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setHooks(await client.listWebhooks());
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  }, [client, toast]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const hooks = useScopedQuery(['webhooks'], () => client.listWebhooks()).data ?? [];
+  const reload = () => invalidate(['webhooks']);
 
   const toggleActive = async (h: WebhookSummary) => {
     try {
       await client.updateWebhook(h.id, { active: !h.active });
-      await load();
+      await reload();
       toast.success(h.active ? 'Webhook paused' : 'Webhook resumed');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -714,7 +666,7 @@ function Webhooks(props: { client: ManagementClient }) {
   const remove = async (id: string) => {
     try {
       await client.deleteWebhook(id);
-      await load();
+      await reload();
       toast.success('Webhook deleted');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -729,7 +681,7 @@ function Webhooks(props: { client: ManagementClient }) {
   }) => {
     if (!editing) return;
     await client.updateWebhook(editing.id, changes);
-    await load();
+    await reload();
     toast.success('Webhook updated');
   };
 
@@ -745,7 +697,7 @@ function Webhooks(props: { client: ManagementClient }) {
       setUrl('');
       setSecret('');
       setTopics(['*']);
-      await load();
+      await reload();
       toast.success('Webhook added');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));

@@ -20,12 +20,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useQueryClient } from '@tanstack/react-query';
 import { FileText } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { EntryDiff } from '../components/EntryDiff.js';
 import { useClient } from '../lib/client-context.js';
 import type { EntryListQuery, PreviewEntry } from '../lib/management.js';
+import { useDebouncedValue, useEntriesQuery, useQueryKeys } from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 import { useContentOutlet } from './content-context.js';
 
@@ -36,43 +38,37 @@ export function EntriesList() {
   const toast = useToast();
   const { client, conn, busy, run } = useClient();
   const { types } = useContentOutlet();
+  const queryClient = useQueryClient();
+  const keys = useQueryKeys();
 
-  const [entries, setEntries] = useState<PreviewEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [diffEntry, setDiffEntry] = useState<PreviewEntry | null>(null);
-  const [query, setQuery] = useState<EntryListQuery>({});
+  // Filter state is bound to the type it was authored for and reset in-render
+  // when the type changes, so a stale filter (naming another type's fields)
+  // can never be combined with the new type's query key — not even for the
+  // 250ms the debounce would otherwise lag.
+  const [filterState, setFilterState] = useState<{
+    typeId: string | undefined;
+    query: EntryListQuery;
+  }>({ typeId, query: {} });
+  if (filterState.typeId !== typeId) {
+    setFilterState({ typeId, query: {} });
+    setPicked(new Set());
+    setDiffEntry(null);
+  }
+  const query = filterState.typeId === typeId ? filterState.query : {};
+  const setQuery = (q: EntryListQuery) => setFilterState({ typeId, query: q });
 
   const selectedType = types.find((t) => t.apiId === typeId);
 
-  const loadEntries = useCallback(
-    (q: EntryListQuery) =>
-      run(async () => {
-        if (!typeId) return;
-        setLoading(true);
-        try {
-          setEntries(await client.listEntries(typeId, q));
-        } finally {
-          setLoading(false);
-        }
-      }),
-    [client, run, typeId],
-  );
-
-  // Reset filters and cross-type UI state when the selected content type changes.
-  useEffect(() => {
-    if (typeId) {
-      setPicked(new Set());
-      setDiffEntry(null);
-      setQuery({});
-    }
-  }, [typeId]);
-
-  // Re-query (debounced) whenever the type or the filter/sort/search query changes.
-  useEffect(() => {
-    const handle = setTimeout(() => loadEntries(query), 250);
-    return () => clearTimeout(handle);
-  }, [loadEntries, query]);
+  // The list is keyed by type + debounced filters; edits to the filter bar
+  // re-key the query after 250ms while the previous page stays visible.
+  const debounced = useDebouncedValue(filterState, 250);
+  const debouncedQuery = debounced.typeId === typeId ? debounced.query : {};
+  const entriesQuery = useEntriesQuery(typeId, debouncedQuery);
+  const entries = entriesQuery.data ?? [];
+  const loading = entriesQuery.isPending;
+  const entriesKey = keys.entries(typeId, debouncedQuery);
 
   const togglePick = (id: string) =>
     setPicked((prev) => {
@@ -82,26 +78,50 @@ export function EntriesList() {
       return next;
     });
 
-  // Optimistically reflect a status change; reconcile on success, roll back on failure.
+  // Optimistically reflect a status change in the cached list; roll back on failure.
   const optimisticStatus = (ids: Set<string>, status: string) =>
-    setEntries((es) => es.map((e) => (ids.has(e.id) ? { ...e, status } : e)));
+    queryClient.setQueryData<PreviewEntry[]>(entriesKey, (es) =>
+      es?.map((e) => (ids.has(e.id) ? { ...e, status } : e)),
+    );
+
+  const refreshEntries = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: keys.entriesRoot }),
+      // Publish/unpublish change an entry's status/version, which the editor's
+      // detail query also holds.
+      queryClient.invalidateQueries({ queryKey: keys.entryRoot }),
+    ]);
+
+  // Shared mutation shell: cancel in-flight list refetches so they can't stomp
+  // the optimistic write, skip the optimistic write entirely while the table
+  // shows placeholder rows from another key, and always revalidate — success
+  // or failure — so the cache never keeps a rolled-back or half-applied list.
+  const mutateEntries = (act: () => Promise<void>) =>
+    run(async () => {
+      await queryClient.cancelQueries({ queryKey: keys.entriesRoot });
+      try {
+        await act();
+      } finally {
+        await refreshEntries();
+      }
+    });
 
   // One bulk API call handles the whole selection server-side, reporting
   // per-item outcomes; we surface any partial failures in the toast.
   const bulk = (action: 'publish' | 'unpublish', verb: string, status: string) => {
-    const snapshot = entries;
     const ids = [...picked];
-    optimisticStatus(picked, status);
     setPicked(new Set());
-    return run(async () => {
+    return mutateEntries(async () => {
+      const optimistic = !entriesQuery.isPlaceholderData;
+      const snapshot = entries;
+      if (optimistic) optimisticStatus(new Set(ids), status);
       let summary: { succeeded: number; failed: number };
       try {
         summary = await client.bulkEntryAction(action, ids);
       } catch (e) {
-        setEntries(snapshot);
+        if (optimistic) queryClient.setQueryData(entriesKey, snapshot);
         throw e;
       }
-      await loadEntries(query);
       toast.success(
         summary.failed > 0
           ? `${verb} ${summary.succeeded}, ${summary.failed} failed`
@@ -115,20 +135,19 @@ export function EntriesList() {
     status: string,
     act: (id: string) => Promise<unknown>,
     msg: string,
-  ) => {
-    const snapshot = entries;
-    optimisticStatus(new Set([id]), status);
-    return run(async () => {
+  ) =>
+    mutateEntries(async () => {
+      const optimistic = !entriesQuery.isPlaceholderData;
+      const snapshot = entries;
+      if (optimistic) optimisticStatus(new Set([id]), status);
       try {
         await act(id);
       } catch (e) {
-        setEntries(snapshot);
+        if (optimistic) queryClient.setQueryData(entriesKey, snapshot);
         throw e;
       }
-      await loadEntries(query);
       toast.success(msg);
     });
-  };
 
   if (!selectedType) {
     return <p className="text-muted-foreground">Select a content type to browse its entries.</p>;

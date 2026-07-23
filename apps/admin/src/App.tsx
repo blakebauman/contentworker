@@ -44,13 +44,12 @@ const Workflows = lazy(() =>
 
 // Thin route wrappers bind the shared client/connection to the leaf components.
 function DashboardRoute() {
-  const { client } = useClient();
-  return <Dashboard client={client} />;
+  return <Dashboard />;
 }
 
 function MediaRoute() {
-  const { client, conn } = useClient();
-  return <MediaLibrary client={client} locale={conn.locale} />;
+  const { conn } = useClient();
+  return <MediaLibrary locale={conn.locale} />;
 }
 
 function SettingsRoute() {

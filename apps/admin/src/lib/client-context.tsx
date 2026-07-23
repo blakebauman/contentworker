@@ -1,4 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { clearStoredConnection, useConnection } from './connection.js';
 import { type Connection, type ManagementClient, createManagementClient } from './management.js';
 import { useToast } from './toast.js';
@@ -33,6 +42,19 @@ export function ClientProvider(props: { children: React.ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Cached server state belongs to a principal, and query keys are scoped by
+  // connection but deliberately not by token (a secret). So any token change —
+  // sign-out, 401 sign-out, or swapping API keys on /connect — must drop the
+  // whole cache, or the next principal would see data RBAC masks from them.
+  const lastToken = useRef(conn.token);
+  useEffect(() => {
+    if (lastToken.current !== conn.token) {
+      lastToken.current = conn.token;
+      queryClient.clear();
+    }
+  }, [conn.token, queryClient]);
 
   const signOut = useCallback(() => {
     clearStoredConnection();
