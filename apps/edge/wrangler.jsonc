@@ -8,9 +8,10 @@
   // and the postgres.js driver. It also populates process.env from vars.
   "compatibility_flags": ["nodejs_compat"],
   // Custom domain for the single-worker (staging) deployment. Cloudflare
-  // provisions DNS + TLS on deploy. Hostnames follow
-  // {name}-{env}.contentworker.dev where env is the deployment stage
-  // (staging | production); the role-split envs below attach their own.
+  // provisions DNS + TLS on deploy. Non-production stages suffix the hostname
+  // ({name}-{stage}.contentworker.dev); production uses the bare name
+  // (api.contentworker.dev, delivery.contentworker.dev — see the role-split
+  // envs below).
   "routes": [{ "pattern": "api-staging.contentworker.dev", "custom_domain": true }],
   "observability": { "enabled": true },
   // Operational counters (outbox relays, consumed events, dead letters) — the
@@ -212,7 +213,7 @@
         "SEED_DEV": "false",
         "ALLOW_FAKE_ADAPTERS": ""
       },
-      // "routes": [{ "pattern": "delivery-production.contentworker.dev", "custom_domain": true }],
+      // "routes": [{ "pattern": "delivery.contentworker.dev", "custom_domain": true }],
       "triggers": { "crons": [] },
       "migrations": [],
       "assets": { "directory": "./no-assets" },
@@ -252,7 +253,7 @@
         "BLOB_FORCE_PATH_STYLE": "true",
         "AWS_REGION": "auto"
       },
-      // "routes": [{ "pattern": "api-production.contentworker.dev", "custom_domain": true }],
+      // "routes": [{ "pattern": "api.contentworker.dev", "custom_domain": true }],
       "triggers": { "crons": [] },
       "migrations": [],
       "assets": {
