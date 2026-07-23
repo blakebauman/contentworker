@@ -8,7 +8,9 @@ import {
   type ConsumeDeps,
   consumeEvent,
   createHasher,
-  relayOutbox,
+  drainOutbox,
+  pruneEventHistory,
+  resumeStalledBulkJobs,
   runDueAgentSchedules,
   runDueScheduledActions,
   runPublishAgents,
@@ -231,7 +233,12 @@ export default {
           const metrics = makeMetrics(env.METRICS);
           try {
             if (wired.queue && MUTATING.has(req.method)) {
-              const relayed = await relayOutbox(wired.ctx, wired.queue);
+              // Loop-until-drained: a bulk mutation can append far more rows
+              // than one relay batch; its own nudge should clear them rather
+              // than leaving the overflow to the cron sweeper.
+              const relayed = await drainOutbox(wired.ctx, wired.queue, {
+                routeTopic: wired.routeTopic,
+              });
               if (relayed > 0) {
                 metrics.count('cw_outbox_relayed_total', relayed, { trigger: 'nudge' });
               }
@@ -290,7 +297,7 @@ export default {
       // moderation retractions — relay now instead of waiting for the cron.
       if (wired.queue) {
         const metrics = makeMetrics(env.METRICS);
-        await relayOutbox(wired.ctx, wired.queue).then(
+        await drainOutbox(wired.ctx, wired.queue, { routeTopic: wired.routeTopic }).then(
           (relayed) => {
             if (relayed > 0) {
               metrics.count('cw_outbox_relayed_total', relayed, { trigger: 'post-batch' });
@@ -311,10 +318,30 @@ export default {
    * Cron sweeper (every minute): drains any outbox rows the post-commit nudge
    * missed (crash/eviction) and fires due scheduled publish/unpublish actions.
    */
-  async scheduled(_ctrl: ScheduledController, env: EdgeEnv, _exec: ExecutionContext) {
+  async scheduled(ctrl: ScheduledController, env: EdgeEnv, _exec: ExecutionContext) {
     const wired = wireEdge(env);
     const metrics = makeMetrics(env.METRICS);
     try {
+      // Retention sweep on the top-of-hour tick only (the cron fires every
+      // minute): trims relayed outbox rows + old webhook delivery records.
+      if (wired.persistent && new Date(ctrl.scheduledTime).getUTCMinutes() === 0) {
+        try {
+          const pruned = await pruneEventHistory(wired.ctx, {
+            ...(env.EVENT_RETENTION_HOURS
+              ? { retentionHours: Number(env.EVENT_RETENTION_HOURS) }
+              : {}),
+          });
+          if (pruned.outboxDeleted > 0 || pruned.webhookDeliveriesDeleted > 0) {
+            console.log(JSON.stringify({ msg: 'event history pruned', ...pruned }));
+            metrics.count('cw_events_pruned_total', pruned.outboxDeleted, { table: 'outbox' });
+            metrics.count('cw_events_pruned_total', pruned.webhookDeliveriesDeleted, {
+              table: 'webhook_deliveries',
+            });
+          }
+        } catch (err) {
+          console.error('event history prune failed', err);
+        }
+      }
       // Actions first: their outbox events are then picked up by the relay
       // sweep below instead of waiting a full cron interval.
       const { executed, failed } = await runDueScheduledActions(wired.ctx);
@@ -328,16 +355,29 @@ export default {
       // same containment as the Node worker's relay loop.
       if (wired.queue) {
         try {
-          let total = 0;
-          for (let i = 0; i < 10; i++) {
-            const relayed = await relayOutbox(wired.ctx, wired.queue);
-            total += relayed;
-            if (relayed === 0) break;
-          }
+          const total = await drainOutbox(wired.ctx, wired.queue, {
+            maxIterations: 20,
+            routeTopic: wired.routeTopic,
+          });
           if (total > 0) metrics.count('cw_outbox_relayed_total', total, { trigger: 'cron' });
         } catch (err) {
           console.error('cron outbox relay failed', err);
           metrics.count('cw_relay_errors_total', 1, { trigger: 'cron' });
+        }
+      }
+      // Bulk-job crash recovery: re-nudge chunks whose claim went stale or
+      // whose chunk_due event was lost (normally returns 0 — one cheap
+      // indexed query). The re-appended events relay on the next tick's
+      // drain (or the following nudge).
+      if (wired.persistent) {
+        try {
+          const resumed = await resumeStalledBulkJobs(wired.ctx);
+          if (resumed > 0) {
+            console.log(JSON.stringify({ msg: 'stalled bulk chunks re-nudged', resumed }));
+            metrics.count('cw_bulk_chunks_resumed_total', resumed);
+          }
+        } catch (err) {
+          console.error('bulk stall sweep failed', err);
         }
       }
       // Recurring agent jobs: due schedules run here on the cron tick, metered

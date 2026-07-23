@@ -330,7 +330,11 @@ export const webhookDeliveries = pgTable(
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('webhook_deliveries_by_webhook').on(t.spaceId, t.webhookId)],
+  (t) => [
+    index('webhook_deliveries_by_webhook').on(t.spaceId, t.webhookId),
+    // Serves the retention sweep (deleteDeliveriesBefore).
+    index('webhook_deliveries_by_created').on(t.createdAt),
+  ],
 );
 
 export const releases = pgTable(
@@ -559,6 +563,49 @@ export const previewTokens = pgTable(
   ],
 );
 
+export const bulkJobs = pgTable(
+  'bulk_jobs',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    id: text('id').notNull(),
+    action: text('action').$type<'publish' | 'unpublish'>().notNull(),
+    status: text('status').$type<'running' | 'completed' | 'cancelled'>().notNull(),
+    totalItems: integer('total_items').notNull(),
+    totalChunks: integer('total_chunks').notNull(),
+    completedChunks: integer('completed_chunks').notNull().default(0),
+    succeeded: integer('succeeded').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.environmentId, t.id] })],
+);
+
+export const bulkJobChunks = pgTable(
+  'bulk_job_chunks',
+  {
+    spaceId: text('space_id').notNull(),
+    environmentId: text('environment_id').notNull(),
+    jobId: text('job_id').notNull(),
+    chunkId: text('chunk_id').notNull(),
+    entryIds: jsonb('entry_ids').$type<string[]>().notNull(),
+    status: text('status').$type<'pending' | 'running' | 'completed' | 'failed'>().notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    failures: jsonb('failures').$type<{ id: string; error: string }[]>().notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.spaceId, t.environmentId, t.jobId, t.chunkId] }),
+    // Serves the cross-scope stall sweep: only open chunks are indexed.
+    index('bulk_chunks_open')
+      .on(t.status, t.createdAt)
+      .where(sql`${t.status} IN ('pending', 'running')`),
+  ],
+);
+
 export const outbox = pgTable(
   'outbox',
   {
@@ -568,5 +615,12 @@ export const outbox = pgTable(
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
     relayedAt: timestamp('relayed_at', { withTimezone: true }),
   },
-  (t) => [index('outbox_pending').on(t.occurredAt).where(sql`${t.relayedAt} IS NULL`)],
+  (t) => [
+    index('outbox_pending').on(t.occurredAt).where(sql`${t.relayedAt} IS NULL`),
+    // Serves the retention sweep (deleteRelayedBefore); partial so the hot
+    // pending rows never pay for it.
+    index('outbox_relayed')
+      .on(t.relayedAt)
+      .where(sql`${t.relayedAt} IS NOT NULL`),
+  ],
 );

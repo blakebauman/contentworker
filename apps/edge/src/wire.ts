@@ -17,13 +17,14 @@ import { type ApiConfig, loadConfig } from '@cw/api/config';
 import {
   type AgentRunner,
   type AppContext,
+  BULK_TOPIC,
   EVENTS_TOPIC,
   type FakeAdapterBinding,
   type PublishAgentsConfig,
   type RagDeps,
   assertNoFakeAdapters,
 } from '@cw/application';
-import { type ApiKeyKind, scopesForKind } from '@cw/domain';
+import { type ApiKeyKind, type DomainEvent, scopesForKind } from '@cw/domain';
 import type {
   AIProvider,
   BlobStore,
@@ -64,6 +65,9 @@ export interface EdgeWired {
   readonly cache?: Cache;
   /** Producer onto the cw-events queue; absent when the binding is not set. */
   readonly queue?: QueuePort;
+  /** Relay topic router; set only when the deployment lacks a cw-bulk queue
+   *  (falls everything back to the events topic). */
+  readonly routeTopic?: (event: DomainEvent) => string;
   /** True when backed by Postgres (Hyperdrive/DATABASE_URL) vs in-memory demo. */
   readonly persistent: boolean;
   /** Closes per-request resources (DB connections). Safe to call once. */
@@ -97,8 +101,14 @@ export function wireEdge(env: EdgeEnv): EdgeWired {
   const connectionString = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
   const cache = env.KV_CACHE ? createKvCache(env.KV_CACHE) : undefined;
   const queue = env.EVENTS_QUEUE
-    ? createCfQueueProducer({ [EVENTS_TOPIC]: env.EVENTS_QUEUE })
+    ? createCfQueueProducer({
+        [EVENTS_TOPIC]: env.EVENTS_QUEUE,
+        ...(env.BULK_QUEUE ? { [BULK_TOPIC]: env.BULK_QUEUE } : {}),
+      })
     : undefined;
+  // Without a cw-bulk binding, chunk_due events fall back to the events topic
+  // (single-queue deployments still work; the consumer handles both).
+  const routeTopic = env.BULK_QUEUE ? undefined : () => EVENTS_TOPIC;
 
   let store: ContentStore;
   if (connectionString) {
@@ -125,7 +135,15 @@ export function wireEdge(env: EdgeEnv): EdgeWired {
   // Meter AI spend per space via the CostGuard Durable Object (shared across
   // isolates/colos). Absent binding or 0-ceilings → unmetered (demo/dev).
   const costGuard = doCostGuardFromEnv(env);
-  const ctx: AppContext = { store, clock, ids, cache, costGuard };
+  const ttlRaw = Number(env.DELIVERY_CACHE_TTL_SECONDS);
+  const ctx: AppContext = {
+    store,
+    clock,
+    ids,
+    cache,
+    ...(Number.isFinite(ttlRaw) && ttlRaw > 0 ? { deliveryCacheTtlSeconds: ttlRaw } : {}),
+    costGuard,
+  };
 
   return {
     ctx,
@@ -136,6 +154,7 @@ export function wireEdge(env: EdgeEnv): EdgeWired {
     bus: new InMemoryEventBus(),
     cache,
     queue,
+    ...(routeTopic ? { routeTopic } : {}),
     persistent: Boolean(connectionString),
     close: async () => {
       for (const c of closers) await c();

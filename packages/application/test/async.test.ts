@@ -204,6 +204,9 @@ describe('P4: outbox relay, webhook fan-out, cache invalidation', () => {
         seen.push(opts?.dedupeKey);
         void payload;
       },
+      enqueueMany: async (_topic: string, messages: readonly { dedupeKey?: string }[]) => {
+        for (const msg of messages) seen.push(msg.dedupeKey);
+      },
       process: () => ({ close: async () => {} }),
     };
     const relayed = await relayOutbox(h.ctx, recordingQueue);

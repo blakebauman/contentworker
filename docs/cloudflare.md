@@ -41,7 +41,7 @@ AI), so `wrangler dev -e demo` boots a zero-infrastructure demo.
 wrangler hyperdrive create cw-neon --connection-string="$NEON_UNPOOLED_URL"
 wrangler kv namespace create cw-cache
 wrangler vectorize create cw-vectors --dimensions=1536 --metric=cosine
-wrangler queues create cw-events && wrangler queues create cw-agents && wrangler queues create cw-events-dlq
+wrangler queues create cw-events && wrangler queues create cw-bulk && wrangler queues create cw-agents && wrangler queues create cw-events-dlq
 wrangler r2 bucket create cw-assets    # + an R2 S3-API token for presigning
 
 # paste the hyperdrive/kv ids into apps/edge/wrangler.jsonc, then
@@ -211,6 +211,18 @@ The full side-by-side matrix (including the Node column) lives in
   events never has to fit N polled Workflow runs inside one consumer
   invocation. Without the `AGENTS_QUEUE` binding, agents run inline in the
   events consumer (dev/demo parity).
+- **Bulk jobs run on their own queue:** `bulk.chunk_due` control events route
+  to `cw-bulk` (one ~200-entry chunk transaction per invocation, bounded
+  consumer concurrency), so a 100k-entry job drains without starving
+  interactive event delivery. Each committed chunk emits ONE coalesced
+  `entries.published_bulk` event whose dispatch bumps the scope-wide `epoch`
+  cache tag once (instead of per-entry invalidation), synthesizes per-entry
+  webhook payloads with stable derived ids (`jobId:chunkId:entryId`) for
+  receiver dedupe, and indexes search/RAG from batch-read snapshots. Bulk
+  publishes deliberately skip on-publish agents and per-entry live fan-out.
+  Crash recovery is store-driven: CAS chunk claims + a cron stall sweep;
+  progress and the per-item report live in `bulk_jobs`/`bulk_job_chunks`.
+  Without the `BULK_QUEUE` binding, chunk events fall back to `cw-events`.
 - **Bulk reindex runs in bounded slices:** each `search.reindex_requested`
   message embeds at most a few hundred entries, then re-enqueues a
   continuation event carrying a keyset cursor (relayed immediately after the

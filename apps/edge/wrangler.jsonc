@@ -75,6 +75,8 @@
   "queues": {
     "producers": [
       { "binding": "EVENTS_QUEUE", "queue": "cw-events" },
+      // Bulk-job chunk lane; created with `wrangler queues create cw-bulk`.
+      { "binding": "BULK_QUEUE", "queue": "cw-bulk" },
       // On-publish agent jobs; created with `wrangler queues create cw-agents`.
       { "binding": "AGENTS_QUEUE", "queue": "cw-agents" }
     ],
@@ -87,6 +89,22 @@
         "max_batch_size": 25,
         "max_batch_timeout": 2,
         "max_retries": 5,
+        // Explicit cap (default autoscaling is unbounded): each invocation
+        // wires a fresh max-5 Postgres pool through Hyperdrive, so consumer
+        // concurrency is what bounds the database connection fan-out.
+        "max_concurrency": 10,
+        "dead_letter_queue": "cw-events-dlq"
+      },
+      {
+        // One chunk per invocation (a chunk is one ~200-entry transaction);
+        // concurrency bounds Neon load from a running bulk job. retry_delay
+        // spaces retries so a transient DB issue doesn't hot-loop chunks.
+        "queue": "cw-bulk",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 5,
+        "retry_delay": 30,
+        "max_concurrency": 10,
         "dead_letter_queue": "cw-events-dlq"
       },
       {
@@ -175,7 +193,11 @@
     // Per-space AI budget (enforced by the CostGuardDO); 0 on either disables.
     "AI_MAX_REQUESTS_PER_WINDOW": "60",
     "AI_MAX_TOKENS_PER_WINDOW": "200000",
-    "AI_BUDGET_WINDOW_SECONDS": "60"
+    "AI_BUDGET_WINDOW_SECONDS": "60",
+    // Delivery cache TTL (GC bound; tag invalidation stays authoritative).
+    "DELIVERY_CACHE_TTL_SECONDS": "86400",
+    // Retention for relayed outbox rows + webhook delivery records (hours).
+    "EVENT_RETENTION_HOURS": "168"
   },
 
   // ---- Enterprise scale-out ---------------------------------------------------
@@ -213,7 +235,8 @@
         "REQUIRE_SECURE_SECRETS": "true",
         "SEED_DEV": "false",
         "SEED_SCALE": "1",
-        "ALLOW_FAKE_ADAPTERS": ""
+        "ALLOW_FAKE_ADAPTERS": "",
+        "DELIVERY_CACHE_TTL_SECONDS": "86400"
       },
       // "routes": [{ "pattern": "delivery.contentworker.dev", "custom_domain": true }],
       "triggers": { "crons": [] },
@@ -285,7 +308,10 @@
       "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "cw_edge_metrics" }],
       "vectorize": [{ "binding": "VECTORIZE", "index_name": "cw-vectors" }],
       "queues": {
-        "producers": [{ "binding": "EVENTS_QUEUE", "queue": "cw-events" }]
+        "producers": [
+          { "binding": "EVENTS_QUEUE", "queue": "cw-events" },
+          { "binding": "BULK_QUEUE", "queue": "cw-bulk" }
+        ]
       },
       "durable_objects": {
         "bindings": [
@@ -327,7 +353,8 @@
         "ALLOW_FAKE_ADAPTERS": "",
         "AI_MAX_REQUESTS_PER_WINDOW": "60",
         "AI_MAX_TOKENS_PER_WINDOW": "200000",
-        "AI_BUDGET_WINDOW_SECONDS": "60"
+        "AI_BUDGET_WINDOW_SECONDS": "60",
+        "EVENT_RETENTION_HOURS": "168"
       },
       "hyperdrive": [
         {
@@ -342,6 +369,7 @@
       "queues": {
         "producers": [
           { "binding": "EVENTS_QUEUE", "queue": "cw-events" },
+          { "binding": "BULK_QUEUE", "queue": "cw-bulk" },
           { "binding": "AGENTS_QUEUE", "queue": "cw-agents" }
         ],
         "consumers": [
@@ -350,6 +378,18 @@
             "max_batch_size": 25,
             "max_batch_timeout": 2,
             "max_retries": 5,
+            // Bounds DB connection fan-out (fresh max-5 pool per invocation).
+            "max_concurrency": 10,
+            "dead_letter_queue": "cw-events-dlq"
+          },
+          {
+            // One ~200-entry chunk transaction per invocation.
+            "queue": "cw-bulk",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 5,
+            "retry_delay": 30,
+            "max_concurrency": 10,
             "dead_letter_queue": "cw-events-dlq"
           },
           {

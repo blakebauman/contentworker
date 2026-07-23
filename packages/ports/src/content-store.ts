@@ -62,6 +62,7 @@ export interface ContentStore {
   readonly functions: FunctionRepo;
   readonly appExtensions: AppExtensionRepo;
   readonly previewTokens: PreviewTokenRepo;
+  readonly bulkJobs: BulkJobRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -158,6 +159,11 @@ export interface TaxonomyRepo {
   deleteTag(scope: Scope, id: string): Promise<void>;
   // Per-entry associations.
   getEntryMetadata(scope: Scope, entryId: string): Promise<EntryMetadata | null>;
+  /** Batch read of entry associations; entries without metadata are absent. */
+  getEntryMetadataMany(
+    scope: Scope,
+    entryIds: readonly string[],
+  ): Promise<{ entryId: string; metadata: EntryMetadata }[]>;
   setEntryMetadata(scope: Scope, entryId: string, metadata: EntryMetadata): Promise<void>;
 }
 
@@ -250,6 +256,8 @@ export interface PublishedAsset {
 
 export interface AssetRepo {
   get(scope: Scope, id: string): Promise<Asset | null>;
+  /** Batch point-read of assets (draft or published); missing ids are absent. */
+  getMany(scope: Scope, ids: readonly string[]): Promise<Asset[]>;
   /** Lists all assets (draft + published) for the media library. */
   list(scope: Scope, query: { limit?: number; skip?: number }): Promise<Asset[]>;
   create(scope: Scope, asset: Asset): Promise<void>;
@@ -257,6 +265,8 @@ export interface AssetRepo {
   putPublished(scope: Scope, snapshot: PublishedAsset): Promise<void>;
   removePublished(scope: Scope, id: string): Promise<void>;
   getPublished(scope: Scope, id: string): Promise<PublishedAsset | null>;
+  /** Batch point-read of published assets; missing ids are absent, order unspecified. */
+  getPublishedMany(scope: Scope, ids: readonly string[]): Promise<PublishedAsset[]>;
   listPublished(scope: Scope, query: { limit?: number; skip?: number }): Promise<PublishedAsset[]>;
 }
 
@@ -303,6 +313,8 @@ export interface ContentStoreTx {
   readonly assets: AssetRepo;
   readonly references: ReferenceRepo;
   readonly releases: ReleaseRepo;
+  readonly taxonomy: TaxonomyRepo;
+  readonly bulkJobs: BulkJobRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -515,6 +527,11 @@ export interface TextSearchHit {
 
 export interface EntryRepo {
   get(scope: Scope, id: string): Promise<EntryWithFields | null>;
+  /**
+   * Batch point-read of draft/current entries — one backend round-trip for
+   * the whole id set (bulk publish). Missing ids are absent; order unspecified.
+   */
+  getMany(scope: Scope, ids: readonly string[]): Promise<EntryWithFields[]>;
   /** Lists draft/current entries (the Preview read path), newest-affected first. */
   list(scope: Scope, query: EntryQuery): Promise<EntryWithFields[]>;
   /** Persists a new entry and its first version. */
@@ -523,6 +540,8 @@ export interface EntryRepo {
   saveVersion(scope: Scope, entry: Entry, version: EntryVersion): Promise<void>;
   /** Updates only the aggregate (status/pointers) — no new version. */
   saveAggregate(scope: Scope, entry: Entry): Promise<void>;
+  /** Batch {@link saveAggregate} — one statement for the whole set. */
+  saveAggregateMany(scope: Scope, entries: readonly Entry[]): Promise<void>;
 
   /** Lists every saved version of an entry, newest first. */
   listVersions(scope: Scope, entryId: string): Promise<EntryVersion[]>;
@@ -531,8 +550,18 @@ export interface EntryRepo {
 
   /** Writes the published read model for an entry. */
   putPublished(scope: Scope, snapshot: PublishedEntry): Promise<void>;
+  /** Batch {@link putPublished} — one upsert statement for the whole set. */
+  putPublishedMany(scope: Scope, snapshots: readonly PublishedEntry[]): Promise<void>;
   removePublished(scope: Scope, entryId: string): Promise<void>;
+  /** Batch {@link removePublished} — one delete statement for the whole set. */
+  removePublishedMany(scope: Scope, entryIds: readonly string[]): Promise<void>;
   getPublished(scope: Scope, id: string): Promise<PublishedEntry | null>;
+  /**
+   * Batch point-read of published snapshots — one backend query for the whole
+   * id set (link-resolution frontiers, bulk dispatch). Missing/unpublished ids
+   * are simply absent from the result; order is not guaranteed.
+   */
+  getPublishedMany(scope: Scope, ids: readonly string[]): Promise<PublishedEntry[]>;
   listPublished(scope: Scope, query: EntryQuery): Promise<PublishedEntry[]>;
   /**
    * Ranked full-text search over published string field values (all locales).
@@ -548,10 +577,30 @@ export interface ReferenceRepo {
     fromEntryId: string,
     edges: readonly ReferenceEdge[],
   ): Promise<void>;
+  /**
+   * Batch {@link replaceForEntry}: one delete for the whole from-set plus one
+   * bulk edge insert. An entry listed with no edges simply has its edges
+   * cleared (which is how a batch unpublish drops them too).
+   */
+  replaceForEntries(
+    scope: Scope,
+    replacements: readonly { fromEntryId: string; edges: readonly ReferenceEdge[] }[],
+  ): Promise<void>;
   /** Removes all outgoing edges for an entry (called on unpublish/delete). */
   removeForEntry(scope: Scope, fromEntryId: string): Promise<void>;
   /** Edges pointing AT `toId` — i.e. entries that embed it (for invalidation). */
   findReverse(scope: Scope, toId: string): Promise<ReferenceEdge[]>;
+  /**
+   * Transitive reverse closure: ids of every entry that directly or
+   * indirectly embeds any of `toIds`, bounded by depth and count, excluding
+   * the seeds themselves. One backend query (recursive CTE) instead of a
+   * breadth-first walk of round-trips.
+   */
+  findReverseClosure(
+    scope: Scope,
+    toIds: readonly string[],
+    opts: { maxDepth: number; maxEntries: number },
+  ): Promise<string[]>;
   /** Outgoing edges from `fromEntryId`. */
   findForward(scope: Scope, fromEntryId: string): Promise<ReferenceEdge[]>;
 }
@@ -578,6 +627,111 @@ export interface WebhookRepo {
     webhookId: string,
     opts?: { limit?: number },
   ): Promise<WebhookDeliveryRecord[]>;
+  /**
+   * Deletes up to `limit` delivery records older than `before`, across ALL
+   * spaces (platform retention sweep, not a tenant operation). Returns the
+   * number deleted.
+   */
+  deleteDeliveriesBefore(before: Date, limit: number): Promise<number>;
+}
+
+// ---- Bulk jobs ------------------------------------------------------------
+
+export type BulkJobAction = 'publish' | 'unpublish';
+export type BulkJobStatus = 'running' | 'completed' | 'cancelled';
+export type BulkChunkStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+/** A durable bulk operation: N entry ids processed as CAS-claimed chunks. */
+export interface BulkJob {
+  readonly id: string;
+  readonly action: BulkJobAction;
+  readonly status: BulkJobStatus;
+  readonly totalItems: number;
+  readonly totalChunks: number;
+  readonly completedChunks: number;
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly createdAt: string;
+  readonly completedAt?: string;
+}
+
+/** One chunk of a bulk job — the unit of claiming, retry, and reporting. */
+export interface BulkJobChunk {
+  readonly jobId: string;
+  readonly chunkId: string;
+  readonly entryIds: readonly string[];
+  readonly status: BulkChunkStatus;
+  readonly attempts: number;
+  /** Per-item failures recorded when the chunk completed. */
+  readonly failures: readonly { id: string; error: string }[];
+}
+
+/** A stalled/pending chunk paired with its scope (the sweep polls all scopes). */
+export interface ScopedBulkChunkRef {
+  readonly scope: Scope;
+  readonly jobId: string;
+  readonly chunkId: string;
+}
+
+export interface BulkJobRepo {
+  createJob(scope: Scope, job: BulkJob): Promise<void>;
+  getJob(scope: Scope, id: string): Promise<BulkJob | null>;
+  /** Jobs newest-first. */
+  listJobs(scope: Scope, opts?: { limit?: number }): Promise<BulkJob[]>;
+  /** Batch-inserts pending chunks (multi-row). */
+  createChunks(scope: Scope, chunks: readonly BulkJobChunk[]): Promise<void>;
+  /** Chunks of a job, in chunkId order (for the compliance report). */
+  listChunks(scope: Scope, jobId: string): Promise<BulkJobChunk[]>;
+  /**
+   * CAS-claims a chunk for processing: `pending`, or `running` with a claim
+   * older than `staleBefore` (crashed worker), atomically becomes `running`
+   * with `claimedAt = now` and `attempts + 1`. Returns the claimed chunk, or
+   * null when it was already claimed/completed — the caller must treat null
+   * as "someone else owns it" and do nothing.
+   */
+  claimChunk(
+    scope: Scope,
+    jobId: string,
+    chunkId: string,
+    opts: { now: Date; staleBefore: Date },
+  ): Promise<BulkJobChunk | null>;
+  /**
+   * Marks a claimed chunk terminal (`completed`/`failed`), records its
+   * per-item failures, and atomically folds its counts into the job
+   * (`completedChunks`, `succeeded`, `failed`). Returns the updated job so
+   * the caller can detect the final chunk and finalize.
+   */
+  completeChunk(
+    scope: Scope,
+    jobId: string,
+    chunkId: string,
+    outcome: {
+      status: Extract<BulkChunkStatus, 'completed' | 'failed'>;
+      succeeded: number;
+      failed: number;
+      failures: readonly { id: string; error: string }[];
+    },
+  ): Promise<BulkJob>;
+  /** Transitions a running job terminal; no-ops (returns null) otherwise. */
+  finalizeJob(scope: Scope, id: string, status: BulkJobStatus, at: Date): Promise<BulkJob | null>;
+  /**
+   * Reverts a `running` claim to `pending` (a chunk transaction failed and
+   * the claimer wants queue retries to do real work instead of losing the
+   * CAS until the stale window passes). No-ops unless currently `running`.
+   */
+  releaseChunk(scope: Scope, jobId: string, chunkId: string): Promise<void>;
+  /**
+   * Chunks needing a nudge across ALL scopes: `pending` or stale-`running`
+   * ones belonging to `running` jobs, created/claimed before `staleBefore`.
+   * The crash-recovery sweep re-enqueues their chunk_due events.
+   */
+  findStalledChunks(staleBefore: Date, limit: number): Promise<ScopedBulkChunkRef[]>;
+  /**
+   * Jobs still `running` whose chunks are ALL terminal (a crash between the
+   * last completeChunk and finalize) across all scopes — the sweep finalizes
+   * them so `bulk.job_completed` is never permanently lost.
+   */
+  findUnfinalizedJobs(limit: number): Promise<{ scope: Scope; jobId: string }[]>;
 }
 
 /** A row in the transactional outbox awaiting relay to the event bus/queue. */
@@ -588,8 +742,16 @@ export interface OutboxRecord {
 export interface OutboxRepo {
   /** Appends an event; must be called within the same tx as the state change. */
   append(event: DomainEvent): Promise<void>;
+  /** Batch {@link append} — one insert statement for the whole set. */
+  appendMany(events: readonly DomainEvent[]): Promise<void>;
   /** Reads up to `limit` un-relayed events, oldest first. */
   readPending(limit: number): Promise<DomainEvent[]>;
   /** Marks events as relayed so they are not re-published. */
   markRelayed(eventIds: readonly string[]): Promise<void>;
+  /**
+   * Deletes up to `limit` RELAYED rows older than `before` (retention sweep —
+   * without it the outbox grows one row per event forever). Never touches
+   * un-relayed rows. Returns the number deleted so callers can loop until dry.
+   */
+  deleteRelayedBefore(before: Date, limit: number): Promise<number>;
 }

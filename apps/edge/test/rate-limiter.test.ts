@@ -1,10 +1,25 @@
-import { env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { env, listDurableObjectIds, runInDurableObject } from 'cloudflare:test';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createDoRateLimiter } from '../src/do/rate-limiter.js';
 
 // vitest.config.ts binds AUTH_RATE_LIMIT_MAX=3, AUTH_RATE_LIMIT_WINDOW_MS=300.
 const MAX = 3;
 const WINDOW_MS = 300;
+
+// The DO arms a GC alarm on every recorded failure. A pending alarm must not
+// outlive its test: vitest-pool-workers pops each test's isolated storage at
+// test end, and an alarm write landing mid-pop corrupts the storage stack
+// (the upstream "isolated storage failed" issue — flaky on slow CI runners).
+// Delete (not run) the alarm: the handler re-arms itself when windows remain.
+afterEach(async () => {
+  // listDurableObjectIds is typed for an untyped namespace; ours is typed.
+  const ns = env.AUTH_LIMITER as unknown as DurableObjectNamespace;
+  for (const id of await listDurableObjectIds(ns)) {
+    await runInDurableObject(env.AUTH_LIMITER.get(id), (_instance, state) =>
+      state.storage.deleteAlarm(),
+    );
+  }
+});
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

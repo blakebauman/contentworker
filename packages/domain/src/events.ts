@@ -10,7 +10,10 @@ export type DomainEvent =
   | EntryUnpublishedEvent
   | ContentTypePublishedEvent
   | ReleasePublishedEvent
-  | SearchReindexRequestedEvent;
+  | SearchReindexRequestedEvent
+  | BulkChunkDueEvent
+  | EntriesPublishedBulkEvent
+  | BulkJobCompletedEvent;
 
 export interface BaseEvent {
   readonly id: string;
@@ -65,6 +68,45 @@ export interface SearchReindexRequestedEvent extends BaseEvent {
   readonly afterEntryId?: string;
   /** Entries already processed by earlier slices (bounds the job total). */
   readonly entriesSoFar?: number;
+}
+
+/**
+ * A bulk-job chunk is ready to run. A control event, not a state-change fact:
+ * consumers CAS-claim the chunk so a redelivered event is a no-op. Routed to
+ * the dedicated bulk topic so chunk processing never starves entry delivery.
+ */
+export interface BulkChunkDueEvent extends BaseEvent {
+  readonly type: 'bulk.chunk_due';
+  readonly jobId: string;
+  readonly chunkId: string;
+}
+
+/**
+ * Coalesced publish/unpublish fact for one committed bulk chunk — entry ids
+ * only, no field payloads (downstream consumers batch-read what they need).
+ * Replaces N per-entry events for bulk operations so 100k entries produce
+ * ~500 events instead of 100,000.
+ */
+export interface EntriesPublishedBulkEvent extends BaseEvent {
+  readonly type: 'entries.published_bulk';
+  readonly jobId: string;
+  /** Chunk this event coalesces — with jobId + entryId it forms the STABLE
+   *  derived id for synthesized per-entry webhooks, so receiver-side dedupe
+   *  survives chunk re-runs (which mint a fresh event id). */
+  readonly chunkId: string;
+  readonly action: 'publish' | 'unpublish';
+  readonly entryIds: readonly string[];
+}
+
+/** Terminal bulk-job fact: totals for webhooks/audit, and the unconditional
+ *  scope-epoch cache bump that backstops any debounced bump along the way. */
+export interface BulkJobCompletedEvent extends BaseEvent {
+  readonly type: 'bulk.job_completed';
+  readonly jobId: string;
+  readonly action: 'publish' | 'unpublish';
+  readonly total: number;
+  readonly succeeded: number;
+  readonly failed: number;
 }
 
 export type EventType = DomainEvent['type'];

@@ -8,6 +8,7 @@ import {
   type ContentType,
   type DomainEvent,
   type Entry,
+  type EntryFields,
   type EntryMetadata,
   type EntryVersion,
   type ReferenceEdge,
@@ -35,6 +36,9 @@ import type {
   AssetRepo,
   AuditRepo,
   AuthRepo,
+  BulkJob,
+  BulkJobChunk,
+  BulkJobRepo,
   CommentRepo,
   ContentStore,
   ContentStoreTx,
@@ -69,7 +73,9 @@ import {
   gt,
   gte,
   inArray,
+  isNotNull,
   isNull,
+  lt,
   lte,
   or,
   sql,
@@ -144,6 +150,40 @@ function makeContentTypeRepo(db: Db): ContentTypeRepo {
 }
 
 function makeEntryRepo(db: Db): EntryRepo {
+  const putPublishedMany = async (
+    scope: Scope,
+    snapshots: readonly PublishedEntry[],
+  ): Promise<void> => {
+    if (snapshots.length === 0) return;
+    await db
+      .insert(schema.entryPublished)
+      .values(snapshots.map((s) => publishedRow(scope, s)))
+      .onConflictDoUpdate({
+        target: [
+          schema.entryPublished.spaceId,
+          schema.entryPublished.environmentId,
+          schema.entryPublished.entryId,
+        ],
+        set: {
+          contentTypeApiId: sql`excluded.content_type_api_id`,
+          version: sql`excluded.version`,
+          fields: sql`excluded.fields`,
+          metadata: sql`excluded.metadata`,
+          publishedAt: sql`excluded.published_at`,
+        },
+      });
+  };
+  const removePublishedMany = async (scope: Scope, entryIds: readonly string[]): Promise<void> => {
+    if (entryIds.length === 0) return;
+    await db
+      .delete(schema.entryPublished)
+      .where(
+        and(
+          scopeFilter(schema.entryPublished, scope),
+          inArray(schema.entryPublished.entryId, [...entryIds]),
+        ),
+      );
+  };
   return {
     async get(scope, id) {
       const [entry] = await db
@@ -164,6 +204,18 @@ function makeEntryRepo(db: Db): EntryRepo {
       const result: EntryWithFields = { entry: toEntry(entry), fields: version?.fields ?? {} };
       return result;
     },
+    async getMany(scope, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.entries)
+        .where(and(scopeFilter(schema.entries, scope), inArray(schema.entries.id, [...ids])));
+      const fieldsByEntry = await currentVersionFields(db, scope, rows);
+      return rows.map((row) => ({
+        entry: toEntry(row),
+        fields: fieldsByEntry.get(row.id) ?? {},
+      }));
+    },
     async list(scope, query: EntryQuery) {
       const advanced = isAdvancedQuery(query);
       const conditions = [scopeFilter(schema.entries, scope)];
@@ -179,21 +231,11 @@ function makeEntryRepo(db: Db): EntryRepo {
       // SQL pagination is only valid when there are no JS-side field predicates.
       if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
       const rows = await select;
-      // Fetch each entry's current-version fields.
-      const results: EntryWithFields[] = [];
-      for (const row of rows) {
-        const [version] = await db
-          .select()
-          .from(schema.entryVersions)
-          .where(
-            and(
-              scopeFilter(schema.entryVersions, scope),
-              eq(schema.entryVersions.entryId, row.id),
-              eq(schema.entryVersions.version, row.currentVersion),
-            ),
-          );
-        results.push({ entry: toEntry(row), fields: version?.fields ?? {} });
-      }
+      const fieldsByEntry = await currentVersionFields(db, scope, rows);
+      const results: EntryWithFields[] = rows.map((row) => ({
+        entry: toEntry(row),
+        fields: fieldsByEntry.get(row.id) ?? {},
+      }));
       if (!advanced) return results;
       const filtered = runEntryQuery(
         results,
@@ -217,6 +259,31 @@ function makeEntryRepo(db: Db): EntryRepo {
     },
     async saveAggregate(scope, entry) {
       await saveEntryAggregate(db, scope, entry);
+    },
+    async saveAggregateMany(scope, entries) {
+      if (entries.length === 0) return;
+      // One UPDATE ... FROM (VALUES ...) for the whole set. Deliberately an
+      // UPDATE, not an upsert: like the single-item saveEntryAggregate, a row
+      // deleted by a concurrent transaction must silently no-op, never be
+      // re-created as a versionless zombie by an insert arm.
+      const values = sql.join(
+        entries.map(
+          (e) =>
+            sql`(${e.id}::text, ${e.status}::text, ${e.currentVersion}::integer, ${e.publishedVersion ?? null}::integer)`,
+        ),
+        sql`, `,
+      );
+      await db.execute(sql`
+        UPDATE ${schema.entries} AS t
+        SET status = v.status,
+            current_version = v.current_version,
+            published_version = v.published_version,
+            updated_at = now()
+        FROM (VALUES ${values}) AS v(id, status, current_version, published_version)
+        WHERE t.space_id = ${scope.spaceId}
+          AND t.environment_id = ${scope.environmentId}
+          AND t.id = v.id
+      `);
     },
     async listVersions(scope, entryId) {
       const rows = await db
@@ -242,46 +309,13 @@ function makeEntryRepo(db: Db): EntryRepo {
       return row ? toVersion(row) : null;
     },
     async putPublished(scope, snapshot) {
-      const values = {
-        spaceId: scope.spaceId,
-        environmentId: scope.environmentId,
-        entryId: snapshot.entryId,
-        contentTypeApiId: snapshot.contentTypeApiId,
-        version: snapshot.version,
-        fields: snapshot.fields,
-        metadata: snapshot.metadata
-          ? { tags: [...snapshot.metadata.tags], concepts: [...snapshot.metadata.concepts] }
-          : null,
-        publishedAt: new Date(snapshot.publishedAt),
-      };
-      await db
-        .insert(schema.entryPublished)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [
-            schema.entryPublished.spaceId,
-            schema.entryPublished.environmentId,
-            schema.entryPublished.entryId,
-          ],
-          set: {
-            contentTypeApiId: values.contentTypeApiId,
-            version: values.version,
-            fields: values.fields,
-            metadata: values.metadata,
-            publishedAt: values.publishedAt,
-          },
-        });
+      await putPublishedMany(scope, [snapshot]);
     },
+    putPublishedMany,
     async removePublished(scope, entryId) {
-      await db
-        .delete(schema.entryPublished)
-        .where(
-          and(
-            scopeFilter(schema.entryPublished, scope),
-            eq(schema.entryPublished.entryId, entryId),
-          ),
-        );
+      await removePublishedMany(scope, [entryId]);
     },
+    removePublishedMany,
     async getPublished(scope, id) {
       const [row] = await db
         .select()
@@ -290,6 +324,19 @@ function makeEntryRepo(db: Db): EntryRepo {
           and(scopeFilter(schema.entryPublished, scope), eq(schema.entryPublished.entryId, id)),
         );
       return row ? toPublished(row) : null;
+    },
+    async getPublishedMany(scope, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.entryPublished)
+        .where(
+          and(
+            scopeFilter(schema.entryPublished, scope),
+            inArray(schema.entryPublished.entryId, [...ids]),
+          ),
+        );
+      return rows.map(toPublished);
     },
     async listPublished(scope, query: EntryQuery) {
       const advanced = isAdvancedQuery(query);
@@ -415,6 +462,21 @@ function makeAssetRepo(db: Db): AssetRepo {
           }
         : null;
     },
+    async getMany(scope, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.assets)
+        .where(and(scopeFilter(schema.assets, scope), inArray(schema.assets.id, [...ids])));
+      return rows.map((r) => ({
+        id: r.id,
+        status: r.status,
+        file: r.file,
+        title: r.title,
+        description: r.description,
+        metadata: r.metadata,
+      }));
+    },
     async list(scope, query) {
       const rows = await db
         .select()
@@ -479,6 +541,19 @@ function makeAssetRepo(db: Db): AssetRepo {
         );
       return row ? toPublishedAsset(row) : null;
     },
+    async getPublishedMany(scope, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.assetPublished)
+        .where(
+          and(
+            scopeFilter(schema.assetPublished, scope),
+            inArray(schema.assetPublished.assetId, [...ids]),
+          ),
+        );
+      return rows.map(toPublishedAsset);
+    },
     async listPublished(scope, query) {
       const rows = await db
         .select()
@@ -503,6 +578,30 @@ function makeReferenceRepo(db: Db): ReferenceRepo {
             eq(schema.references.fromEntryId, fromEntryId),
           ),
         );
+      if (edges.length === 0) return;
+      await db.insert(schema.references).values(
+        edges.map((e) => ({
+          spaceId: scope.spaceId,
+          environmentId: scope.environmentId,
+          fromEntryId: e.fromEntryId,
+          fromField: e.fromField,
+          toId: e.toId,
+          toType: e.toType,
+        })),
+      );
+    },
+    async replaceForEntries(scope, replacements) {
+      if (replacements.length === 0) return;
+      await db.delete(schema.references).where(
+        and(
+          scopeFilter(schema.references, scope),
+          inArray(
+            schema.references.fromEntryId,
+            replacements.map((r) => r.fromEntryId),
+          ),
+        ),
+      );
+      const edges = replacements.flatMap((r) => r.edges);
       if (edges.length === 0) return;
       await db.insert(schema.references).values(
         edges.map((e) => ({
@@ -544,19 +643,298 @@ function makeReferenceRepo(db: Db): ReferenceRepo {
         .where(and(scopeFilter(schema.references, scope), eq(schema.references.toId, toId)));
       return rows.map(toEdge);
     },
+    async findReverseClosure(scope, toIds, opts) {
+      if (toIds.length === 0) return [];
+      // One recursive CTE over the (space, env, to_id) index replaces a
+      // breadth-first walk of per-node round-trips. Working rows are
+      // (entry_id, depth) tuples, so a cycle produces rows at increasing
+      // depths — the `depth < maxDepth` bound is what terminates it (UNION
+      // dedupe only collapses same-depth revisits); the outer LIMIT caps the
+      // result set. Seeds are excluded from the output.
+      const seeds = sql.join(
+        [...new Set(toIds)].map((id) => sql`(${id}::text)`),
+        sql`, `,
+      );
+      const result = await db.execute<{ entry_id: string }>(sql`
+        WITH RECURSIVE closure(entry_id, depth) AS (
+          SELECT r.from_entry_id, 1
+          FROM ${schema.references} r
+          JOIN (VALUES ${seeds}) AS seed(id) ON r.to_id = seed.id
+          WHERE r.space_id = ${scope.spaceId} AND r.environment_id = ${scope.environmentId}
+          UNION
+          SELECT r.from_entry_id, c.depth + 1
+          FROM ${schema.references} r
+          JOIN closure c ON r.to_id = c.entry_id
+          WHERE r.space_id = ${scope.spaceId} AND r.environment_id = ${scope.environmentId}
+            AND c.depth < ${opts.maxDepth}
+        )
+        SELECT DISTINCT entry_id FROM closure
+        WHERE entry_id NOT IN (SELECT id FROM (VALUES ${seeds}) AS seed(id))
+        LIMIT ${opts.maxEntries}
+      `);
+      return [...result].map((r) => r.entry_id);
+    },
+  };
+}
+
+function makeBulkJobRepo(db: Db): BulkJobRepo {
+  const toJob = (row: typeof schema.bulkJobs.$inferSelect): BulkJob => ({
+    id: row.id,
+    action: row.action,
+    status: row.status,
+    totalItems: row.totalItems,
+    totalChunks: row.totalChunks,
+    completedChunks: row.completedChunks,
+    succeeded: row.succeeded,
+    failed: row.failed,
+    createdAt: row.createdAt.toISOString(),
+    ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+  });
+  const toChunk = (row: typeof schema.bulkJobChunks.$inferSelect): BulkJobChunk => ({
+    jobId: row.jobId,
+    chunkId: row.chunkId,
+    entryIds: row.entryIds,
+    status: row.status,
+    attempts: row.attempts,
+    failures: row.failures,
+  });
+
+  return {
+    async createJob(scope, job) {
+      await db.insert(schema.bulkJobs).values({
+        spaceId: scope.spaceId,
+        environmentId: scope.environmentId,
+        id: job.id,
+        action: job.action,
+        status: job.status,
+        totalItems: job.totalItems,
+        totalChunks: job.totalChunks,
+        completedChunks: job.completedChunks,
+        succeeded: job.succeeded,
+        failed: job.failed,
+        createdAt: new Date(job.createdAt),
+      });
+    },
+    async getJob(scope, id) {
+      const [row] = await db
+        .select()
+        .from(schema.bulkJobs)
+        .where(and(scopeFilter(schema.bulkJobs, scope), eq(schema.bulkJobs.id, id)));
+      return row ? toJob(row) : null;
+    },
+    async listJobs(scope, opts) {
+      const rows = await db
+        .select()
+        .from(schema.bulkJobs)
+        .where(scopeFilter(schema.bulkJobs, scope))
+        .orderBy(desc(schema.bulkJobs.createdAt), desc(schema.bulkJobs.id))
+        .limit(opts?.limit ?? 50);
+      return rows.map(toJob);
+    },
+    async createChunks(scope, chunks) {
+      if (chunks.length === 0) return;
+      // Multi-row insert in slices (each row carries a jsonb id list; slices
+      // keep statement size and parameter counts bounded).
+      const SLICE = 200;
+      for (let at = 0; at < chunks.length; at += SLICE) {
+        await db.insert(schema.bulkJobChunks).values(
+          chunks.slice(at, at + SLICE).map((c) => ({
+            spaceId: scope.spaceId,
+            environmentId: scope.environmentId,
+            jobId: c.jobId,
+            chunkId: c.chunkId,
+            entryIds: [...c.entryIds],
+            status: c.status,
+            attempts: c.attempts,
+            failures: [...c.failures],
+          })),
+        );
+      }
+    },
+    async listChunks(scope, jobId) {
+      const rows = await db
+        .select()
+        .from(schema.bulkJobChunks)
+        .where(and(scopeFilter(schema.bulkJobChunks, scope), eq(schema.bulkJobChunks.jobId, jobId)))
+        .orderBy(asc(schema.bulkJobChunks.chunkId));
+      return rows.map(toChunk);
+    },
+    async claimChunk(scope, jobId, chunkId, opts) {
+      // Single-statement CAS: only a pending chunk or a stale running claim
+      // transitions; a concurrent claimer's UPDATE matches zero rows.
+      const claimed = await db
+        .update(schema.bulkJobChunks)
+        .set({ status: 'running', claimedAt: opts.now, attempts: sql`attempts + 1` })
+        .where(
+          and(
+            scopeFilter(schema.bulkJobChunks, scope),
+            eq(schema.bulkJobChunks.jobId, jobId),
+            eq(schema.bulkJobChunks.chunkId, chunkId),
+            or(
+              eq(schema.bulkJobChunks.status, 'pending'),
+              and(
+                eq(schema.bulkJobChunks.status, 'running'),
+                lt(schema.bulkJobChunks.claimedAt, opts.staleBefore),
+              ),
+            ),
+          ),
+        )
+        .returning();
+      return claimed[0] ? toChunk(claimed[0]) : null;
+    },
+    async completeChunk(scope, jobId, chunkId, outcome) {
+      return db.transaction(async (txdb) => {
+        const [chunk] = await txdb
+          .update(schema.bulkJobChunks)
+          .set({
+            status: outcome.status,
+            failures: [...outcome.failures],
+            completedAt: new Date(),
+          })
+          .where(
+            and(
+              scopeFilter(schema.bulkJobChunks, scope),
+              eq(schema.bulkJobChunks.jobId, jobId),
+              eq(schema.bulkJobChunks.chunkId, chunkId),
+              // Guard: only the running claim completes; a duplicate
+              // completion (redelivered event) must not double-count.
+              eq(schema.bulkJobChunks.status, 'running'),
+            ),
+          )
+          .returning();
+        if (chunk) {
+          const [job] = await txdb
+            .update(schema.bulkJobs)
+            .set({
+              completedChunks: sql`completed_chunks + 1`,
+              succeeded: sql`succeeded + ${outcome.succeeded}`,
+              failed: sql`failed + ${outcome.failed}`,
+            })
+            .where(and(scopeFilter(schema.bulkJobs, scope), eq(schema.bulkJobs.id, jobId)))
+            .returning();
+          if (!job) throw new Error(`Bulk job ${jobId} not found for completed chunk`);
+          return toJob(job);
+        }
+        // Chunk was not in `running` (already completed by another worker):
+        // return the job as-is so the caller can still check completion.
+        // txdb, not db — a second pooled connection inside a transaction is
+        // a pool-exhaustion footgun.
+        const [job] = await txdb
+          .select()
+          .from(schema.bulkJobs)
+          .where(and(scopeFilter(schema.bulkJobs, scope), eq(schema.bulkJobs.id, jobId)));
+        if (!job) throw new Error(`Bulk job ${jobId} not found`);
+        return toJob(job);
+      });
+    },
+    async finalizeJob(scope, id, status, at) {
+      const [row] = await db
+        .update(schema.bulkJobs)
+        .set({ status, completedAt: at })
+        .where(
+          and(
+            scopeFilter(schema.bulkJobs, scope),
+            eq(schema.bulkJobs.id, id),
+            eq(schema.bulkJobs.status, 'running'),
+          ),
+        )
+        .returning();
+      return row ? toJob(row) : null;
+    },
+    async releaseChunk(scope, jobId, chunkId) {
+      await db
+        .update(schema.bulkJobChunks)
+        .set({ status: 'pending', claimedAt: null })
+        .where(
+          and(
+            scopeFilter(schema.bulkJobChunks, scope),
+            eq(schema.bulkJobChunks.jobId, jobId),
+            eq(schema.bulkJobChunks.chunkId, chunkId),
+            eq(schema.bulkJobChunks.status, 'running'),
+          ),
+        );
+    },
+    async findStalledChunks(staleBefore, limit) {
+      // Open chunks past the threshold, joined to their (running) jobs so a
+      // cancelled job's leftovers are never re-nudged.
+      const rows = await db
+        .select({
+          spaceId: schema.bulkJobChunks.spaceId,
+          environmentId: schema.bulkJobChunks.environmentId,
+          jobId: schema.bulkJobChunks.jobId,
+          chunkId: schema.bulkJobChunks.chunkId,
+        })
+        .from(schema.bulkJobChunks)
+        .innerJoin(
+          schema.bulkJobs,
+          and(
+            eq(schema.bulkJobChunks.spaceId, schema.bulkJobs.spaceId),
+            eq(schema.bulkJobChunks.environmentId, schema.bulkJobs.environmentId),
+            eq(schema.bulkJobChunks.jobId, schema.bulkJobs.id),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.bulkJobs.status, 'running'),
+            or(
+              and(
+                eq(schema.bulkJobChunks.status, 'pending'),
+                lt(schema.bulkJobChunks.createdAt, staleBefore),
+              ),
+              and(
+                eq(schema.bulkJobChunks.status, 'running'),
+                lt(schema.bulkJobChunks.claimedAt, staleBefore),
+              ),
+            ),
+          ),
+        )
+        .limit(limit);
+      return rows.map((r) => ({
+        scope: { spaceId: r.spaceId, environmentId: r.environmentId },
+        jobId: r.jobId,
+        chunkId: r.chunkId,
+      }));
+    },
+    async findUnfinalizedJobs(limit) {
+      const rows = await db
+        .select({
+          spaceId: schema.bulkJobs.spaceId,
+          environmentId: schema.bulkJobs.environmentId,
+          id: schema.bulkJobs.id,
+        })
+        .from(schema.bulkJobs)
+        .where(
+          and(
+            eq(schema.bulkJobs.status, 'running'),
+            gte(schema.bulkJobs.completedChunks, schema.bulkJobs.totalChunks),
+          ),
+        )
+        .limit(limit);
+      return rows.map((r) => ({
+        scope: { spaceId: r.spaceId, environmentId: r.environmentId },
+        jobId: r.id,
+      }));
+    },
   };
 }
 
 function makeOutboxRepo(db: Db): OutboxRepo {
-  return {
-    async append(event) {
-      await db.insert(schema.outbox).values({
+  const appendMany = async (events: readonly DomainEvent[]): Promise<void> => {
+    if (events.length === 0) return;
+    await db.insert(schema.outbox).values(
+      events.map((event) => ({
         id: event.id,
         type: event.type,
         payload: event,
         occurredAt: new Date(event.occurredAt),
-      });
+      })),
+    );
+  };
+  return {
+    async append(event) {
+      await appendMany([event]);
     },
+    appendMany,
     async readPending(limit) {
       // SKIP LOCKED: concurrent relayers (edge nudge vs cron sweeper, multiple
       // workers) claim disjoint rows for the duration of their transaction.
@@ -575,6 +953,20 @@ function makeOutboxRepo(db: Db): OutboxRepo {
         .update(schema.outbox)
         .set({ relayedAt: new Date() })
         .where(inArray(schema.outbox.id, [...eventIds]));
+    },
+    async deleteRelayedBefore(before, limit) {
+      // Postgres DELETE has no LIMIT; bound the sweep via an id subquery so a
+      // huge backlog is trimmed in controlled slices.
+      const victims = db
+        .select({ id: schema.outbox.id })
+        .from(schema.outbox)
+        .where(and(isNotNull(schema.outbox.relayedAt), lt(schema.outbox.relayedAt, before)))
+        .limit(limit);
+      const deleted = await db
+        .delete(schema.outbox)
+        .where(inArray(schema.outbox.id, victims))
+        .returning({ id: schema.outbox.id });
+      return deleted.length;
     },
   };
 }
@@ -663,6 +1055,18 @@ function makeWebhookRepo(db: Db): WebhookRepo {
         error: r.error ?? undefined,
         createdAt: r.createdAt.toISOString(),
       }));
+    },
+    async deleteDeliveriesBefore(before, limit) {
+      const victims = db
+        .select({ id: schema.webhookDeliveries.id })
+        .from(schema.webhookDeliveries)
+        .where(lt(schema.webhookDeliveries.createdAt, before))
+        .limit(limit);
+      const deleted = await db
+        .delete(schema.webhookDeliveries)
+        .where(inArray(schema.webhookDeliveries.id, victims))
+        .returning({ id: schema.webhookDeliveries.id });
+      return deleted.length;
     },
   };
 }
@@ -1861,6 +2265,22 @@ function makeTaxonomyRepo(db: Db): TaxonomyRepo {
         );
       return row ? { tags: row.tags, concepts: row.concepts } : null;
     },
+    async getEntryMetadataMany(scope, entryIds) {
+      if (entryIds.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.entryMetadata)
+        .where(
+          and(
+            scopeFilter(schema.entryMetadata, scope),
+            inArray(schema.entryMetadata.entryId, [...entryIds]),
+          ),
+        );
+      return rows.map((row) => ({
+        entryId: row.entryId,
+        metadata: { tags: row.tags, concepts: row.concepts },
+      }));
+    },
     async setEntryMetadata(scope, entryId, metadata: EntryMetadata) {
       const values = {
         spaceId: scope.spaceId,
@@ -1935,6 +2355,7 @@ export function createPostgresStore(
     tasks: makeTaskRepo(db),
     workflows: makeWorkflowRepo(db),
     taxonomy: makeTaxonomyRepo(db),
+    bulkJobs: makeBulkJobRepo(db),
     outbox: makeOutboxRepo(db),
     async withTransaction<T>(fn: (tx: ContentStoreTx) => Promise<T>): Promise<T> {
       return db.transaction(async (txdb) => {
@@ -1944,6 +2365,8 @@ export function createPostgresStore(
           assets: makeAssetRepo(txdb as unknown as Db),
           references: makeReferenceRepo(txdb as unknown as Db),
           releases: makeReleaseRepo(txdb as unknown as Db),
+          taxonomy: makeTaxonomyRepo(txdb as unknown as Db),
+          bulkJobs: makeBulkJobRepo(txdb as unknown as Db),
           outbox: makeOutboxRepo(txdb as unknown as Db),
         };
         return fn(tx);
@@ -2051,6 +2474,19 @@ const toPublished = (r: PubRow): PublishedEntry => ({
   ...(r.metadata ? { metadata: r.metadata } : {}),
 });
 
+const publishedRow = (scope: Scope, snapshot: PublishedEntry) => ({
+  spaceId: scope.spaceId,
+  environmentId: scope.environmentId,
+  entryId: snapshot.entryId,
+  contentTypeApiId: snapshot.contentTypeApiId,
+  version: snapshot.version,
+  fields: snapshot.fields,
+  metadata: snapshot.metadata
+    ? { tags: [...snapshot.metadata.tags], concepts: [...snapshot.metadata.concepts] }
+    : null,
+  publishedAt: new Date(snapshot.publishedAt),
+});
+
 const entryRow = (scope: Scope, entry: Entry) => ({
   spaceId: scope.spaceId,
   environmentId: scope.environmentId,
@@ -2080,6 +2516,43 @@ const toVersion = (r: EntryVersionRow): EntryVersion => ({
   fields: r.fields,
   createdAt: r.createdAt.toISOString(),
 });
+
+/**
+ * Fetches the current-version fields for a set of entry rows in batched
+ * queries (not one per row). The OR-of-(entryId, version) pairs stays on the
+ * (scope, entryId, version) index and never drags in historical versions;
+ * chunking keeps an unbounded row set under the Postgres wire-protocol
+ * parameter cap.
+ */
+async function currentVersionFields(
+  db: Db,
+  scope: Scope,
+  rows: readonly { id: string; currentVersion: number }[],
+): Promise<Map<string, EntryFields>> {
+  const PAIR_CHUNK = 1000;
+  const fieldsByEntry = new Map<string, EntryFields>();
+  for (let at = 0; at < rows.length; at += PAIR_CHUNK) {
+    const chunk = rows.slice(at, at + PAIR_CHUNK);
+    const versionRows = await db
+      .select()
+      .from(schema.entryVersions)
+      .where(
+        and(
+          scopeFilter(schema.entryVersions, scope),
+          or(
+            ...chunk.map((r) =>
+              and(
+                eq(schema.entryVersions.entryId, r.id),
+                eq(schema.entryVersions.version, r.currentVersion),
+              ),
+            ),
+          ),
+        ),
+      );
+    for (const v of versionRows) fieldsByEntry.set(v.entryId, v.fields);
+  }
+  return fieldsByEntry;
+}
 
 async function saveEntryAggregate(db: Db, scope: Scope, entry: Entry): Promise<void> {
   await db

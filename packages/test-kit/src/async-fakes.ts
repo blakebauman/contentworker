@@ -6,6 +6,7 @@ import type {
   GenerateRequest,
   GenerateResult,
   Queue,
+  QueueMessage,
   Subscription,
   WebhookSendResult,
   WebhookSender,
@@ -21,6 +22,10 @@ export class InMemoryQueue implements Queue {
 
   async enqueue(topic: string, payload: unknown): Promise<void> {
     this.jobs.push({ topic, payload });
+  }
+
+  async enqueueMany(topic: string, messages: readonly QueueMessage[]): Promise<void> {
+    for (const msg of messages) this.jobs.push({ topic, payload: msg.payload });
   }
 
   process(topic: string, handler: (payload: unknown) => Promise<void>): Subscription {
@@ -99,6 +104,10 @@ export class InMemoryCache implements Cache {
   async invalidateTag(tag: string): Promise<void> {
     for (const key of this.tags.get(tag) ?? []) this.store.delete(key);
     this.tags.delete(tag);
+  }
+
+  async invalidateTags(tags: readonly string[]): Promise<void> {
+    for (const tag of new Set(tags)) await this.invalidateTag(tag);
   }
 
   get size(): number {

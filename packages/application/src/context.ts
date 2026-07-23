@@ -10,6 +10,15 @@ export interface AppContext {
   readonly ids: IdGenerator;
   /** Optional delivery cache; when absent, reads go straight to the store. */
   readonly cache?: Cache;
+  /**
+   * TTL for delivery cache entries, seconds. A garbage-collection bound only —
+   * tag-version invalidation stays the correctness mechanism — so backends
+   * don't accumulate every render ever produced. Default 86400 (1 day).
+   */
+  readonly deliveryCacheTtlSeconds?: number;
   /** Optional per-tenant AI budget governor; when absent, AI calls are unmetered. */
   readonly costGuard?: CostGuard;
 }
+
+/** Default {@link AppContext.deliveryCacheTtlSeconds}. */
+export const DEFAULT_DELIVERY_CACHE_TTL_SECONDS = 86_400;

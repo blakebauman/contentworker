@@ -8,6 +8,7 @@ import {
   autofillField,
   bulkCreateEntries,
   bulkEntryAction,
+  cancelBulkJob,
   cancelScheduledAction,
   canvasToEntry,
   compareEnvironments,
@@ -52,6 +53,8 @@ import {
   getAgentReview,
   getAsset,
   getAssetUsage,
+  getBulkJob,
+  getBulkJobReport,
   getContentType,
   getEntry,
   getEntryEmbedding,
@@ -71,6 +74,7 @@ import {
   listAppExtensions,
   listAssets,
   listAuditLog,
+  listBulkJobs,
   listComments,
   listConcepts,
   listContentTypes,
@@ -109,6 +113,7 @@ import {
   setConceptBroader,
   setEntryMetadata,
   setEnvironmentAlias,
+  startBulkJob,
   suggestEntryTags,
   summarizeEntry,
   transformAssetUrl,
@@ -124,6 +129,7 @@ import {
 import {
   type ApiKey,
   type ContentAction,
+  ForbiddenError,
   SCOPES,
   type Scope,
   ValidationError,
@@ -156,6 +162,7 @@ import {
   autofillBody,
   broaderBody,
   bulkEntriesBody,
+  bulkJobBody,
   canvasBody,
   commentBody,
   conceptBody,
@@ -632,6 +639,37 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
     const body = await parseBody(c, idsBody);
     for (const id of body.ids ?? []) await guardEntry(c, id, 'publish');
     return c.json(await bulkEntryAction(ctx, scopeOf(c), 'unpublish', body.ids ?? []));
+  });
+
+  // --- bulk jobs (durable, chunked; for id sets beyond the sync routes) ----
+  // Granular per-entry RBAC guards are impractical at this cardinality, so
+  // start/cancel/report require an ungranted (full content:publish) principal
+  // — per-item authorization failures would silently skew the compliance
+  // report, and reports expose entry ids across all content types. Job
+  // status/list (counts only) stay readable by any content:publish key.
+  const guardBulkJobs = (c: Context<AuthVars>) => {
+    if (c.get('principal').contentGrants) {
+      throw new ForbiddenError('bulk jobs (unrestricted content:publish role required)');
+    }
+  };
+  app.post(`${BASE}/bulk/jobs`, requireScope(SCOPES.contentPublish), async (c) => {
+    const body = await parseBody(c, bulkJobBody);
+    guardBulkJobs(c);
+    return c.json(await startBulkJob(ctx, scopeOf(c), body), 202);
+  });
+  app.get(`${BASE}/bulk/jobs`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await listBulkJobs(ctx, scopeOf(c), { limit: clampCount(c.req.query('limit'), 50) })),
+  );
+  app.get(`${BASE}/bulk/jobs/:id`, requireScope(SCOPES.contentPublish), async (c) =>
+    c.json(await getBulkJob(ctx, scopeOf(c), c.req.param('id'))),
+  );
+  app.get(`${BASE}/bulk/jobs/:id/report`, requireScope(SCOPES.contentPublish), async (c) => {
+    guardBulkJobs(c);
+    return c.json(await getBulkJobReport(ctx, scopeOf(c), c.req.param('id')));
+  });
+  app.post(`${BASE}/bulk/jobs/:id/cancel`, requireScope(SCOPES.contentPublish), async (c) => {
+    guardBulkJobs(c);
+    return c.json(await cancelBulkJob(ctx, scopeOf(c), c.req.param('id')));
   });
 
   // --- agent actions (audit → work packages) -----------------------------

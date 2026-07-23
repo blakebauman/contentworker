@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { AppContext } from '@cw/application';
 import {
   authenticate,
+  bulkEntryAction,
   createAgentReview,
   createAgentSchedule,
   createApiKey,
@@ -181,6 +182,266 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
     await publishEntry(ctx, scope, e.entry.id);
     const pending = await store.outbox.readPending(100);
     expect(pending.some((ev) => ev.type === 'entry.published')).toBe(true);
+  });
+
+  it('bulk publishes and unpublishes through the batched statements', async () => {
+    const mk = (title: string) =>
+      createEntry(ctx, scope, {
+        contentTypeApiId: 'article',
+        fields: { title: { 'en-US': title } },
+      });
+    const [a, b, c] = await Promise.all([mk('Bulk A'), mk('Bulk B'), mk('Bulk C')]);
+
+    // Publish: exercises getMany, saveAggregateMany (multi-value upsert),
+    // putPublishedMany, replaceForEntries, appendMany — plus a per-item
+    // failure partitioned inside the committed batch.
+    const summary = await bulkEntryAction(ctx, scope, 'publish', [
+      a.entry.id,
+      b.entry.id,
+      c.entry.id,
+      'missing-entry-id',
+    ]);
+    expect(summary.succeeded).toBe(3);
+    expect(summary.failed).toBe(1);
+
+    const published = await store.entries.getPublishedMany(scope, [
+      a.entry.id,
+      b.entry.id,
+      c.entry.id,
+    ]);
+    expect(published).toHaveLength(3);
+    // One shared publish instant across the chunk.
+    expect(new Set(published.map((p) => p.publishedAt)).size).toBe(1);
+    const drafts = await store.entries.getMany(scope, [a.entry.id, b.entry.id]);
+    expect(drafts.every((d) => d.entry.status === 'published')).toBe(true);
+    const events = await store.outbox.readPending(1000);
+    const ourPublishes = events.filter(
+      (ev) =>
+        ev.type === 'entry.published' &&
+        [a.entry.id, b.entry.id, c.entry.id].includes((ev as { entryId: string }).entryId),
+    );
+    expect(ourPublishes).toHaveLength(3);
+
+    // Unpublish: exercises removePublishedMany + edge clearing.
+    const undo = await bulkEntryAction(ctx, scope, 'unpublish', [a.entry.id, b.entry.id]);
+    expect(undo.succeeded).toBe(2);
+    expect(await store.entries.getPublishedMany(scope, [a.entry.id, b.entry.id])).toHaveLength(0);
+    expect(await store.entries.getPublishedMany(scope, [c.entry.id])).toHaveLength(1);
+  });
+
+  it('round-trips the bulk-job repo (CAS claim, atomic counters, stall sweep)', async () => {
+    const jobId = uuidv7();
+    const now = clock.now();
+    await store.bulkJobs.createJob(scope, {
+      id: jobId,
+      action: 'publish',
+      status: 'running',
+      totalItems: 3,
+      totalChunks: 2,
+      completedChunks: 0,
+      succeeded: 0,
+      failed: 0,
+      createdAt: now.toISOString(),
+    });
+    await store.bulkJobs.createChunks(scope, [
+      {
+        jobId,
+        chunkId: 'c00000',
+        entryIds: ['a', 'b'],
+        status: 'pending',
+        attempts: 0,
+        failures: [],
+      },
+      { jobId, chunkId: 'c00001', entryIds: ['c'], status: 'pending', attempts: 0, failures: [] },
+    ]);
+
+    // CAS claim: first wins, second (not stale) loses.
+    const staleBefore = new Date(now.getTime() - 60_000);
+    const claimed = await store.bulkJobs.claimChunk(scope, jobId, 'c00000', { now, staleBefore });
+    expect(claimed?.attempts).toBe(1);
+    expect(
+      await store.bulkJobs.claimChunk(scope, jobId, 'c00000', { now, staleBefore }),
+    ).toBeNull();
+    // A stale claim IS re-claimable.
+    const futureStale = new Date(now.getTime() + 60_000);
+    const reclaimed = await store.bulkJobs.claimChunk(scope, jobId, 'c00000', {
+      now,
+      staleBefore: futureStale,
+    });
+    expect(reclaimed?.attempts).toBe(2);
+
+    // The stall sweep sees the running-stale chunk and the aging pending one.
+    // (Pending age uses the DB-stamped created_at — real time — while the
+    // claim stamp came from the fixed test clock, so cut off after both.)
+    const sweepCutoff = new Date(Date.now() + 60_000);
+    const stalled = await store.bulkJobs.findStalledChunks(sweepCutoff, 1000);
+    const ours = stalled.filter((s) => s.jobId === jobId);
+    expect(ours.map((s) => s.chunkId).sort()).toEqual(['c00000', 'c00001']);
+
+    // Complete folds counters atomically; a duplicate completion no-ops.
+    const afterFirst = await store.bulkJobs.completeChunk(scope, jobId, 'c00000', {
+      status: 'completed',
+      succeeded: 2,
+      failed: 0,
+      failures: [],
+    });
+    expect(afterFirst).toMatchObject({ completedChunks: 1, succeeded: 2, failed: 0 });
+    const dup = await store.bulkJobs.completeChunk(scope, jobId, 'c00000', {
+      status: 'completed',
+      succeeded: 2,
+      failed: 0,
+      failures: [],
+    });
+    expect(dup.completedChunks).toBe(1); // unchanged
+
+    await store.bulkJobs.claimChunk(scope, jobId, 'c00001', { now, staleBefore });
+    const afterSecond = await store.bulkJobs.completeChunk(scope, jobId, 'c00001', {
+      status: 'failed',
+      succeeded: 0,
+      failed: 1,
+      failures: [{ id: 'c', error: 'boom' }],
+    });
+    expect(afterSecond).toMatchObject({ completedChunks: 2, succeeded: 2, failed: 1 });
+
+    // Finalize CAS: once, then null.
+    expect(await store.bulkJobs.finalizeJob(scope, jobId, 'completed', now)).toBeTruthy();
+    expect(await store.bulkJobs.finalizeJob(scope, jobId, 'completed', now)).toBeNull();
+    const chunks = await store.bulkJobs.listChunks(scope, jobId);
+    expect(chunks.find((c) => c.chunkId === 'c00001')?.failures).toEqual([
+      { id: 'c', error: 'boom' },
+    ]);
+  });
+
+  it('computes the reverse reference closure with one recursive query', async () => {
+    // c <- b <- a  and  c <- d (direct): closure of [c] = {a, b, d}.
+    const put = (fromEntryId: string, toId: string) =>
+      store.references.replaceForEntry(scope, fromEntryId, [
+        { fromEntryId, fromField: 'ref', toId, toType: 'Entry' },
+      ]);
+    await put('closure-b', 'closure-c');
+    await put('closure-a', 'closure-b');
+    await put('closure-d', 'closure-c');
+
+    const closure = await store.references.findReverseClosure(scope, ['closure-c'], {
+      maxDepth: 5,
+      maxEntries: 100,
+    });
+    expect(closure.sort()).toEqual(['closure-a', 'closure-b', 'closure-d']);
+
+    // Depth bound: depth 1 sees only direct embedders.
+    const shallow = await store.references.findReverseClosure(scope, ['closure-c'], {
+      maxDepth: 1,
+      maxEntries: 100,
+    });
+    expect(shallow.sort()).toEqual(['closure-b', 'closure-d']);
+
+    // Cycle safety: a <-> b terminates.
+    await put('cyc-a', 'cyc-b');
+    await put('cyc-b', 'cyc-a');
+    const cyc = await store.references.findReverseClosure(scope, ['cyc-a'], {
+      maxDepth: 10,
+      maxEntries: 100,
+    });
+    expect(cyc).toEqual(['cyc-b']);
+  });
+
+  it('getPublishedMany returns present snapshots only, scoped', async () => {
+    const otherScope = { spaceId: `t-${uuidv7()}`, environmentId: 'main' };
+    await createSpace(ctx, {
+      spaceId: otherScope.spaceId,
+      name: 'Other',
+      defaultLocale: 'en-US',
+      locales: ['en-US'],
+    });
+    await createContentType(ctx, otherScope, {
+      apiId: 'article',
+      name: 'Article',
+      displayField: 'title',
+      fields: [
+        {
+          apiId: 'title',
+          name: 'Title',
+          type: 'Symbol',
+          localized: false,
+          required: true,
+          position: 0,
+        },
+      ],
+    });
+    const a = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Batch A' } },
+    });
+    const b = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Batch B' } },
+    });
+    const foreign = await createEntry(ctx, otherScope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Foreign' } },
+    });
+    await publishEntry(ctx, scope, a.entry.id);
+    await publishEntry(ctx, scope, b.entry.id);
+    await publishEntry(ctx, otherScope, foreign.entry.id);
+
+    const got = await store.entries.getPublishedMany(scope, [
+      a.entry.id,
+      b.entry.id,
+      foreign.entry.id, // other space — must not leak
+      uuidv7(), // nonexistent — silently absent
+    ]);
+    expect(got.map((s) => s.entryId).sort()).toEqual([a.entry.id, b.entry.id].sort());
+    expect(await store.entries.getPublishedMany(scope, [])).toEqual([]);
+  });
+
+  it('deleteRelayedBefore respects the limit and never deletes pending rows', async () => {
+    const mk = (n: number) => ({
+      id: uuidv7(),
+      type: 'entry.published' as const,
+      scope,
+      occurredAt: clock.now().toISOString(),
+      entryId: `sweep-${n}`,
+      contentTypeApiId: 'article',
+      version: 1,
+      fields: {},
+    });
+    const [r1, r2, pending] = [mk(1), mk(2), mk(3)];
+    await store.outbox.append(r1);
+    await store.outbox.append(r2);
+    await store.outbox.append(pending);
+    await store.outbox.markRelayed([r1.id, r2.id]);
+
+    const future = new Date(Date.now() + 60_000); // past the relay stamps
+    expect(await store.outbox.deleteRelayedBefore(future, 1)).toBe(1);
+    expect(await store.outbox.deleteRelayedBefore(future, 10)).toBe(1);
+    expect(await store.outbox.deleteRelayedBefore(future, 10)).toBe(0);
+    // The never-relayed row survived every sweep.
+    const still = await store.outbox.readPending(1000);
+    expect(still.some((ev) => ev.id === pending.id)).toBe(true);
+  });
+
+  it('deleteDeliveriesBefore trims old delivery records across spaces', async () => {
+    const otherScope = { spaceId: `t-${uuidv7()}`, environmentId: 'main' };
+    await store.webhooks.recordDelivery(scope, {
+      webhookId: 'wh-sweep-a',
+      eventId: 'evt-1',
+      status: 'success',
+      attempts: 1,
+    });
+    await store.webhooks.recordDelivery(otherScope, {
+      webhookId: 'wh-sweep-b',
+      eventId: 'evt-2',
+      status: 'failed',
+      attempts: 1,
+    });
+
+    // Platform sweep: both spaces' old records go; a future cutoff catches
+    // the just-written rows (createdAt = DB now).
+    const future = new Date(Date.now() + 60_000);
+    const deleted = await store.webhooks.deleteDeliveriesBefore(future, 100);
+    expect(deleted).toBeGreaterThanOrEqual(2);
+    expect(await store.webhooks.listDeliveries(scope, 'wh-sweep-a')).toEqual([]);
+    expect(await store.webhooks.listDeliveries(otherScope, 'wh-sweep-b')).toEqual([]);
   });
 
   it('round-trips roles and role-bound API keys (granular RBAC)', async () => {

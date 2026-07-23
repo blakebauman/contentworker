@@ -1,5 +1,6 @@
-import type { DomainEvent } from '@cw/domain';
+import type { DomainEvent, EntriesPublishedBulkEvent, Webhook } from '@cw/domain';
 import type { Cache, FunctionInvoker, SearchIndex, WebhookSender } from '@cw/ports';
+import { runBulkChunk } from '../bulk-jobs.js';
 import type { AppContext } from '../context.js';
 import { invokeFunctionsForEvent } from '../functions.js';
 import {
@@ -59,6 +60,20 @@ export async function dispatchEvent(
     return;
   }
 
+  // Bulk-job control event: claim and run one chunk. Not a state-change fact
+  // — no webhooks/cache/RAG apply. (Normally routed to the dedicated bulk
+  // topic; handled here too so a single-topic deployment still works.)
+  if (event.type === 'bulk.chunk_due') {
+    await runBulkChunk(ctx, event);
+    return;
+  }
+
+  // Coalesced bulk fact: the bulk-shaped fan-out replaces N per-entry events.
+  if (event.type === 'entries.published_bulk') {
+    await dispatchBulkPublished(ctx, deps, event);
+    return;
+  }
+
   // 1. Webhook fan-out.
   const webhooks = await ctx.store.webhooks.listByTopic(scope, event.type);
   for (const webhook of webhooks) {
@@ -76,26 +91,20 @@ export async function dispatchEvent(
 
   // 2. Cache invalidation for entry events: the entry itself plus every entry
   // that transitively embeds it (A embeds B embeds C → publishing C refreshes
-  // A and B), via a bounded breadth-first walk of the reverse-reference graph.
+  // A and B). One bounded reverse-closure query, one batched invalidation.
   if (deps.cache && (event.type === 'entry.published' || event.type === 'entry.unpublished')) {
-    const visited = new Set<string>([event.entryId]);
-    let frontier = [event.entryId];
-    walk: for (let depth = 0; depth < MAX_INVALIDATION_DEPTH && frontier.length > 0; depth++) {
-      const next: string[] = [];
-      for (const id of frontier) {
-        for (const edge of await ctx.store.references.findReverse(scope, id)) {
-          if (visited.has(edge.fromEntryId)) continue;
-          // Cap reached: stop querying entirely — everything already admitted
-          // to `visited` still gets invalidated below.
-          if (visited.size >= MAX_INVALIDATION_ENTRIES) break walk;
-          visited.add(edge.fromEntryId);
-          next.push(edge.fromEntryId);
-        }
-      }
-      frontier = next;
-    }
-    const cache = deps.cache;
-    await Promise.all([...visited].map((id) => cache.invalidateTag(cacheTag(scope, id))));
+    const embedders = await ctx.store.references.findReverseClosure(scope, [event.entryId], {
+      maxDepth: MAX_INVALIDATION_DEPTH,
+      maxEntries: MAX_INVALIDATION_ENTRIES,
+    });
+    await deps.cache.invalidateTags([event.entryId, ...embedders].map((id) => cacheTag(scope, id)));
+  }
+
+  // Terminal bulk-job fact: the unconditional scope-epoch bump — the
+  // correctness backstop for any bump missed while the job ran. (Webhook
+  // fan-out above already delivered the job summary to subscribers.)
+  if (deps.cache && event.type === 'bulk.job_completed') {
+    await deps.cache.invalidateTag(epochTag(scope));
   }
 
   // 3. RAG: (re)embed on publish, drop vectors on unpublish.
@@ -132,10 +141,183 @@ export async function dispatchEvent(
   }
 }
 
+/** Concurrent webhook POSTs per bulk event (bounds subrequest burst). */
+const BULK_WEBHOOK_CONCURRENCY = 5;
+
+/**
+ * Fan-out for one coalesced `entries.published_bulk` chunk event.
+ *
+ * - Cache: ONE scope-epoch bump instead of up to `entryIds.length × 500`
+ *   per-entry tag writes — a bulk chunk has changed enough of the scope that
+ *   precise invalidation is worse than a scope-wide lazy refresh. Every
+ *   delivery envelope carries the epoch tag, so readers re-render on next
+ *   read. (Physically forced too: per-entry closure walks and KV writes at
+ *   bulk scale would blow the per-invocation subrequest budget.)
+ * - Webhooks: receivers keep the per-entry payload contract — each entry is
+ *   sent as a synthesized `entry.published`/`entry.unpublished` event with
+ *   the deterministic derived id `${event.id}:${entryId}`, so redelivered
+ *   chunks dedupe receiver-side. One delivery record per webhook summarizes
+ *   the batch.
+ * - RAG/search: batch-read snapshots once, then index per entry.
+ */
+async function dispatchBulkPublished(
+  ctx: AppContext,
+  deps: DispatchDeps,
+  event: EntriesPublishedBulkEvent,
+): Promise<void> {
+  const scope = event.scope;
+  const isPublish = event.action === 'publish';
+  const perEntryType = isPublish ? ('entry.published' as const) : ('entry.unpublished' as const);
+
+  // Snapshots for webhook payloads + indexing (publish only; unpublished
+  // entries have left the read model and need ids only).
+  const snapshots = isPublish
+    ? await ctx.store.entries.getPublishedMany(scope, event.entryIds)
+    : [];
+  const snapshotById = new Map(snapshots.map((s) => [s.entryId, s]));
+
+  // Publish sends only entries whose snapshot still exists — one re-unpublished
+  // between chunk commit and dispatch gets no degraded empty-fields payload
+  // (its own unpublish event tells the receiver what happened instead).
+  const webhookIds = isPublish
+    ? event.entryIds.filter((id) => snapshotById.has(id))
+    : [...event.entryIds];
+
+  // 1. Webhooks: subscribers to the per-entry topics get synthesized
+  // per-entry events; subscribers to the bulk topic get the bulk event.
+  const perEntryWebhooks = await ctx.store.webhooks.listByTopic(scope, perEntryType);
+  for (const webhook of perEntryWebhooks) {
+    let failed = 0;
+    let lastError: string | undefined;
+    const sendOne = async (entryId: string) => {
+      const snapshot = snapshotById.get(entryId);
+      // Derived id from STABLE coordinates (jobId, chunkId, entryId) — a
+      // chunk re-run mints a fresh event id, but the receiver's dedupe key
+      // must not change with it.
+      const derivedId = `${event.jobId}:${event.chunkId}:${entryId}`;
+      const perEntryEvent: DomainEvent =
+        isPublish && snapshot
+          ? {
+              id: derivedId,
+              type: 'entry.published',
+              scope,
+              occurredAt: event.occurredAt,
+              entryId,
+              contentTypeApiId: snapshot.contentTypeApiId,
+              version: snapshot.version,
+              fields: snapshot.fields,
+            }
+          : {
+              id: derivedId,
+              type: 'entry.unpublished',
+              scope,
+              occurredAt: event.occurredAt,
+              entryId,
+              contentTypeApiId: '',
+            };
+      const result = await deps.sender.send(webhook, perEntryEvent);
+      deps.onWebhookDelivery?.({ delivered: result.delivered });
+      if (!result.delivered) {
+        failed += 1;
+        lastError = result.error ?? `HTTP ${result.statusCode}`;
+      }
+    };
+    // Per-endpoint failures are recorded, never thrown: the retry unit stays
+    // the receiver's dedupe on derived ids, not this whole chunk event.
+    for (let at = 0; at < webhookIds.length; at += BULK_WEBHOOK_CONCURRENCY) {
+      await Promise.all(
+        webhookIds.slice(at, at + BULK_WEBHOOK_CONCURRENCY).map((id) => sendOne(id)),
+      );
+    }
+    await ctx.store.webhooks.recordDelivery(scope, {
+      webhookId: webhook.id,
+      eventId: event.id,
+      status: failed === 0 ? 'success' : 'failed',
+      attempts: 1,
+      error:
+        failed === 0 ? undefined : `${failed}/${webhookIds.length} deliveries failed: ${lastError}`,
+    });
+  }
+  const bulkWebhooks = (await ctx.store.webhooks.listByTopic(scope, event.type)).filter(
+    (w: Webhook) => !perEntryWebhooks.some((p) => p.id === w.id),
+  );
+  for (const webhook of bulkWebhooks) {
+    const result = await deps.sender.send(webhook, event);
+    deps.onWebhookDelivery?.({ delivered: result.delivered });
+    await ctx.store.webhooks.recordDelivery(scope, {
+      webhookId: webhook.id,
+      eventId: event.id,
+      status: result.delivered ? 'success' : 'failed',
+      statusCode: result.statusCode,
+      attempts: 1,
+      error: result.error,
+    });
+  }
+
+  // 2. Cache: one epoch bump for the whole chunk.
+  if (deps.cache) {
+    await deps.cache.invalidateTag(epochTag(scope));
+  }
+
+  // 3. RAG + lexical index, from the batch-read snapshots.
+  if (deps.rag) {
+    if (isPublish) {
+      for (const s of snapshots) {
+        await indexEntryEmbeddings(deps.rag, scope, {
+          entryId: s.entryId,
+          fields: s.fields,
+          entryVersion: s.version,
+        });
+      }
+    } else {
+      for (const id of event.entryIds) {
+        await removeEntryEmbeddings(deps.rag, scope, id);
+      }
+    }
+  }
+  const searchIndex = deps.searchIndex ?? deps.rag?.searchIndex;
+  if (searchIndex) {
+    if (isPublish) {
+      for (const s of snapshots) {
+        // refresh: false — bulk writes defer to the engine's refresh cycle.
+        await searchIndex.index(
+          scope,
+          {
+            entryId: s.entryId,
+            contentTypeApiId: s.contentTypeApiId,
+            textByLocale: extractTextByLocale(s.fields),
+            entryVersion: s.version,
+          },
+          { refresh: false },
+        );
+      }
+    } else {
+      for (const id of event.entryIds) {
+        await searchIndex.remove(scope, id);
+      }
+    }
+  }
+
+  // 4. User functions see the bulk event itself (one invocation per function,
+  // not one per entry).
+  if (deps.invoker) {
+    await invokeFunctionsForEvent(ctx, deps.invoker, event);
+  }
+}
+
 /** Cache tag for a delivered entry, scoped to its space + environment. */
 export function cacheTag(
   scope: { spaceId: string; environmentId: string },
   entryId: string,
 ): string {
   return `entry:${scope.spaceId}:${scope.environmentId}:${entryId}`;
+}
+
+/**
+ * Scope-wide epoch tag. Every delivery cache envelope carries it, so bumping
+ * this ONE version key lazily evicts the whole scope — the bulk-operation
+ * invalidation path (one KV write instead of one per affected entry).
+ */
+export function epochTag(scope: { spaceId: string; environmentId: string }): string {
+  return `epoch:${scope.spaceId}:${scope.environmentId}`;
 }

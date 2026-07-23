@@ -38,6 +38,9 @@ import type {
   AuditEntry,
   AuditRepo,
   AuthRepo,
+  BulkJob,
+  BulkJobChunk,
+  BulkJobRepo,
   CommentRepo,
   ContentStore,
   ContentStoreTx,
@@ -75,12 +78,19 @@ const scopeKey = (s: Scope) => `${s.spaceId}::${s.environmentId}`;
  * outbox) without isolation guarantees — transactions simply run the callback.
  */
 export class InMemoryContentStore implements ContentStore {
+  /**
+   * Time source for adapter-stamped instants (outbox `relayedAt`) — the fields
+   * the REAL adapter stamps with database time, not the use-case clock. Tests
+   * exercising retention point this at their FixedClock for determinism.
+   */
+  nowMs: () => number = () => Date.now();
+
   private readonly spaceConfigs = new Map<string, SpaceConfig>();
   private readonly contentTypeData = new Map<string, ContentType>();
   private readonly entryData = new Map<string, Entry>();
   private readonly versionData = new Map<string, EntryVersion[]>();
   private readonly publishedData = new Map<string, PublishedEntry>();
-  private readonly outboxData: { event: DomainEvent; relayed: boolean }[] = [];
+  private readonly outboxData: { event: DomainEvent; relayed: boolean; relayedAt?: number }[] = [];
 
   private readonly environmentData = new Map<string, { id: string; name: string }[]>();
   private readonly aliasData = new Map<string, EnvironmentAlias>();
@@ -132,6 +142,16 @@ export class InMemoryContentStore implements ContentStore {
       const result: EntryWithFields = { entry, fields: current?.fields ?? {} };
       return result;
     },
+    getMany: async (scope, ids) =>
+      // Dedupe first: Postgres inArray returns each matching row once, so
+      // duplicate input ids must not yield duplicate rows here either.
+      [...new Set(ids)].flatMap((id) => {
+        const entry = this.entryData.get(`${scopeKey(scope)}::${id}`);
+        if (!entry) return [];
+        const versions = this.versionData.get(`${scopeKey(scope)}::${id}`) ?? [];
+        const current = versions.find((v) => v.version === entry.currentVersion);
+        return [{ entry, fields: current?.fields ?? {} }];
+      }),
     list: async (scope, query: EntryQuery) => {
       const prefix = `${scopeKey(scope)}::`;
       let entries = [...this.entryData.entries()]
@@ -171,6 +191,9 @@ export class InMemoryContentStore implements ContentStore {
     saveAggregate: async (scope, entry) => {
       this.entryData.set(`${scopeKey(scope)}::${entry.id}`, entry);
     },
+    saveAggregateMany: async (scope, entries) => {
+      for (const entry of entries) this.entryData.set(`${scopeKey(scope)}::${entry.id}`, entry);
+    },
     listVersions: async (scope, entryId) =>
       [...(this.versionData.get(`${scopeKey(scope)}::${entryId}`) ?? [])].sort(
         (a, b) => b.version - a.version,
@@ -181,10 +204,18 @@ export class InMemoryContentStore implements ContentStore {
     putPublished: async (scope, snapshot) => {
       this.publishedData.set(`${scopeKey(scope)}::${snapshot.entryId}`, snapshot);
     },
+    putPublishedMany: async (scope, snapshots) => {
+      for (const s of snapshots) this.publishedData.set(`${scopeKey(scope)}::${s.entryId}`, s);
+    },
     removePublished: async (scope, entryId) => {
       this.publishedData.delete(`${scopeKey(scope)}::${entryId}`);
     },
+    removePublishedMany: async (scope, entryIds) => {
+      for (const id of entryIds) this.publishedData.delete(`${scopeKey(scope)}::${id}`);
+    },
     getPublished: async (scope, id) => this.publishedData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    getPublishedMany: async (scope, ids) =>
+      [...new Set(ids)].flatMap((id) => this.publishedData.get(`${scopeKey(scope)}::${id}`) ?? []),
     listPublished: async (scope, query: EntryQuery) => {
       const prefix = `${scopeKey(scope)}::`;
       let rows = [...this.publishedData.entries()]
@@ -288,6 +319,8 @@ export class InMemoryContentStore implements ContentStore {
 
   readonly assets: AssetRepo = {
     get: async (scope, id) => this.assetData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    getMany: async (scope, ids) =>
+      [...new Set(ids)].flatMap((id) => this.assetData.get(`${scopeKey(scope)}::${id}`) ?? []),
     list: async (scope, query) => {
       const prefix = `${scopeKey(scope)}::`;
       const rows = [...this.assetData.entries()]
@@ -310,6 +343,10 @@ export class InMemoryContentStore implements ContentStore {
     },
     getPublished: async (scope, id) =>
       this.publishedAssetData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    getPublishedMany: async (scope, ids) =>
+      [...new Set(ids)].flatMap(
+        (id) => this.publishedAssetData.get(`${scopeKey(scope)}::${id}`) ?? [],
+      ),
     listPublished: async (scope, query) => {
       const prefix = `${scopeKey(scope)}::`;
       const rows = [...this.publishedAssetData.entries()]
@@ -326,6 +363,11 @@ export class InMemoryContentStore implements ContentStore {
     replaceForEntry: async (scope, fromEntryId, edges) => {
       this.referenceData.set(`${scopeKey(scope)}::${fromEntryId}`, [...edges]);
     },
+    replaceForEntries: async (scope, replacements) => {
+      for (const r of replacements) {
+        this.referenceData.set(`${scopeKey(scope)}::${r.fromEntryId}`, [...r.edges]);
+      }
+    },
     removeForEntry: async (scope, fromEntryId) => {
       this.referenceData.delete(`${scopeKey(scope)}::${fromEntryId}`);
     },
@@ -339,6 +381,36 @@ export class InMemoryContentStore implements ContentStore {
         out.push(...edges.filter((e) => e.toId === toId));
       }
       return out;
+    },
+    findReverseClosure: async (scope, toIds, opts) => {
+      // BFS mirror of the Postgres recursive CTE: bounded by depth and count,
+      // cycle-safe via the visited set, seeds excluded from the output.
+      const prefix = `${scopeKey(scope)}::`;
+      const reverse = new Map<string, string[]>();
+      for (const [k, edges] of this.referenceData.entries()) {
+        if (!k.startsWith(prefix)) continue;
+        for (const e of edges) {
+          const list = reverse.get(e.toId) ?? [];
+          list.push(e.fromEntryId);
+          reverse.set(e.toId, list);
+        }
+      }
+      const seeds = new Set(toIds);
+      const visited = new Set<string>();
+      let frontier = [...seeds];
+      for (let depth = 0; depth < opts.maxDepth && frontier.length > 0; depth++) {
+        const next: string[] = [];
+        for (const id of frontier) {
+          for (const from of reverse.get(id) ?? []) {
+            if (seeds.has(from) || visited.has(from)) continue;
+            if (visited.size >= opts.maxEntries) return [...visited];
+            visited.add(from);
+            next.push(from);
+          }
+        }
+        frontier = next;
+      }
+      return [...visited];
     },
   };
 
@@ -377,7 +449,9 @@ export class InMemoryContentStore implements ContentStore {
       this.webhookDeliveries.push({
         ...delivery,
         id: this.deliverySeq,
-        createdAt: new Date(this.deliverySeq).toISOString(),
+        // Stamped from the injectable time source (like the real adapter's
+        // DB default) so retention tests can control record age.
+        createdAt: new Date(this.nowMs()).toISOString(),
       });
     },
     listDeliveries: async (_scope, webhookId, opts) =>
@@ -385,6 +459,17 @@ export class InMemoryContentStore implements ContentStore {
         .filter((d) => d.webhookId === webhookId)
         .sort((a, b) => b.id - a.id)
         .slice(0, opts?.limit ?? 50),
+    deleteDeliveriesBefore: async (before, limit) => {
+      const cutoff = before.toISOString();
+      let deleted = 0;
+      for (let i = this.webhookDeliveries.length - 1; i >= 0 && deleted < limit; i--) {
+        if ((this.webhookDeliveries[i]?.createdAt ?? '') < cutoff) {
+          this.webhookDeliveries.splice(i, 1);
+          deleted += 1;
+        }
+      }
+      return deleted;
+    },
   };
 
   private readonly apiKeyData = new Map<string, ApiKey>();
@@ -732,6 +817,11 @@ export class InMemoryContentStore implements ContentStore {
     },
     getEntryMetadata: async (scope, entryId) =>
       this.entryMetadataData.get(`${scopeKey(scope)}::${entryId}`) ?? null,
+    getEntryMetadataMany: async (scope, entryIds) =>
+      [...new Set(entryIds)].flatMap((entryId) => {
+        const metadata = this.entryMetadataData.get(`${scopeKey(scope)}::${entryId}`);
+        return metadata ? [{ entryId, metadata }] : [];
+      }),
     setEntryMetadata: async (scope, entryId, metadata) => {
       this.entryMetadataData.set(`${scopeKey(scope)}::${entryId}`, metadata);
     },
@@ -820,9 +910,131 @@ export class InMemoryContentStore implements ContentStore {
     },
   };
 
+  private readonly bulkJobData = new Map<string, BulkJob>();
+  private readonly bulkChunkData = new Map<
+    string,
+    BulkJobChunk & { createdAtMs: number; claimedAtMs?: number }
+  >();
+
+  readonly bulkJobs: BulkJobRepo = {
+    createJob: async (scope, job) => {
+      this.bulkJobData.set(`${scopeKey(scope)}::${job.id}`, job);
+    },
+    getJob: async (scope, id) => this.bulkJobData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    listJobs: async (scope, opts) => {
+      const prefix = `${scopeKey(scope)}::`;
+      return [...this.bulkJobData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+        .slice(0, opts?.limit ?? 50);
+    },
+    createChunks: async (scope, chunks) => {
+      for (const c of chunks) {
+        this.bulkChunkData.set(`${scopeKey(scope)}::${c.jobId}::${c.chunkId}`, {
+          ...c,
+          createdAtMs: this.nowMs(),
+        });
+      }
+    },
+    listChunks: async (scope, jobId) => {
+      const prefix = `${scopeKey(scope)}::${jobId}::`;
+      return [...this.bulkChunkData.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([, v]) => v)
+        .sort((a, b) => a.chunkId.localeCompare(b.chunkId));
+    },
+    claimChunk: async (scope, jobId, chunkId, opts) => {
+      const key = `${scopeKey(scope)}::${jobId}::${chunkId}`;
+      const chunk = this.bulkChunkData.get(key);
+      if (!chunk) return null;
+      const stale =
+        chunk.status === 'running' && (chunk.claimedAtMs ?? 0) < opts.staleBefore.getTime();
+      if (chunk.status !== 'pending' && !stale) return null;
+      const claimed = {
+        ...chunk,
+        status: 'running' as const,
+        attempts: chunk.attempts + 1,
+        claimedAtMs: opts.now.getTime(),
+      };
+      this.bulkChunkData.set(key, claimed);
+      return claimed;
+    },
+    completeChunk: async (scope, jobId, chunkId, outcome) => {
+      const jobKey = `${scopeKey(scope)}::${jobId}`;
+      const job = this.bulkJobData.get(jobKey);
+      if (!job) throw new Error(`Bulk job ${jobId} not found`);
+      const chunkKey = `${scopeKey(scope)}::${jobId}::${chunkId}`;
+      const chunk = this.bulkChunkData.get(chunkKey);
+      // Only a running claim completes — a duplicate completion never
+      // double-counts (mirrors the Postgres status guard).
+      if (!chunk || chunk.status !== 'running') return job;
+      this.bulkChunkData.set(chunkKey, {
+        ...chunk,
+        status: outcome.status,
+        failures: [...outcome.failures],
+      });
+      const updated: BulkJob = {
+        ...job,
+        completedChunks: job.completedChunks + 1,
+        succeeded: job.succeeded + outcome.succeeded,
+        failed: job.failed + outcome.failed,
+      };
+      this.bulkJobData.set(jobKey, updated);
+      return updated;
+    },
+    finalizeJob: async (scope, id, status, at) => {
+      const key = `${scopeKey(scope)}::${id}`;
+      const job = this.bulkJobData.get(key);
+      if (!job || job.status !== 'running') return null;
+      const updated: BulkJob = { ...job, status, completedAt: at.toISOString() };
+      this.bulkJobData.set(key, updated);
+      return updated;
+    },
+    releaseChunk: async (scope, jobId, chunkId) => {
+      const key = `${scopeKey(scope)}::${jobId}::${chunkId}`;
+      const chunk = this.bulkChunkData.get(key);
+      if (chunk?.status !== 'running') return;
+      const { claimedAtMs: _dropped, ...rest } = chunk;
+      this.bulkChunkData.set(key, { ...rest, status: 'pending' });
+    },
+    findStalledChunks: async (staleBefore, limit) => {
+      const cutoff = staleBefore.getTime();
+      const out: { scope: Scope; jobId: string; chunkId: string }[] = [];
+      for (const [key, chunk] of this.bulkChunkData.entries()) {
+        if (out.length >= limit) break;
+        const [spaceId, environmentId] = key.split('::');
+        if (!spaceId || !environmentId) continue;
+        const scope = { spaceId, environmentId };
+        const job = this.bulkJobData.get(`${scopeKey(scope)}::${chunk.jobId}`);
+        if (job?.status !== 'running') continue;
+        const stalePending = chunk.status === 'pending' && chunk.createdAtMs < cutoff;
+        const staleRunning = chunk.status === 'running' && (chunk.claimedAtMs ?? 0) < cutoff;
+        if (stalePending || staleRunning) {
+          out.push({ scope, jobId: chunk.jobId, chunkId: chunk.chunkId });
+        }
+      }
+      return out;
+    },
+    findUnfinalizedJobs: async (limit) => {
+      const out: { scope: Scope; jobId: string }[] = [];
+      for (const [key, job] of this.bulkJobData.entries()) {
+        if (out.length >= limit) break;
+        if (job.status !== 'running' || job.completedChunks < job.totalChunks) continue;
+        const [spaceId, environmentId] = key.split('::');
+        if (!spaceId || !environmentId) continue;
+        out.push({ scope: { spaceId, environmentId }, jobId: job.id });
+      }
+      return out;
+    },
+  };
+
   readonly outbox: OutboxRepo = {
     append: async (event) => {
       this.outboxData.push({ event, relayed: false });
+    },
+    appendMany: async (events) => {
+      for (const event of events) this.outboxData.push({ event, relayed: false });
     },
     readPending: async (limit) =>
       this.outboxData
@@ -832,8 +1044,23 @@ export class InMemoryContentStore implements ContentStore {
     markRelayed: async (eventIds) => {
       const ids = new Set(eventIds);
       for (const row of this.outboxData) {
-        if (ids.has(row.event.id)) row.relayed = true;
+        if (ids.has(row.event.id)) {
+          row.relayed = true;
+          row.relayedAt = this.nowMs();
+        }
       }
+    },
+    deleteRelayedBefore: async (before, limit) => {
+      const cutoff = before.getTime();
+      let deleted = 0;
+      for (let i = this.outboxData.length - 1; i >= 0 && deleted < limit; i--) {
+        const row = this.outboxData[i];
+        if (row?.relayed && (row.relayedAt ?? 0) < cutoff) {
+          this.outboxData.splice(i, 1);
+          deleted += 1;
+        }
+      }
+      return deleted;
     },
   };
 
@@ -849,6 +1076,8 @@ export class InMemoryContentStore implements ContentStore {
       this.referenceData,
       this.releaseData,
       this.releaseItemData,
+      this.bulkJobData,
+      this.bulkChunkData,
     ] as Map<string, unknown>[];
   }
 
@@ -873,6 +1102,8 @@ export class InMemoryContentStore implements ContentStore {
         assets: this.assets,
         references: this.references,
         releases: this.releases,
+        taxonomy: this.taxonomy,
+        bulkJobs: this.bulkJobs,
         outbox: this.outbox,
       });
     } catch (err) {

@@ -33,5 +33,17 @@ export function createRedisCache(connection: Redis, defaultTtlSeconds = 300): Ca
       pipe.del(tagKey(tag));
       await pipe.exec();
     },
+    async invalidateTags(tags) {
+      const distinct = [...new Set(tags)];
+      if (distinct.length === 0) return;
+      // One round-trip for all member lookups, then one delete pipeline.
+      const memberLists = await Promise.all(
+        distinct.map((tag) => connection.smembers(tagKey(tag))),
+      );
+      const pipe = connection.pipeline();
+      for (const members of memberLists) for (const key of members) pipe.del(key);
+      for (const tag of distinct) pipe.del(tagKey(tag));
+      await pipe.exec();
+    },
   };
 }

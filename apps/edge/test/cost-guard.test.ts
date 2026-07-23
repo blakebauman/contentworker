@@ -1,6 +1,6 @@
-import { env } from 'cloudflare:test';
+import { env, listDurableObjectIds, runInDurableObject } from 'cloudflare:test';
 import type { Scope } from '@cw/domain';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   createDoCostGuard,
   doAgentCostGuardFromEnv,
@@ -11,6 +11,20 @@ import type { EdgeEnv } from '../src/env.js';
 // vitest.config.ts binds AI_MAX_REQUESTS_PER_WINDOW=2, AI_MAX_TOKENS_PER_WINDOW=100,
 // AI_BUDGET_WINDOW_SECONDS=2, AI_AGENT_MAX_REQUESTS_PER_WINDOW=1.
 const WINDOW_MS = 2_000;
+
+// Drain the DO's GC alarm after every test — a pending alarm firing while
+// vitest-pool-workers pops the test's isolated storage corrupts the storage
+// stack (flaky "isolated storage failed" on slow runners). Delete, don't run:
+// the alarm handler re-arms itself when live windows remain.
+afterEach(async () => {
+  // listDurableObjectIds is typed for an untyped namespace; ours is typed.
+  const ns = env.AI_BUDGET as unknown as DurableObjectNamespace;
+  for (const id of await listDurableObjectIds(ns)) {
+    await runInDurableObject(env.AI_BUDGET.get(id), (_instance, state) =>
+      state.storage.deleteAlarm(),
+    );
+  }
+});
 
 const scopeFor = (spaceId: string): Scope => ({ spaceId, environmentId: 'main' });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
