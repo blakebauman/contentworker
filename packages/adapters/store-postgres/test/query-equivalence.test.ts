@@ -136,13 +136,25 @@ const QUERIES: { name: string; q: EntryQuery }[] = [
     name: 'explicit locale resolves that locale',
     q: { locale: 'de', filters: [{ field: 'title', op: 'eq', value: 'Alpha Anleitung' }] },
   },
-  { name: 'match non-ASCII lowercase needle', q: { filters: [{ field: 'title', op: 'match', value: 'äpfel' }] } },
-  { name: 'match non-ASCII uppercase needle', q: { filters: [{ field: 'title', op: 'match', value: 'ÄPFEL' }] } },
+  {
+    name: 'match non-ASCII lowercase needle',
+    q: { filters: [{ field: 'title', op: 'match', value: 'äpfel' }] },
+  },
+  {
+    name: 'match non-ASCII uppercase needle',
+    q: { filters: [{ field: 'title', op: 'match', value: 'ÄPFEL' }] },
+  },
   { name: 'match sharp-s', q: { filters: [{ field: 'title', op: 'match', value: 'straße' }] } },
-  { name: 'match dotted capital I (Turkish)', q: { filters: [{ field: 'title', op: 'match', value: 'istanbul' }] } },
+  {
+    name: 'match dotted capital I (Turkish)',
+    q: { filters: [{ field: 'title', op: 'match', value: 'istanbul' }] },
+  },
   { name: 'match accented', q: { filters: [{ field: 'title', op: 'match', value: 'CAFÉ' }] } },
   { name: 'search non-ASCII', q: { search: 'äpfel' } },
-  { name: 'eq non-ASCII exact', q: { filters: [{ field: 'title', op: 'eq', value: 'naïve café' }] } },
+  {
+    name: 'eq non-ASCII exact',
+    q: { filters: [{ field: 'title', op: 'eq', value: 'naïve café' }] },
+  },
   {
     name: 'explicit locale + fallback chain',
     q: {
@@ -287,7 +299,8 @@ describe.skipIf(!URL)('prefilter superset property (adversarial)', { timeout: 12
     '5.0',
     0,
     -1,
-    9007199254740993, // beyond double precision
+    9007199254740991, // Number.MAX_SAFE_INTEGER
+    '9007199254740993', // beyond double precision, as a string comparand
     true,
     false,
     'true',
@@ -335,8 +348,22 @@ describe.skipIf(!URL)('prefilter superset property (adversarial)', { timeout: 12
         name: 'Adv',
         displayField: 'label',
         fields: [
-          { apiId: 'label', name: 'L', type: 'Symbol', localized: false, required: true, position: 0 },
-          { apiId: 'data', name: 'D', type: 'Object', localized: false, required: false, position: 1 },
+          {
+            apiId: 'label',
+            name: 'L',
+            type: 'Symbol',
+            localized: false,
+            required: true,
+            position: 0,
+          },
+          {
+            apiId: 'data',
+            name: 'D',
+            type: 'Object',
+            localized: false,
+            required: false,
+            position: 1,
+          },
         ],
       });
       for (let i = 0; i < VALUES.length; i++) {
