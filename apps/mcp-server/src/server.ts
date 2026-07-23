@@ -2,6 +2,7 @@ import {
   AGENT_WORKFLOWS,
   addComment,
   addEntryToRelease,
+  applyEntryTags,
   auditEntry,
   autoTagAsset,
   autofillField,
@@ -422,6 +423,27 @@ export function buildServer(deps: McpDeps, principal: Principal): McpServer {
     async (args) => {
       guard(SCOPES.contentWrite, scopeOf(args));
       return ok(await suggestEntryTags(ctx, ai, scopeOf(args), args.id, { apply: args.apply }));
+    },
+  );
+
+  server.tool(
+    'entry_apply_tags',
+    'Persist a reviewed tag suggestion exactly as approved: assigns the given ' +
+      'existing-tag ids and creates the given new tag names (no model re-run).',
+    {
+      id: z.string(),
+      tagIds: z.array(z.string().max(128)).max(1000).optional(),
+      newTags: z.array(z.string().max(256)).max(100).optional(),
+      ...scopeArgs,
+    },
+    async (args) => {
+      guard(SCOPES.contentWrite, scopeOf(args));
+      return ok(
+        await applyEntryTags(ctx, scopeOf(args), args.id, {
+          tagIds: args.tagIds,
+          newTags: args.newTags,
+        }),
+      );
     },
   );
 

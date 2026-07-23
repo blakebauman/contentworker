@@ -58,15 +58,17 @@ export function CanvasDialog(props: {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+    // Dismissal is blocked while a mapping is in flight: a late result landing
+    // after the dialog closed would silently mutate the form.
+    <Dialog open={props.open} onOpenChange={(o) => !busy && props.onOpenChange(o)}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <PenLine className="size-4 text-primary" />
-            Canvas → {props.contentTypeName}
+            Draft {props.contentTypeName} from prose
           </DialogTitle>
           <DialogDescription>
-            Write freely. The model maps your prose into the structured fields — you can edit
+            Write freely. The model maps your prose into the structured fields, and you can edit
             anything before saving.
           </DialogDescription>
         </DialogHeader>
@@ -101,7 +103,12 @@ export function CanvasDialog(props: {
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => props.onOpenChange(false)}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={busy || !prose.trim()}>

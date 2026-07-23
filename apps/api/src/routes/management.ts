@@ -2,6 +2,7 @@ import {
   addComment,
   addEntryToRelease,
   agentUsage,
+  applyEntryTags,
   auditEntry,
   autoTagAsset,
   autofillField,
@@ -149,6 +150,7 @@ import {
   agentSchedulePatchBody,
   altTextBody,
   appExtensionBody,
+  applyTagsBody,
   assetMetadataBody,
   auditBody,
   autofillBody,
@@ -572,6 +574,12 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
         c.req.param('id'),
         await parseBody(c, tierOnlyBody),
       ),
+    ),
+  );
+  // Persists a reviewed tag suggestion exactly as approved (no model re-run).
+  app.post(`${BASE}/entries/:id/apply-tags`, requireScope(SCOPES.contentWrite), async (c) =>
+    c.json(
+      await applyEntryTags(ctx, scopeOf(c), c.req.param('id'), await parseBody(c, applyTagsBody)),
     ),
   );
   // --- functions (event-triggered, HTTP-invoked) -------------------------

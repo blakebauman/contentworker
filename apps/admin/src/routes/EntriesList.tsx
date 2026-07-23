@@ -2,6 +2,17 @@ import { EmptyState } from '@/components/EmptyState';
 import { EntryFilterBar } from '@/components/EntryFilterBar';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -43,6 +54,14 @@ export function EntriesList() {
 
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [diffEntry, setDiffEntry] = useState<PreviewEntry | null>(null);
+  // Bulk action awaiting confirmation (bulk selections are tedious to rebuild,
+  // so the whole batch is confirmed once before it runs).
+  const [confirmBulk, setConfirmBulk] = useState<'publish' | 'unpublish' | null>(null);
+  // Per-item failures from the last bulk action, with resolved titles so the
+  // editor knows WHICH entries failed, not just how many.
+  const [bulkFailures, setBulkFailures] = useState<
+    { id: string; title: string; error?: string }[] | null
+  >(null);
   // Filter state is bound to the type it was authored for and reset in-render
   // when the type changes, so a stale filter (naming another type's fields)
   // can never be combined with the new type's query key — not even for the
@@ -55,6 +74,8 @@ export function EntriesList() {
     setFilterState({ typeId, query: {} });
     setPicked(new Set());
     setDiffEntry(null);
+    setConfirmBulk(null);
+    setBulkFailures(null);
   }
   const query = filterState.typeId === typeId ? filterState.query : {};
   const setQuery = (q: EntryListQuery) => setFilterState({ typeId, query: q });
@@ -106,27 +127,45 @@ export function EntriesList() {
       }
     });
 
+  const titleOf = (id: string) => {
+    const entry = entries.find((e) => e.id === id);
+    const value = selectedType
+      ? (entry?.fields[selectedType.displayField] as Record<string, unknown> | undefined)?.[
+          conn.locale
+        ]
+      : undefined;
+    return typeof value === 'string' && value ? value : id;
+  };
+
   // One bulk API call handles the whole selection server-side, reporting
-  // per-item outcomes; we surface any partial failures in the toast.
+  // per-item outcomes; partial failures are surfaced by entry, not as a count.
   const bulk = (action: 'publish' | 'unpublish', verb: string, status: string) => {
     const ids = [...picked];
     setPicked(new Set());
+    setBulkFailures(null);
     return mutateEntries(async () => {
       const optimistic = !entriesQuery.isPlaceholderData;
       const snapshot = entries;
       if (optimistic) optimisticStatus(new Set(ids), status);
-      let summary: { succeeded: number; failed: number };
+      let summary: Awaited<ReturnType<typeof client.bulkEntryAction>>;
       try {
         summary = await client.bulkEntryAction(action, ids);
       } catch (e) {
         if (optimistic) queryClient.setQueryData(entriesKey, snapshot);
         throw e;
       }
-      toast.success(
-        summary.failed > 0
-          ? `${verb} ${summary.succeeded}, ${summary.failed} failed`
-          : `${verb} ${summary.succeeded} ${summary.succeeded === 1 ? 'entry' : 'entries'}`,
-      );
+      if (summary.failed > 0) {
+        setBulkFailures(
+          summary.results
+            .filter((r) => !r.ok)
+            .map((r) => ({ id: r.id, title: titleOf(r.id), error: r.error })),
+        );
+        toast.error(`${verb} ${summary.succeeded}; ${summary.failed} failed (details in the list)`);
+      } else {
+        toast.success(
+          `${verb} ${summary.succeeded} ${summary.succeeded === 1 ? 'entry' : 'entries'}`,
+        );
+      }
     });
   };
 
@@ -164,17 +203,13 @@ export function EntriesList() {
         {picked.size > 0 && (
           <>
             <span className="text-sm text-muted-foreground">{picked.size} selected</span>
-            <Button
-              type="button"
-              onClick={() => bulk('publish', 'Published', 'published')}
-              disabled={busy}
-            >
+            <Button type="button" onClick={() => setConfirmBulk('publish')} disabled={busy}>
               Publish selected
             </Button>
             <Button
               type="button"
               variant="outline"
-              onClick={() => bulk('unpublish', 'Unpublished', 'draft')}
+              onClick={() => setConfirmBulk('unpublish')}
               disabled={busy}
             >
               Unpublish selected
@@ -191,6 +226,33 @@ export function EntriesList() {
       </PageHeader>
 
       <EntryFilterBar type={selectedType} value={query} onChange={setQuery} />
+
+      {bulkFailures && bulkFailures.length > 0 && (
+        <Alert variant="destructive">
+          <AlertTitle>
+            {bulkFailures.length} {bulkFailures.length === 1 ? 'entry' : 'entries'} failed
+          </AlertTitle>
+          <AlertDescription>
+            <ul className="space-y-0.5">
+              {bulkFailures.map((f) => (
+                <li key={f.id}>
+                  <span className="font-medium">{f.title}</span>
+                  {f.error ? `: ${f.error}` : ''}
+                </li>
+              ))}
+            </ul>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => setBulkFailures(null)}
+            >
+              Dismiss
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {loading ? (
         <div className="space-y-2">
@@ -226,7 +288,15 @@ export function EntriesList() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-8" />
+              <TableHead className="w-8">
+                <Checkbox
+                  aria-label="Select all entries"
+                  checked={entries.length > 0 && entries.every((e) => picked.has(e.id))}
+                  onCheckedChange={(c) =>
+                    setPicked(c === true ? new Set(entries.map((e) => e.id)) : new Set())
+                  }
+                />
+              </TableHead>
               <TableHead>{selectedType.displayField}</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="w-[320px]">Actions</TableHead>
@@ -274,21 +344,23 @@ export function EntriesList() {
                         Diff
                       </Button>
                     )}
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() =>
-                        setStatus(
-                          e.id,
-                          'published',
-                          (id) => client.publishEntry(id),
-                          'Entry published',
-                        )
-                      }
-                      disabled={busy}
-                    >
-                      Publish
-                    </Button>
+                    {e.status !== 'published' && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() =>
+                          setStatus(
+                            e.id,
+                            'published',
+                            (id) => client.publishEntry(id),
+                            'Entry published',
+                          )
+                        }
+                        disabled={busy}
+                      >
+                        Publish
+                      </Button>
+                    )}
                     {e.status === 'published' && (
                       <Button
                         type="button"
@@ -314,6 +386,41 @@ export function EntriesList() {
           </TableBody>
         </Table>
       )}
+
+      <AlertDialog
+        open={confirmBulk !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmBulk(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmBulk === 'publish' ? 'Publish' : 'Unpublish'} {picked.size}{' '}
+              {picked.size === 1 ? 'entry' : 'entries'}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmBulk === 'publish'
+                ? 'The current draft of each selected entry goes live on the delivery API.'
+                : 'Each selected entry is removed from the delivery API and returns to draft.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep as is</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={() => {
+                const action = confirmBulk;
+                setConfirmBulk(null);
+                if (action === 'publish') void bulk('publish', 'Published', 'published');
+                else if (action === 'unpublish') void bulk('unpublish', 'Unpublished', 'draft');
+              }}
+            >
+              {confirmBulk === 'publish' ? 'Publish entries' : 'Unpublish entries'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Sheet open={!!diffEntry} onOpenChange={(o) => !o && setDiffEntry(null)}>
         <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">

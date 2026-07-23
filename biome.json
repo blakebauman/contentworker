@@ -38,5 +38,21 @@
       "semicolons": "always",
       "trailingCommas": "all"
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": [
+        "apps/admin/src/components/layout/CommandPalette.tsx",
+        "apps/admin/src/components/EntityPicker.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off",
+            "useFocusableInteractive": "off"
+          }
+        }
+      }
+    }
+  ]
 }

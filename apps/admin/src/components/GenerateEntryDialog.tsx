@@ -57,7 +57,9 @@ export function GenerateEntryDialog(props: {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+    // Dismissal is blocked while a generation is in flight: a late result
+    // landing after the dialog closed would silently mutate the form.
+    <Dialog open={props.open} onOpenChange={(o) => !busy && props.onOpenChange(o)}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -99,7 +101,12 @@ export function GenerateEntryDialog(props: {
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => props.onOpenChange(false)}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={busy || !prompt.trim()}>

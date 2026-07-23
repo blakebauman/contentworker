@@ -693,11 +693,16 @@ export function createManagementClient(
     },
 
     // --- bulk operations -------------------------------------------------
-    /** Publishes or unpublishes many entries in one call. */
+    /** Publishes or unpublishes many entries in one call; failures are per-item. */
     bulkEntryAction(
       action: 'publish' | 'unpublish',
       ids: string[],
-    ): Promise<{ total: number; succeeded: number; failed: number }> {
+    ): Promise<{
+      total: number;
+      succeeded: number;
+      failed: number;
+      results: { id: string; ok: boolean; error?: string }[];
+    }> {
       return req('POST', `${mgmt}/bulk/entries/${action}`, { ids });
     },
 
@@ -726,7 +731,7 @@ export function createManagementClient(
     translateEntry(
       id: string,
       input: { targetLocale: string; sourceLocale?: string; apply?: boolean },
-    ): Promise<{ translatedFields: string[]; applied: boolean }> {
+    ): Promise<{ fields: EntryFields; translatedFields: string[]; applied: boolean }> {
       return req('POST', `${mgmt}/entries/${encodeURIComponent(id)}/translate`, input);
     },
     /** Summarizes an entry; `apply` writes the summary into `targetField`. */
@@ -749,6 +754,13 @@ export function createManagementClient(
       input: { apply?: boolean } = {},
     ): Promise<{ tagIds: string[]; newTags: string[]; applied: boolean }> {
       return req('POST', `${mgmt}/entries/${encodeURIComponent(id)}/suggest-tags`, input);
+    },
+    /** Persists a reviewed tag suggestion exactly as approved (no model re-run). */
+    applyEntryTags(
+      id: string,
+      input: { tagIds?: string[]; newTags?: string[] },
+    ): Promise<{ tagIds: string[]; createdTags: { id: string; name: string }[] }> {
+      return req('POST', `${mgmt}/entries/${encodeURIComponent(id)}/apply-tags`, input);
     },
     /** Suggests alt text for an image; `apply` writes it to the asset metadata. */
     generateAltText(

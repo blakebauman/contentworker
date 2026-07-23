@@ -1,6 +1,6 @@
+import { CollapsibleCard } from '@/components/CollapsibleCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import {
@@ -12,10 +12,11 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import type { Comment, EntryWorkflowState, Task, WorkflowDefinition } from '@cw/domain';
+import type { Comment, Task } from '@cw/domain';
 import { CheckSquare, GitBranch, MessageSquare, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import { useClient } from '../lib/client-context.js';
+import { useEffect, useState } from 'react';
+import { useClient, useLocalRun } from '../lib/client-context.js';
+import { useInvalidate, useScopedQuery } from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 
 const fmt = (iso: string) => new Date(iso).toLocaleString();
@@ -24,66 +25,58 @@ const fmt = (iso: string) => new Date(iso).toLocaleString();
 export function CollaborationPanel(props: { entryId: string }) {
   const { entryId } = props;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Collaboration</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Tabs defaultValue="comments">
-          <TabsList>
-            <TabsTrigger value="comments">
-              <MessageSquare className="size-4" />
-              Comments
-            </TabsTrigger>
-            <TabsTrigger value="tasks">
-              <CheckSquare className="size-4" />
-              Tasks
-            </TabsTrigger>
-            <TabsTrigger value="workflow">
-              <GitBranch className="size-4" />
-              Workflow
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="comments" className="mt-4">
-            <CommentsTab entryId={entryId} />
-          </TabsContent>
-          <TabsContent value="tasks" className="mt-4">
-            <TasksTab entryId={entryId} />
-          </TabsContent>
-          <TabsContent value="workflow" className="mt-4">
-            <WorkflowTab entryId={entryId} />
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+    <CollapsibleCard defaultOpen title="Collaboration">
+      <Tabs defaultValue="comments">
+        <TabsList>
+          <TabsTrigger value="comments">
+            <MessageSquare className="size-4" />
+            Comments
+          </TabsTrigger>
+          <TabsTrigger value="tasks">
+            <CheckSquare className="size-4" />
+            Tasks
+          </TabsTrigger>
+          <TabsTrigger value="workflow">
+            <GitBranch className="size-4" />
+            Workflow
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="comments" className="mt-4">
+          <CommentsTab entryId={entryId} />
+        </TabsContent>
+        <TabsContent value="tasks" className="mt-4">
+          <TasksTab entryId={entryId} />
+        </TabsContent>
+        <TabsContent value="workflow" className="mt-4">
+          <WorkflowTab entryId={entryId} />
+        </TabsContent>
+      </Tabs>
+    </CollapsibleCard>
   );
 }
 
 function CommentsTab(props: { entryId: string }) {
-  const { client, busy, run } = useClient();
+  const { client } = useClient();
+  const { busy, run } = useLocalRun();
   const toast = useToast();
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [draft, setDraft] = useState('');
-
-  const load = useCallback(
-    () => run(async () => setComments(await client.listComments(props.entryId))),
-    [client, run, props.entryId],
+  const invalidate = useInvalidate();
+  const commentsQuery = useScopedQuery(['comments', props.entryId], () =>
+    client.listComments(props.entryId),
   );
-  useEffect(() => {
-    load();
-  }, [load]);
+  const comments = commentsQuery.data ?? [];
+  const [draft, setDraft] = useState('');
 
   const add = (parentId: string | null, body: string) =>
     run(async () => {
       await client.addComment(props.entryId, { body, parentId });
-      await load();
+      await invalidate(['comments', props.entryId]);
     });
 
   const remove = (id: string) =>
     run(async () => {
       await client.deleteComment(id);
       toast.success('Comment deleted');
-      await load();
+      await invalidate(['comments', props.entryId]);
     });
 
   const roots = comments.filter((c) => !c.parentId);
@@ -149,7 +142,7 @@ function CommentRow(props: { comment: Comment; onDelete: () => void; busy: boole
         type="button"
         variant="ghost"
         size="icon"
-        className="size-7 opacity-0 group-hover:opacity-100"
+        className="size-7 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
         aria-label="Delete comment"
         onClick={props.onDelete}
         disabled={props.busy}
@@ -204,19 +197,16 @@ function ReplyBox(props: { onReply: (body: string) => void; busy: boolean }) {
 }
 
 function TasksTab(props: { entryId: string }) {
-  const { client, busy, run } = useClient();
+  const { client } = useClient();
+  const { busy, run } = useLocalRun();
   const toast = useToast();
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const invalidate = useInvalidate();
+  const tasksQuery = useScopedQuery(['tasks', props.entryId], () =>
+    client.listTasks(props.entryId),
+  );
+  const tasks = tasksQuery.data ?? [];
   const [body, setBody] = useState('');
   const [assignee, setAssignee] = useState('');
-
-  const load = useCallback(
-    () => run(async () => setTasks(await client.listTasks(props.entryId))),
-    [client, run, props.entryId],
-  );
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const create = () =>
     run(async () => {
@@ -226,7 +216,7 @@ function TasksTab(props: { entryId: string }) {
       });
       setBody('');
       setAssignee('');
-      await load();
+      await invalidate(['tasks', props.entryId]);
     });
 
   const toggle = (task: Task) =>
@@ -234,14 +224,14 @@ function TasksTab(props: { entryId: string }) {
       await client.updateTask(task.id, {
         status: task.status === 'resolved' ? 'open' : 'resolved',
       });
-      await load();
+      await invalidate(['tasks', props.entryId]);
     });
 
   const remove = (id: string) =>
     run(async () => {
       await client.deleteTask(id);
       toast.success('Task deleted');
-      await load();
+      await invalidate(['tasks', props.entryId]);
     });
 
   return (
@@ -250,7 +240,7 @@ function TasksTab(props: { entryId: string }) {
         <Input
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          placeholder="Task — e.g. write alt text"
+          placeholder="Task, e.g. write alt text"
         />
         <div className="flex gap-2">
           <Input
@@ -293,7 +283,7 @@ function TasksTab(props: { entryId: string }) {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-7 opacity-0 group-hover:opacity-100"
+                className="size-7 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
                 aria-label="Delete task"
                 onClick={() => remove(t.id)}
                 disabled={busy}
@@ -309,35 +299,32 @@ function TasksTab(props: { entryId: string }) {
 }
 
 function WorkflowTab(props: { entryId: string }) {
-  const { client, busy, run } = useClient();
+  const { client } = useClient();
+  const { busy, run } = useLocalRun();
   const toast = useToast();
-  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
-  const [state, setState] = useState<EntryWorkflowState | null>(null);
+  const invalidate = useInvalidate();
+  const workflowsQuery = useScopedQuery(['workflows'], () => client.listWorkflows());
+  const stateQuery = useScopedQuery(['workflow-state', props.entryId], () =>
+    client.getEntryWorkflowState(props.entryId),
+  );
+  const workflows = workflowsQuery.data ?? [];
+  const state = stateQuery.data ?? null;
   const [workflowId, setWorkflowId] = useState('');
   const [stepId, setStepId] = useState('');
 
-  const load = useCallback(
-    () =>
-      run(async () => {
-        const [wfs, st] = await Promise.all([
-          client.listWorkflows(),
-          client.getEntryWorkflowState(props.entryId),
-        ]);
-        setWorkflows(wfs);
-        setState(st);
-        if (st) {
-          setWorkflowId(st.workflowId);
-          setStepId(st.currentStepId);
-        } else if (wfs[0]) {
-          setWorkflowId(wfs[0].id);
-          setStepId(wfs[0].steps[0]?.id ?? '');
-        }
-      }),
-    [client, run, props.entryId],
-  );
+  // Seed the pickers once both queries land (and re-seed after a transition).
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!workflowsQuery.data || stateQuery.data === undefined) return;
+    const wfs = workflowsQuery.data;
+    const st = stateQuery.data;
+    if (st) {
+      setWorkflowId(st.workflowId);
+      setStepId(st.currentStepId);
+    } else if (wfs[0]) {
+      setWorkflowId(wfs[0].id);
+      setStepId(wfs[0].steps[0]?.id ?? '');
+    }
+  }, [workflowsQuery.data, stateQuery.data]);
 
   const selected = workflows.find((w) => w.id === workflowId);
   const currentWorkflow = workflows.find((w) => w.id === state?.workflowId);
@@ -347,7 +334,7 @@ function WorkflowTab(props: { entryId: string }) {
     run(async () => {
       await client.transitionEntry(props.entryId, { workflowId, toStepId: stepId });
       toast.success('Workflow updated');
-      await load();
+      await invalidate(['workflow-state', props.entryId]);
     });
 
   if (workflows.length === 0) {

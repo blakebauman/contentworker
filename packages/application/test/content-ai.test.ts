@@ -8,13 +8,18 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   type AppContext,
+  applyEntryTags,
   autofillField,
+  createConcept,
   createContentType,
   createEntry,
+  createScheme,
   createSpace,
   createTag,
   getEntry,
   getEntryMetadata,
+  listTags,
+  setEntryMetadata,
   suggestEntryTags,
   summarizeEntry,
   translateEntry,
@@ -159,5 +164,76 @@ describe('suggestEntryTags', () => {
     const meta = await getEntryMetadata(ctx, scope, id);
     expect(meta?.tags).toContain(greetings.id);
     expect(meta?.tags).toHaveLength(2); // greetings + created "intro"
+  });
+
+  it('apply merges tags without wiping the entry’s concepts', async () => {
+    const id = await newPost(ctx);
+    const scheme = await createScheme(ctx, scope, { name: 'topics' });
+    const concept = await createConcept(ctx, scope, { schemeId: scheme.id, prefLabel: 'travel' });
+    await setEntryMetadata(ctx, scope, id, { tags: [], concepts: [concept.id] });
+    const ai = new StubAIProvider(() => ({ existingTags: [], newTags: ['intro'] }));
+    await suggestEntryTags(ctx, ai, scope, id, { apply: true });
+    const meta = await getEntryMetadata(ctx, scope, id);
+    expect(meta?.tags).toHaveLength(1);
+    expect(meta?.concepts).toEqual([concept.id]);
+  });
+});
+
+describe('applyEntryTags', () => {
+  let ctx: AppContext;
+  beforeEach(async () => {
+    ({ ctx } = setup());
+    await seed(ctx);
+  });
+
+  it('persists the reviewed suggestion without a model call', async () => {
+    const id = await newPost(ctx);
+    const greetings = await createTag(ctx, scope, { name: 'greetings' });
+    const result = await applyEntryTags(ctx, scope, id, {
+      tagIds: [greetings.id],
+      newTags: ['intro'],
+    });
+    expect(result.createdTags).toHaveLength(1);
+    expect(result.createdTags[0]?.name).toBe('intro');
+    expect(result.tagIds).toContain(greetings.id);
+    const meta = await getEntryMetadata(ctx, scope, id);
+    expect(meta?.tags).toHaveLength(2);
+  });
+
+  it('reuses an existing tag when a new name matches case-insensitively', async () => {
+    const id = await newPost(ctx);
+    const greetings = await createTag(ctx, scope, { name: 'Greetings' });
+    const result = await applyEntryTags(ctx, scope, id, { newTags: ['greetings'] });
+    expect(result.createdTags).toHaveLength(0);
+    expect(result.tagIds).toEqual([greetings.id]);
+    expect(await listTags(ctx, scope)).toHaveLength(1); // no duplicate created
+  });
+
+  it('merges with existing tags and preserves concepts', async () => {
+    const id = await newPost(ctx);
+    const existing = await createTag(ctx, scope, { name: 'kept' });
+    const scheme = await createScheme(ctx, scope, { name: 'topics' });
+    const concept = await createConcept(ctx, scope, { schemeId: scheme.id, prefLabel: 'travel' });
+    await setEntryMetadata(ctx, scope, id, { tags: [existing.id], concepts: [concept.id] });
+    const result = await applyEntryTags(ctx, scope, id, { newTags: ['fresh'] });
+    expect(result.tagIds).toContain(existing.id);
+    const meta = await getEntryMetadata(ctx, scope, id);
+    expect(meta?.tags).toHaveLength(2);
+    expect(meta?.concepts).toEqual([concept.id]); // apply must not wipe concepts
+  });
+
+  it('rejects an unknown tag id before creating any new tags', async () => {
+    const id = await newPost(ctx);
+    await expect(
+      applyEntryTags(ctx, scope, id, { tagIds: ['nope'], newTags: ['fresh'] }),
+    ).rejects.toThrow();
+    const meta = await getEntryMetadata(ctx, scope, id);
+    expect(meta?.tags ?? []).toHaveLength(0);
+    expect(await listTags(ctx, scope)).toHaveLength(0); // no orphaned vocabulary
+  });
+
+  it('rejects an unknown entry without creating tags', async () => {
+    await expect(applyEntryTags(ctx, scope, 'missing', { newTags: ['x'] })).rejects.toThrow();
+    expect(await listTags(ctx, scope)).toHaveLength(0);
   });
 });

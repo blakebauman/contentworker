@@ -1,6 +1,14 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -64,19 +72,36 @@ export function AiActions(props: { client: ManagementClient }) {
     }
   };
 
-  const run = async (action: AIAction) => {
-    const variables: Record<string, string> = {};
-    for (const v of action.variables) {
-      // Field variables are resolved from a target entry, not prompted here.
-      if (v.startsWith('field.')) continue;
-      variables[v] = window.prompt(`Value for {{${v}}}`) ?? '';
-    }
+  // Variables the user must fill before a run; field.* variables resolve from
+  // a target entry server-side and are never prompted here.
+  const promptable = (action: AIAction) => action.variables.filter((v) => !v.startsWith('field.'));
+
+  const [runFor, setRunFor] = useState<{
+    action: AIAction;
+    values: Record<string, string>;
+  } | null>(null);
+  const [running, setRunning] = useState(false);
+
+  const execute = async (action: AIAction, variables: Record<string, string>) => {
+    setRunning(true);
     try {
       const r = await client.runAIAction(action.id, { variables });
       setOutput({ id: action.id, text: r.output });
+      setRunFor(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
     }
+  };
+
+  const run = (action: AIAction) => {
+    const vars = promptable(action);
+    if (vars.length === 0) {
+      void execute(action, {});
+      return;
+    }
+    setRunFor({ action, values: Object.fromEntries(vars.map((v) => [v, ''])) });
   };
 
   const remove = async (id: string) => {
@@ -184,7 +209,13 @@ export function AiActions(props: { client: ManagementClient }) {
                     )}
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    <Button type="button" variant="outline" size="sm" onClick={() => run(a)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={running}
+                      onClick={() => run(a)}
+                    >
                       Run
                     </Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => remove(a.id)}>
@@ -202,6 +233,57 @@ export function AiActions(props: { client: ManagementClient }) {
           ))}
         </div>
       )}
+
+      <Dialog open={runFor !== null} onOpenChange={(o) => !o && !running && setRunFor(null)}>
+        <DialogContent className="sm:max-w-md">
+          {runFor && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Run “{runFor.action.name}”</DialogTitle>
+                <DialogDescription>
+                  This action's template needs {Object.keys(runFor.values).length}{' '}
+                  {Object.keys(runFor.values).length === 1 ? 'value' : 'values'} before it runs.
+                </DialogDescription>
+              </DialogHeader>
+              <form
+                className="space-y-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void execute(runFor.action, runFor.values);
+                }}
+              >
+                {Object.keys(runFor.values).map((v) => (
+                  <div key={v} className="space-y-1.5">
+                    <Label htmlFor={`action-var-${v}`}>{v}</Label>
+                    <Input
+                      id={`action-var-${v}`}
+                      value={runFor.values[v] ?? ''}
+                      onChange={(e) =>
+                        setRunFor((s) =>
+                          s ? { ...s, values: { ...s.values, [v]: e.target.value } } : s,
+                        )
+                      }
+                    />
+                  </div>
+                ))}
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={running}
+                    onClick={() => setRunFor(null)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={running}>
+                    {running ? 'Running…' : 'Run action'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

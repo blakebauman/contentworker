@@ -136,6 +136,10 @@ export const autofillBody = z.object({
   tier: zTier.optional(),
 });
 export const tierOnlyBody = z.object({ apply: z.boolean().optional(), tier: zTier.optional() });
+export const applyTagsBody = z.object({
+  tagIds: z.array(zId).max(1000).optional(),
+  newTags: z.array(zShort).max(100).optional(),
+});
 export const createFunctionBody = z.object({
   name: zShort,
   eventPattern: z.string().max(256),

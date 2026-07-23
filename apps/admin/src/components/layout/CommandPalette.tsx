@@ -76,6 +76,11 @@ export function CommandPalette() {
     }
   }, [open]);
 
+  // Keep the keyboard-highlighted option visible while arrowing through.
+  useEffect(() => {
+    document.getElementById(`cw-cmdk-item-${active}`)?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+
   // Lazy-load the searchable index the first time the palette opens.
   useEffect(() => {
     if (!open || loaded) return;
@@ -170,9 +175,23 @@ export function CommandPalette() {
             placeholder="Jump to a section, content type, or entry…"
             className="h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             aria-label="Command palette search"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="cw-cmdk-list"
+            aria-autocomplete="list"
+            aria-activedescendant={filtered.length > 0 ? `cw-cmdk-item-${active}` : undefined}
           />
         </div>
-        <div className="max-h-80 overflow-y-auto p-1">
+        {/* WAI-ARIA combobox pattern: focus stays in the input and the active
+            option is conveyed via aria-activedescendant, so the listbox and its
+            options are intentionally not focusable and can't be <select>/<option>.
+            (biome.json turns off useSemanticElements/useFocusableInteractive here.) */}
+        <div
+          id="cw-cmdk-list"
+          role="listbox"
+          aria-label="Results"
+          className="max-h-80 overflow-y-auto p-1"
+        >
           {filtered.length === 0 && (
             <div className="py-6 text-center text-sm text-muted-foreground">No results found.</div>
           )}
@@ -180,8 +199,13 @@ export function CommandPalette() {
             const inGroup = filtered.filter((i) => i.group === g);
             if (inGroup.length === 0) return null;
             return (
-              <div key={g} className="mb-1">
-                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">{g}</div>
+              <div key={g} role="group" aria-labelledby={`cw-cmdk-group-${g}`} className="mb-1">
+                <div
+                  id={`cw-cmdk-group-${g}`}
+                  className="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+                >
+                  {g}
+                </div>
                 {inGroup.map((item) => {
                   flat += 1;
                   const idx = flat;
@@ -189,6 +213,9 @@ export function CommandPalette() {
                     <button
                       key={item.to}
                       type="button"
+                      id={`cw-cmdk-item-${idx}`}
+                      role="option"
+                      aria-selected={idx === active}
                       onMouseEnter={() => setActive(idx)}
                       onClick={() => go(item)}
                       className={cn(

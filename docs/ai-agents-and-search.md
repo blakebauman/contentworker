@@ -159,7 +159,7 @@ calls `authorize` before delegating to the same use-case as the HTTP route.
 | --- | --- |
 | Model | `model_list_content_types`, `model_get_content_type`, `model_create_content_type`, `model_publish_content_type` |
 | Entries | `entries_query`, `entries_get`, `entries_create`, `entries_update`, `entries_publish`, `entries_unpublish`, `entries_bulk_action`, `entries_list_versions`, `entries_diff_versions`, `entries_restore_version`, `entries_set_metadata` |
-| AI | `generate_draft`, `entry_from_canvas`, `entry_translate`, `entry_summarize`, `entry_autofill_field`, `entry_suggest_tags`, `entry_audit`, `entry_moderate` |
+| AI | `generate_draft`, `entry_from_canvas`, `entry_translate`, `entry_summarize`, `entry_autofill_field`, `entry_suggest_tags`, `entry_apply_tags`, `entry_audit`, `entry_moderate` |
 | Search | `content_search` (hybrid), `content_semantic_search`, `content_related`, `content_duplicates` |
 | Roles | `roles_list`, `role_create`, `role_update`, `role_delete` |
 | Releases | `releases_list`, `releases_get`, `releases_create`, `releases_add_entry`, `releases_publish` |

@@ -16,6 +16,11 @@ import { useToast } from './toast.js';
  * Shares the API connection + a memoized Management client across routes, plus a
  * `run()` helper that wraps async work with a busy flag and surfaces errors as
  * toasts. Replaces the prop-drilling the old single-component App relied on.
+ *
+ * `busy`/`run` are for the surface's PRIMARY mutation (saving a form, publishing)
+ * — the flag is page-global, so a sidebar panel using it would disable the main
+ * action while it fetches. Panels read via TanStack Query and run their own
+ * mutations through `useLocalRun()` instead.
  */
 interface ClientApi {
   readonly conn: Connection;
@@ -36,10 +41,34 @@ export function useClient(): ClientApi {
   return api;
 }
 
+/**
+ * A busy flag + error-toasting runner scoped to the calling component. Same
+ * contract as the context's `run`, but concurrent panels can't disable each
+ * other's controls or race the shared flag.
+ */
+export function useLocalRun(): { busy: boolean; run: (fn: () => Promise<void>) => Promise<void> } {
+  const toast = useToast();
+  const [pending, setPending] = useState(0);
+  const run = useCallback(
+    async (fn: () => Promise<void>) => {
+      setPending((n) => n + 1);
+      try {
+        await fn();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      } finally {
+        setPending((n) => n - 1);
+      }
+    },
+    [toast],
+  );
+  return { busy: pending > 0, run };
+}
+
 export function ClientProvider(props: { children: React.ReactNode }) {
   const toast = useToast();
   const [conn, updateConn] = useConnection();
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(0);
   const [authReady, setAuthReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const queryClient = useQueryClient();
@@ -106,19 +135,22 @@ export function ClientProvider(props: { children: React.ReactNode }) {
     };
   }, [conn]);
 
+  // Counter, not boolean: with overlapping runs a boolean would go idle when
+  // the FIRST one finished, re-enabling controls while work is still in flight.
   const run = useCallback(
     async (fn: () => Promise<void>) => {
-      setBusy(true);
+      setPending((n) => n + 1);
       try {
         await fn();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : String(e));
       } finally {
-        setBusy(false);
+        setPending((n) => n - 1);
       }
     },
     [toast],
   );
+  const busy = pending > 0;
 
   const api = useMemo<ClientApi>(
     () => ({ conn, updateConn, client, busy, authReady, authenticated, signOut, run }),

@@ -10,3 +10,6 @@ coverage/
 infra/helm/contentworker/charts/
 .wrangler/
 .dev.vars*
+
+# Impeccable design-tooling state (critique snapshots, live-mode config)
+.impeccable/

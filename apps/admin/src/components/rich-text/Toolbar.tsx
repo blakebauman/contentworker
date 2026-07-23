@@ -1,12 +1,6 @@
+import { EntityPicker } from '@/components/EntityPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { Editor } from '@tiptap/react';
 import { useEditorState } from '@tiptap/react';
@@ -33,12 +27,9 @@ import {
   Underline,
   Undo2,
 } from 'lucide-react';
-import { useContext, useState } from 'react';
+import { useContext, useId, useState } from 'react';
 import type { PickOption } from '../EntryForm.js';
 import { RichTextPickersContext } from './EmbedNodeView.js';
-
-// Radix Select forbids an empty-string item value; sentinel for "unset".
-const NONE = '__none__';
 
 /** Which secondary row is open under the toolbar. */
 type PickerRow = 'link' | 'entryLink' | 'assetLink' | 'inlineEntry' | null;
@@ -75,22 +66,20 @@ function TargetPickerRow(props: {
   onCancel: () => void;
 }) {
   const [id, setId] = useState('');
+  const pickerId = useId();
   return (
     <div className="flex items-center gap-2 border-t p-2">
       <span className="text-muted-foreground text-xs">{props.label}</span>
-      <Select value={id || NONE} onValueChange={(v) => setId(v === NONE ? '' : v)}>
-        <SelectTrigger className="h-8 flex-1" aria-label="Pick a target">
-          <SelectValue placeholder="Pick a target…" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={NONE}>— none —</SelectItem>
-          {props.options.map((o) => (
-            <SelectItem key={o.id} value={o.id}>
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="min-w-0 flex-1">
+        <EntityPicker
+          id={pickerId}
+          ariaLabel="Pick a target"
+          options={props.options}
+          value={id}
+          placeholder="Search for a target…"
+          onChange={(v) => setId(v ?? '')}
+        />
+      </div>
       <Button type="button" size="sm" disabled={!id} onClick={() => props.onApply(id)}>
         Apply
       </Button>
@@ -177,7 +166,11 @@ export function Toolbar(props: { editor: Editor }) {
 
   return (
     <div className="border-b">
-      <div className="flex flex-wrap items-center gap-0.5 p-1">
+      <div
+        role="toolbar"
+        aria-label="Text formatting"
+        className="flex flex-wrap items-center gap-0.5 p-1"
+      >
         <ToolbarButton label="Bold" active={state.bold} onClick={() => chain().toggleBold().run()}>
           <Bold className="size-4" />
         </ToolbarButton>
