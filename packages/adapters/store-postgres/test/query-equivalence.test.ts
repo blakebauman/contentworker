@@ -18,8 +18,16 @@ import { createPostgresStore } from '../src/store.js';
 const URL = process.env.TEST_DATABASE_URL;
 
 const clock: Clock = { now: () => new Date('2026-01-01T00:00:00.000Z') };
-/** Deterministic per-store sequence: both stores mint identical entry ids for
- *  the same fixture order, so results compare row-for-row. */
+/**
+ * Deterministic per-store sequence: both stores mint identical entry ids for
+ * the same fixture order, so results compare row-for-row.
+ *
+ * The prefix must carry FULL uuid entropy. Truncating it (e.g. `.slice(0, 8)`)
+ * keeps only the high bits of uuidv7's millisecond timestamp, which change
+ * roughly once a minute — and since these ids also become outbox event ids
+ * (a globally unique PK, not scoped per space), two runs inside the same
+ * window collide on `outbox_pkey`. CI runs this suite twice per job.
+ */
 const seqIds = (prefix: string): IdGenerator => {
   let n = 0;
   return { newId: () => `${prefix}-${++n}` };
@@ -175,7 +183,7 @@ describe.skipIf(!URL)('Postgres ≡ in-memory query equivalence', { timeout: 60_
   beforeAll(async () => {
     pg = createPostgresStore(URL as string);
     const mem = new InMemoryContentStore();
-    const runId = uuidv7().slice(0, 8);
+    const runId = uuidv7();
     pgCtx = { store: pg, clock, ids: seqIds(`e-${runId}`) };
     memCtx = { store: mem, clock, ids: seqIds(`e-${runId}`) };
 
@@ -338,7 +346,7 @@ describe.skipIf(!URL)('prefilter superset property (adversarial)', { timeout: 12
 
   beforeAll(async () => {
     pg = createPostgresStore(URL as string);
-    const runId = uuidv7().slice(0, 8);
+    const runId = uuidv7();
     pgCtx = { store: pg, clock, ids: seqIds(`a-${runId}`) };
     memCtx = { store: new InMemoryContentStore(), clock, ids: seqIds(`a-${runId}`) };
     for (const ctx of [pgCtx, memCtx]) {
