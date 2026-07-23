@@ -156,6 +156,18 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* WCAG 2.3.3 / DESIGN.md: every animation gets a reduced-motion alternative.
+   * Near-zero (not zero) durations keep animation/transition end events firing. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
   body {
     @apply bg-background text-foreground;
     margin: 0;

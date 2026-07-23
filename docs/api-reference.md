@@ -130,6 +130,7 @@ Base paths: `/spaces` and `…` = `/spaces/:space/environments/:env`.
 | POST | `…/entries/:id/summarize` | `content:write` | Summarize entry text |
 | POST | `…/entries/:id/autofill` | `content:write` | Fill empty fields |
 | POST | `…/entries/:id/suggest-tags` | `content:write` | Suggest taxonomy tags |
+| POST | `…/entries/:id/apply-tags` | `content:write` | Persist a reviewed tag suggestion |
 | POST | `…/entries/:id/audit` | `content:write` | AI content audit |
 | POST | `…/entries/:id/moderate` | `content:write` | Run moderation agent |
 | GET | `…/entries/:id/related` | `search:read` | Semantically related entries |

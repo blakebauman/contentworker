@@ -1,4 +1,5 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -102,8 +103,10 @@ export function EntryDiff(props: {
             {deltas.map((d) => (
               <TableRow key={d.apiId} className={cn(d.changed && 'bg-warning/5')}>
                 <TableCell>
-                  {d.changed && <span className="text-primary">● </span>}
-                  {d.apiId}
+                  <span className="flex items-center gap-1.5">
+                    {d.apiId}
+                    {d.changed && <Badge variant="warning">changed</Badge>}
+                  </span>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {show(d.published).slice(0, 200)}

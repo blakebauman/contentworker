@@ -1,7 +1,7 @@
 import { toDocument, toTiptap } from '@/lib/rich-text-mapper';
 import type { RichTextDocument } from '@cw/domain';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Pickers } from './EntryForm.js';
 import { RichTextPickersContext } from './rich-text/EmbedNodeView.js';
 import { Toolbar } from './rich-text/Toolbar.js';
@@ -14,6 +14,9 @@ import { buildExtensions } from './rich-text/extensions.js';
  */
 export function RichTextEditor(props: {
   id?: string;
+  /** id of the field's <Label>, giving the contenteditable its accessible name
+   * (label htmlFor can't reach a non-labelable element). */
+  ariaLabelledBy?: string;
   value: unknown;
   pickers: Pickers;
   onChange: (value: RichTextDocument | undefined) => void;
@@ -23,16 +26,30 @@ export function RichTextEditor(props: {
   // setContent feedback loop).
   const lastEmitted = useRef(props.value as RichTextDocument | undefined);
 
-  const editor = useEditor({
-    extensions: buildExtensions(),
-    content: toTiptap(props.value),
-    editorProps: {
+  // useEditor compares options by REFERENCE each render and calls
+  // editor.setOptions() when anything differs. Fresh extensions/content/
+  // editorProps objects per render would trigger that on every keystroke
+  // (each edit re-renders the parent form), and the resulting view churn can
+  // swallow in-flight selection keystrokes. Keep every non-handler option
+  // referentially stable; `content` only matters at creation anyway.
+  const extensions = useMemo(() => buildExtensions(), []);
+  const [initialContent] = useState(() => toTiptap(props.value));
+  const editorProps = useMemo(
+    () => ({
       attributes: {
         class: 'rich-text-editor min-h-32 px-3 py-2 text-sm focus:outline-none',
         role: 'textbox',
         'aria-multiline': 'true',
+        ...(props.ariaLabelledBy ? { 'aria-labelledby': props.ariaLabelledBy } : {}),
       },
-    },
+    }),
+    [props.ariaLabelledBy],
+  );
+
+  const editor = useEditor({
+    extensions,
+    content: initialContent,
+    editorProps,
     onUpdate: ({ editor: e }) => {
       const doc = toDocument(e.getJSON());
       lastEmitted.current = doc;
@@ -42,6 +59,12 @@ export function RichTextEditor(props: {
 
   useEffect(() => {
     if (!editor) return;
+    // While the user is typing, parent renders can carry a value one keystroke
+    // behind lastEmitted; syncing then would setContent with the stale doc and
+    // collapse the selection mid-edit. External updates (AI merge, restore)
+    // always originate from a click outside the editor, so an unfocused check
+    // cleanly separates the two.
+    if (editor.isFocused) return;
     if (props.value === lastEmitted.current) return;
     if (JSON.stringify(props.value) === JSON.stringify(lastEmitted.current)) return;
     editor.commands.setContent(toTiptap(props.value), { emitUpdate: false });

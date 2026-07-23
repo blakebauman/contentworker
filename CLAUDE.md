@@ -151,3 +151,11 @@ Before committing non-trivial changes, run the review agents (`hexagonal-guardia
 `code-reviewer`, `test-coverage-reviewer`); ops work goes to `ops-engineer` / `db-migration-agent`;
 after a feature lands, `docs-keeper` keeps `docs/` truthful.
 Hooks auto-format edited TS with Biome, block hand-edits to `drizzle/`, and flag convention drift.
+
+## Design context
+
+The admin UI's design context lives in `PRODUCT.md` (register, users, brand personality,
+anti-references, design principles) and `DESIGN.md` (visual system: tokens, typography,
+components, named rules). Read both before designing or restyling any `apps/admin` surface;
+new screens must compose the existing token/component system, never stock shadcn defaults.
+(`.impeccable/` is local design-tooling state and stays untracked.)

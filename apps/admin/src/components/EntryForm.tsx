@@ -3,24 +3,16 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import type { ContentType, EntryFields, FieldDefinition, LocaleConfig } from '@cw/domain';
 import { fallbackChain, resolveLocalizedValue, validateEntryFields } from '@cw/domain';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppExtension } from '../lib/management.js';
+import { EntityPicker } from './EntityPicker.js';
 import { ExtensionFrame } from './ExtensionFrame.js';
 import { RichTextEditor } from './RichTextEditor.js';
 
 const SCALAR = new Set(['Symbol', 'Text', 'Integer', 'Number', 'Boolean', 'Date']);
-// Radix Select forbids an empty-string item value; use a sentinel for "no link".
-const NONE = '__none__';
 
 /** A selectable reference target (entry or asset). */
 export interface PickOption {
@@ -140,6 +132,18 @@ export function EntryForm(props: {
   fieldEditors?: readonly AppExtension[];
   entryContext?: EntryContext;
   busy?: boolean;
+  /** DOM id for the form element, so external buttons can submit via `form=`. */
+  formId?: string;
+  /** Hides the built-in Save/Cancel row when the parent renders its own actions. */
+  hideActions?: boolean;
+  /** Reports edits so the parent can guard navigation against unsaved changes. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Called when a submit is rejected by validation, so actions living outside
+   * the form (header Save/Publish) can give feedback at the point of action. */
+  onValidationFailed?: (errorCount: number) => void;
+  /** External field values (AI generation/canvas/assist) merged into the live
+   * form state per locale — never remounts, so other unsaved edits survive. */
+  mergePatch?: { seq: number; fields: EntryFields } | null;
   onSave: (fields: EntryFields) => void;
   onCancel: () => void;
 }) {
@@ -154,6 +158,8 @@ export function EntryForm(props: {
     [defaultLocale, locales, fallbacks],
   );
 
+  const markDirty = () => props.onDirtyChange?.(true);
+
   const set = (apiId: string, locale: string, v: unknown) => {
     setFieldErrors((prev) => {
       const key = errorKey(apiId, locale);
@@ -163,46 +169,120 @@ export function EntryForm(props: {
       return next;
     });
     setValues((p) => ({ ...p, [apiId]: { ...p[apiId], [locale]: v } }));
+    markDirty();
   };
+
+  // Merge externally produced values (generate/canvas/AI assist) into live state.
+  const appliedPatchSeq = useRef(0);
+  useEffect(() => {
+    const patch = props.mergePatch;
+    if (!patch || patch.seq === appliedPatchSeq.current) return;
+    appliedPatchSeq.current = patch.seq;
+    setValues((p) => {
+      const next = { ...p };
+      for (const [apiId, byLocale] of Object.entries(patch.fields)) {
+        next[apiId] = { ...next[apiId], ...(byLocale as Record<string, unknown>) };
+      }
+      return next;
+    });
+    setFieldErrors({});
+    props.onDirtyChange?.(true);
+  }, [props.mergePatch, props.onDirtyChange]);
+
+  // Bumped per rejected submit; scrolls the error summary into view once the
+  // errors have rendered (not on every fieldErrors change — typing edits those).
+  const [failedSubmits, setFailedSubmits] = useState(0);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (failedSubmits === 0) return;
+    summaryRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [failedSubmits]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Guard double-submits (rapid ⌘S / Enter): a second createEntry in flight
+    // would duplicate the entry.
+    if (props.busy) return;
     const out = fieldsFromValues(contentType, values, locales, defaultLocale);
     const issues = validateEntryFields(contentType, out, {
       defaultLocale,
       locales,
     });
     if (issues.length > 0) {
-      setFieldErrors(issuesToErrors(issues, defaultLocale));
+      const errors = issuesToErrors(issues, defaultLocale);
+      setFieldErrors(errors);
+      // If the active locale is clean, jump to the first locale that isn't, so
+      // the failure is never invisible (errors on unmounted tabs).
+      const errorLocales = new Set(Object.keys(errors).map((k) => k.split(':')[1] ?? ''));
+      if (!errorLocales.has(activeLocale)) {
+        const target = locales.find((l) => errorLocales.has(l));
+        if (target) setActiveLocale(target);
+      }
+      setFailedSubmits((n) => n + 1);
+      props.onValidationFailed?.(issues.length);
       return;
     }
     setFieldErrors({});
     props.onSave(out);
   };
 
+  // Per-locale error counts back the locale-tab badges and the summary list.
+  const errorsByLocale = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const key of Object.keys(fieldErrors)) {
+      const loc = key.split(':')[1] ?? defaultLocale;
+      out.set(loc, (out.get(loc) ?? 0) + 1);
+    }
+    return out;
+  }, [fieldErrors, defaultLocale]);
+
+  const fieldName = (apiId: string) =>
+    contentType.fields.find((f) => f.apiId === apiId)?.name ?? apiId;
+
   return (
-    <form onSubmit={submit} className="max-w-2xl space-y-4">
+    <form id={props.formId} onSubmit={submit} className="max-w-2xl space-y-4">
       {hasLocalized && locales.length > 1 && (
         // Locale switcher: a segmented row of <button>s (role=button) — component
         // tests select a locale via getByRole('button', { name: 'de-DE' }).
         <div className="inline-flex flex-wrap gap-1 rounded-lg border bg-muted/40 p-1">
-          {locales.map((loc) => (
-            <Button
-              type="button"
-              key={loc}
-              size="sm"
-              variant={loc === activeLocale ? 'default' : 'ghost'}
-              onClick={() => setActiveLocale(loc)}
-            >
-              {loc}
-              {loc === defaultLocale ? ' (default)' : ''}
-            </Button>
-          ))}
+          {locales.map((loc) => {
+            const errCount = errorsByLocale.get(loc) ?? 0;
+            return (
+              <Button
+                type="button"
+                key={loc}
+                size="sm"
+                variant={loc === activeLocale ? 'default' : 'ghost'}
+                onClick={() => setActiveLocale(loc)}
+              >
+                {loc}
+                {loc === defaultLocale ? ' (default)' : ''}
+                {errCount > 0 && (
+                  <span
+                    className="inline-flex h-4 min-w-4 items-center justify-center rounded-2xl bg-destructive/15 px-1 text-[10px] text-destructive"
+                    aria-label={`${errCount} validation ${errCount === 1 ? 'error' : 'errors'}`}
+                  >
+                    {errCount}
+                  </span>
+                )}
+              </Button>
+            );
+          })}
         </div>
       )}
 
       <Card>
         <CardContent className="space-y-5">
+          {activeLocale !== defaultLocale &&
+            (() => {
+              const shared = contentType.fields.filter((f) => !f.localized).length;
+              return shared > 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  {shared} {shared === 1 ? 'field' : 'fields'} shared across all locales{' '}
+                  {shared === 1 ? 'is' : 'are'} edited on the {defaultLocale} (default) tab.
+                </p>
+              ) : null;
+            })()}
           {contentType.fields.map((f) => {
             // Non-localized fields are only editable on the default-locale tab.
             const locale = f.localized ? activeLocale : defaultLocale;
@@ -215,19 +295,21 @@ export function EntryForm(props: {
                 : undefined;
             return (
               <div className="space-y-1.5" key={f.apiId}>
-                <Label htmlFor={id} className="gap-1">
+                <Label id={`${id}-label`} htmlFor={id} className="gap-1">
                   {f.name}
                   {f.required && <span className="text-destructive">*</span>}
-                  <span className="ml-1 font-normal text-muted-foreground">
-                    {f.type}
-                    {f.localized ? ` · ${activeLocale}` : ' · not localized'}
-                  </span>
+                  {locales.length > 1 && (
+                    <span className="ml-1 font-normal text-muted-foreground">
+                      {f.localized ? activeLocale : 'all locales'}
+                    </span>
+                  )}
                 </Label>
                 <FieldInput
                   id={id}
                   field={f}
                   value={values[f.apiId]?.[locale]}
                   invalid={Boolean(err)}
+                  errorId={err ? `${id}-error` : undefined}
                   pickers={props.pickers}
                   editor={fieldEditors?.find(
                     (e) =>
@@ -238,21 +320,62 @@ export function EntryForm(props: {
                   onChange={(v) => set(f.apiId, locale, v)}
                 />
                 {hint && !err && <p className="text-xs text-muted-foreground">{hint}</p>}
-                {err && <p className="text-xs text-destructive">{err}</p>}
+                {err && (
+                  <p id={`${id}-error`} className="text-xs text-destructive">
+                    {err}
+                  </p>
+                )}
               </div>
             );
           })}
         </CardContent>
       </Card>
 
-      <div className="flex items-center gap-2">
-        <Button type="submit" disabled={props.busy}>
-          Save draft
-        </Button>
-        <Button type="button" variant="outline" onClick={props.onCancel} disabled={props.busy}>
-          Cancel
-        </Button>
-      </div>
+      {Object.keys(fieldErrors).length > 0 && (
+        <div
+          ref={summaryRef}
+          role="alert"
+          className="space-y-1 rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-sm"
+        >
+          <p className="font-medium text-destructive">
+            Can’t save yet: {Object.keys(fieldErrors).length}{' '}
+            {Object.keys(fieldErrors).length === 1 ? 'field needs' : 'fields need'} attention.
+          </p>
+          <ul className="space-y-0.5">
+            {Object.entries(fieldErrors).map(([key, message]) => {
+              const [apiId = '', loc = defaultLocale] = key.split(':');
+              return (
+                <li key={key} className="text-destructive">
+                  {loc === activeLocale ? (
+                    <span>
+                      {fieldName(apiId)} ({loc}): {message}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="underline underline-offset-2"
+                      onClick={() => setActiveLocale(loc)}
+                    >
+                      {fieldName(apiId)} ({loc}): {message}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {!props.hideActions && (
+        <div className="flex items-center gap-2">
+          <Button type="submit" disabled={props.busy}>
+            Save draft
+          </Button>
+          <Button type="button" variant="outline" onClick={props.onCancel} disabled={props.busy}>
+            Cancel
+          </Button>
+        </div>
+      )}
     </form>
   );
 }
@@ -262,14 +385,18 @@ function FieldInput(props: {
   field: FieldDefinition;
   value: unknown;
   invalid?: boolean;
+  /** id of the error message element, wired to aria-describedby when invalid. */
+  errorId?: string;
   pickers: Pickers;
   editor?: AppExtension;
   editorContext?: EntryContext;
   locale: string;
   onChange: (v: unknown) => void;
 }) {
-  const { id, field, value, invalid, onChange, pickers, editor, editorContext, locale } = props;
+  const { id, field, value, invalid, errorId, onChange, pickers, editor, editorContext, locale } =
+    props;
   const inputClass = invalid ? 'border-destructive focus-visible:ring-destructive/30' : undefined;
+  const aria = { 'aria-invalid': invalid || undefined, 'aria-describedby': errorId };
 
   // A custom field editor extension takes over the input entirely (sandboxed iframe).
   if (editor) {
@@ -290,7 +417,8 @@ function FieldInput(props: {
     );
   }
 
-  // Reference fields: a dropdown of entries/assets, stored as { id, linkType }.
+  // Reference fields: a searchable combobox over entries/assets, stored as
+  // { id, linkType }.
   if (field.type === 'Link') {
     const linkType = field.linkType ?? 'Entry';
     const allowed = field.validations?.linkContentTypes as string[] | undefined;
@@ -300,22 +428,15 @@ function FieldInput(props: {
     }
     const currentId = (value as { id?: string } | undefined)?.id ?? '';
     return (
-      <Select
-        value={currentId || NONE}
-        onValueChange={(v) => onChange(v === NONE ? undefined : { id: v, linkType })}
-      >
-        <SelectTrigger id={id} className={inputClass}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={NONE}>— none —</SelectItem>
-          {options.map((o) => (
-            <SelectItem key={o.id} value={o.id}>
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <EntityPicker
+        id={id}
+        options={options}
+        value={currentId}
+        placeholder={linkType === 'Asset' ? 'Search assets…' : 'Search entries…'}
+        invalid={invalid}
+        errorId={errorId}
+        onChange={(picked) => onChange(picked ? { id: picked, linkType } : undefined)}
+      />
     );
   }
 
@@ -323,14 +444,22 @@ function FieldInput(props: {
   // locale gets its own editor instance (isolated content and undo history).
   if (field.type === 'RichText') {
     return (
-      <RichTextEditor key={locale} id={id} value={value} pickers={pickers} onChange={onChange} />
+      <RichTextEditor
+        key={locale}
+        id={id}
+        ariaLabelledBy={`${id}-label`}
+        value={value}
+        pickers={pickers}
+        onChange={onChange}
+      />
     );
   }
 
   if (field.type === 'Boolean') {
     return (
-      <div>
+      <div className="flex items-center gap-2">
         <Checkbox id={id} checked={!!value} onCheckedChange={(c) => onChange(c === true)} />
+        <span className="text-muted-foreground text-sm">{value ? 'Yes' : 'No'}</span>
       </div>
     );
   }
@@ -339,6 +468,7 @@ function FieldInput(props: {
       <Input
         id={id}
         className={inputClass}
+        {...aria}
         type="number"
         value={value === undefined || value === null ? '' : String(value)}
         onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
@@ -350,6 +480,7 @@ function FieldInput(props: {
       <Input
         id={id}
         className={inputClass}
+        {...aria}
         type="date"
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
@@ -361,6 +492,7 @@ function FieldInput(props: {
       <Textarea
         id={id}
         className={inputClass}
+        {...aria}
         rows={4}
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
@@ -372,6 +504,7 @@ function FieldInput(props: {
       <Input
         id={id}
         className={inputClass}
+        {...aria}
         value={typeof value === 'string' ? value : ''}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -379,19 +512,69 @@ function FieldInput(props: {
   }
   // Complex types (Array, JSON, Location): raw JSON editor for the MVP.
   return (
-    <Textarea
-      id={id}
-      className={inputClass}
-      rows={3}
-      placeholder="JSON value"
-      defaultValue={value === undefined ? '' : JSON.stringify(value)}
-      onChange={(e) => {
-        try {
-          onChange(e.target.value === '' ? undefined : JSON.parse(e.target.value));
-        } catch {
-          /* keep last valid value until parseable */
-        }
-      }}
-    />
+    <JsonFieldInput id={id} inputClass={inputClass} aria={aria} value={value} onChange={onChange} />
+  );
+}
+
+/**
+ * Raw JSON editor for complex field types. Typing through invalid syntax is
+ * expected; the field says so instead of silently keeping the last valid value.
+ */
+function JsonFieldInput(props: {
+  id: string;
+  inputClass?: string;
+  aria: Record<string, string | boolean | undefined>;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const [invalid, setInvalid] = useState(false);
+  // Controlled text mirrored from the value, so external updates (AI merge
+  // patches) show up; `lastEmitted` tells our own onChange echo apart from a
+  // real external change (same pattern as RichTextEditor).
+  const [text, setText] = useState(() =>
+    props.value === undefined ? '' : JSON.stringify(props.value),
+  );
+  const lastEmitted = useRef(props.value);
+  useEffect(() => {
+    if (props.value === lastEmitted.current) return;
+    if (JSON.stringify(props.value) === JSON.stringify(lastEmitted.current)) return;
+    lastEmitted.current = props.value;
+    setText(props.value === undefined ? '' : JSON.stringify(props.value));
+    setInvalid(false);
+  }, [props.value]);
+  return (
+    <div className="space-y-1">
+      <Textarea
+        id={props.id}
+        className={props.inputClass}
+        {...props.aria}
+        rows={3}
+        placeholder='JSON, e.g. {"lat": 52.52, "lon": 13.4}'
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (e.target.value === '') {
+            setInvalid(false);
+            lastEmitted.current = undefined;
+            props.onChange(undefined);
+            return;
+          }
+          try {
+            const parsed = JSON.parse(e.target.value);
+            lastEmitted.current = parsed;
+            props.onChange(parsed);
+            setInvalid(false);
+          } catch {
+            // Keep the last valid value until the text parses again.
+            setInvalid(true);
+          }
+        }}
+      />
+      {invalid && (
+        <p className="text-warning text-xs">
+          Not valid JSON yet. Until the syntax is fixed, the last valid value is what saves.
+        </p>
+      )}
+    </div>
   );
 }

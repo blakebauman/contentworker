@@ -359,9 +359,10 @@ export async function suggestEntryTags(
   if (input.apply) {
     const createdIds: string[] = [];
     for (const name of newTags) createdIds.push((await createTag(ctx, scope, { name })).id);
-    const current = (await getEntryMetadata(ctx, scope, id))?.tags ?? [];
-    const allTags = Array.from(new Set([...current, ...tagIds, ...createdIds]));
-    await setEntryMetadata(ctx, scope, id, { tags: allTags });
+    const current = await getEntryMetadata(ctx, scope, id);
+    const allTags = Array.from(new Set([...(current?.tags ?? []), ...tagIds, ...createdIds]));
+    // setEntryMetadata replaces the whole record — carry concepts through.
+    await setEntryMetadata(ctx, scope, id, { tags: allTags, concepts: current?.concepts ?? [] });
     applied = true;
   }
   await recordAgentRun(ctx, scope, {
@@ -372,4 +373,77 @@ export async function suggestEntryTags(
     usage: result.usage,
   });
   return { tagIds, newTags, applied, usage: result.usage };
+}
+
+export interface ApplyEntryTagsInput {
+  /** Existing-tag ids from a reviewed suggestion. Unknown ids are rejected. */
+  readonly tagIds?: readonly string[];
+  /** New tag names from a reviewed suggestion; existing names are reused. */
+  readonly newTags?: readonly string[];
+}
+
+export interface ApplyEntryTagsResult {
+  /** The entry's full tag set after the apply. */
+  readonly tagIds: readonly string[];
+  /** Tags created by this apply (names that had no vocabulary match). */
+  readonly createdTags: readonly { id: string; name: string }[];
+}
+
+/**
+ * Persists a REVIEWED tag suggestion exactly as approved — the human-in-the-loop
+ * counterpart to `suggestEntryTags`. Deliberately deterministic: re-running the
+ * model at apply time could assign tags the reviewer never saw. Mirrors the
+ * suggest semantics (case-insensitive vocabulary reuse, merge with the entry's
+ * current tags).
+ */
+export async function applyEntryTags(
+  ctx: AppContext,
+  scope: Scope,
+  id: string,
+  input: ApplyEntryTagsInput,
+): Promise<ApplyEntryTagsResult> {
+  // Validate everything BEFORE the createTag writes: a stale review (unknown
+  // entry or deleted tag id) must fail without orphaning new vocabulary tags.
+  if (!(await ctx.store.entries.get(scope, id))) throw new NotFoundError('Entry', id);
+  const existing = await listTags(ctx, scope);
+  const byId = new Set(existing.map((t) => t.id));
+  for (const tagId of input.tagIds ?? []) {
+    if (!byId.has(tagId)) throw new NotFoundError('Tag', tagId);
+  }
+  const byName = new Map(existing.map((t) => [t.name.toLowerCase(), t]));
+
+  const createdTags: { id: string; name: string }[] = [];
+  const reusedIds: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input.newTags ?? []) {
+    const name = raw.trim();
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    const match = byName.get(name.toLowerCase());
+    if (match) reusedIds.push(match.id);
+    else createdTags.push(await createTag(ctx, scope, { name }));
+  }
+
+  const current = await getEntryMetadata(ctx, scope, id);
+  const currentTags = current?.tags ?? [];
+  const allTags = Array.from(
+    new Set([
+      ...currentTags,
+      ...(input.tagIds ?? []),
+      ...reusedIds,
+      ...createdTags.map((t) => t.id),
+    ]),
+  );
+  // setEntryMetadata replaces the whole metadata record, so carry concepts
+  // through; it also validates the entry and every tag id, so an unknown id
+  // from a stale review fails loudly instead of polluting metadata.
+  await setEntryMetadata(ctx, scope, id, { tags: allTags, concepts: current?.concepts ?? [] });
+  await recordAgentRun(ctx, scope, {
+    workflow: 'classify',
+    entryId: id,
+    status: 'completed',
+    decisions: [`Applied ${allTags.length - currentTags.length} reviewed tag(s)`],
+    usage: { inputTokens: 0, outputTokens: 0 },
+  });
+  return { tagIds: allTags, createdTags };
 }

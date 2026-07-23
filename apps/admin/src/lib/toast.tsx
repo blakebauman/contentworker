@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { cn } from './utils.js';
 
 type ToastKind = 'success' | 'error';
@@ -16,6 +24,8 @@ export interface ToastApi {
 
 const ToastCtx = createContext<ToastApi | null>(null);
 
+const durationOf = (kind: ToastKind) => (kind === 'error' ? 6000 : 3500);
+
 /** Transient notifications. Errors stay longer than successes; both auto-dismiss. */
 export function useToast(): ToastApi {
   const api = useContext(ToastCtx);
@@ -26,17 +36,49 @@ export function useToast(): ToastApi {
 export function ToastProvider(props: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seq = useRef(0);
+  // Per-toast dismiss timers, so hovering (or focusing the dismiss button)
+  // pauses auto-dismiss and a missed error can actually be read.
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const timer of pending.values()) clearTimeout(timer);
+    };
+  }, []);
 
   const dismiss = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer) clearTimeout(timer);
+    timers.current.delete(id);
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const pause = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer) clearTimeout(timer);
+    timers.current.delete(id);
+  }, []);
+
+  const resume = useCallback(
+    (id: number, kind: ToastKind) => {
+      if (timers.current.has(id)) return;
+      timers.current.set(
+        id,
+        setTimeout(() => dismiss(id), durationOf(kind)),
+      );
+    },
+    [dismiss],
+  );
 
   const push = useCallback(
     (kind: ToastKind, message: string) => {
       seq.current += 1;
       const id = seq.current;
       setToasts((prev) => [...prev, { id, kind, message }]);
-      setTimeout(() => dismiss(id), kind === 'error' ? 6000 : 3500);
+      timers.current.set(
+        id,
+        setTimeout(() => dismiss(id), durationOf(kind)),
+      );
     },
     [dismiss],
   );
@@ -60,6 +102,10 @@ export function ToastProvider(props: { children: React.ReactNode }) {
         {toasts.map((t) => (
           <output
             key={t.id}
+            onMouseEnter={() => pause(t.id)}
+            onMouseLeave={() => resume(t.id, t.kind)}
+            onFocus={() => pause(t.id)}
+            onBlur={() => resume(t.id, t.kind)}
             className={cn(
               'flex min-w-60 max-w-md items-center gap-3 rounded-lg border bg-card px-3 py-2.5 text-sm text-card-foreground shadow-lg',
               t.kind === 'success' ? 'border-success/50' : 'border-destructive/50',

@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { CollapsibleCard } from '@/components/CollapsibleCard';
 import type { ContentType } from '@cw/domain';
 import { Link2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -59,40 +59,39 @@ export function ReferencedBy(props: { id: string; types: ContentType[] }) {
   if (refs === null) return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <h2 className="flex items-center gap-2 font-heading text-base font-medium">
+    <CollapsibleCard
+      title={
+        <>
           <Link2 className="size-4 text-muted-foreground" />
           Referenced by
           {refs.length > 0 && (
-            <span className="text-sm text-muted-foreground">· {refs.length}</span>
+            <span className="text-muted-foreground text-sm">· {refs.length}</span>
           )}
-        </h2>
-      </CardHeader>
-      <CardContent>
-        {refs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing references this entry yet.</p>
-        ) : (
-          <ul className="space-y-1.5 text-sm">
-            {refs.map((r) => (
-              <li key={`${r.fromEntryId}:${r.fromField}`} className="flex items-center gap-2">
-                {r.contentType ? (
-                  <Link
-                    to={`/content/${r.contentType}/${r.fromEntryId}`}
-                    className="font-medium text-primary hover:underline"
-                  >
-                    {r.title}
-                  </Link>
-                ) : (
-                  <span className="font-mono text-xs">{r.fromEntryId}</span>
-                )}
-                <span className="text-muted-foreground">via</span>
-                <span className="font-mono text-xs">{r.fromField}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
+        </>
+      }
+    >
+      {refs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nothing references this entry yet.</p>
+      ) : (
+        <ul className="space-y-1.5 text-sm">
+          {refs.map((r) => (
+            <li key={`${r.fromEntryId}:${r.fromField}`} className="flex items-center gap-2">
+              {r.contentType ? (
+                <Link
+                  to={`/content/${r.contentType}/${r.fromEntryId}`}
+                  className="font-medium text-primary hover:underline"
+                >
+                  {r.title}
+                </Link>
+              ) : (
+                <span className="font-mono text-xs">{r.fromEntryId}</span>
+              )}
+              <span className="text-muted-foreground">via</span>
+              <span className="font-mono text-xs">{r.fromField}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </CollapsibleCard>
   );
 }

@@ -2,6 +2,7 @@
 import type { ContentType, FieldDefinition } from '@cw/domain';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EntityPicker } from '../src/components/EntityPicker.js';
 import { EntryForm } from '../src/components/EntryForm.js';
 import { ToastProvider, useToast } from '../src/lib/toast.js';
 
@@ -87,6 +88,82 @@ describe('EntryForm validation and fallbacks', () => {
     expect(screen.getByText('Field is required')).not.toBeNull();
   });
 
+  it('reports validation failure to the parent (for header Save/Publish feedback)', () => {
+    const requiredType: ContentType = {
+      ...contentType,
+      fields: [field({ apiId: 'title', name: 'Title', localized: true, required: true })],
+    };
+    const onValidationFailed = vi.fn();
+    render(
+      <EntryForm
+        contentType={requiredType}
+        initial={{}}
+        locales={['en-US']}
+        defaultLocale="en-US"
+        pickers={{ entries: [], assets: [] }}
+        onSave={() => {}}
+        onValidationFailed={onValidationFailed}
+        onCancel={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(onValidationFailed).toHaveBeenCalledWith(1);
+  });
+
+  it('surfaces errors from a non-active locale: auto-switches tabs and lists a summary', () => {
+    const requiredType: ContentType = {
+      ...contentType,
+      fields: [field({ apiId: 'title', name: 'Title', localized: true, required: true })],
+    };
+    const onSave = vi.fn();
+    render(
+      <EntryForm
+        contentType={requiredType}
+        initial={{}}
+        locales={['en-US', 'de-DE']}
+        defaultLocale="en-US"
+        pickers={{ entries: [], assets: [] }}
+        onSave={onSave}
+        onCancel={() => {}}
+      />,
+    );
+    // The required error is on en-US, but the editor is looking at de-DE.
+    fireEvent.click(screen.getByRole('button', { name: 'de-DE' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(onSave).not.toHaveBeenCalled();
+    // The form jumped back to the erroring locale and announced the failure.
+    expect(screen.getByRole('alert').textContent).toContain('Title (en-US)');
+    expect(screen.getByText('Field is required')).not.toBeNull();
+  });
+
+  it('merges an external patch into live state without losing other edits', () => {
+    const onSave = vi.fn();
+    const onDirtyChange = vi.fn();
+    const props = {
+      contentType,
+      initial: {},
+      locales: ['en-US'] as const,
+      defaultLocale: 'en-US',
+      pickers: { entries: [], assets: [] },
+      onSave,
+      onDirtyChange,
+      onCancel: () => {},
+    };
+    const { rerender } = render(<EntryForm {...props} />);
+    const textboxes = screen.getAllByRole('textbox');
+    fireEvent.change(textboxes[1]!, { target: { value: 'kept-slug' } });
+    expect(onDirtyChange).toHaveBeenCalledWith(true);
+
+    rerender(
+      <EntryForm {...props} mergePatch={{ seq: 1, fields: { title: { 'en-US': 'Generated' } } }} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(onSave).toHaveBeenCalledWith({
+      title: { 'en-US': 'Generated' },
+      slug: { 'en-US': 'kept-slug' },
+    });
+  });
+
   it('shows a fallback hint when a locale inherits from the default', () => {
     const onSave = vi.fn();
     render(
@@ -103,6 +180,34 @@ describe('EntryForm validation and fallbacks', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'de-DE' }));
     expect(screen.getByText(/Falls back to en-US: Hello/)).not.toBeNull();
+  });
+});
+
+describe('EntityPicker', () => {
+  const options = [
+    { id: 'a1', label: 'Alpha post (article)', contentType: 'article' },
+    { id: 'b2', label: 'Beta page (page)', contentType: 'page' },
+  ];
+
+  it('filters options by query and reports the picked id', () => {
+    const onChange = vi.fn();
+    render(<EntityPicker id="pick" options={options} value="" onChange={onChange} />);
+
+    const input = screen.getByRole('combobox');
+    fireEvent.click(input);
+    fireEvent.change(input, { target: { value: 'beta' } });
+    const shown = screen.getAllByRole('option');
+    expect(shown).toHaveLength(1);
+    fireEvent.click(shown[0]!);
+    expect(onChange).toHaveBeenCalledWith('b2');
+  });
+
+  it('shows the selected label and clears via the clear button', () => {
+    const onChange = vi.fn();
+    render(<EntityPicker id="pick" options={options} value="a1" onChange={onChange} />);
+    expect(screen.getByRole('combobox')).toHaveProperty('value', 'Alpha post (article)');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
+    expect(onChange).toHaveBeenCalledWith(undefined);
   });
 });
 
