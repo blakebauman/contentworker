@@ -34,6 +34,8 @@ These docs describe how contentworker is built and how to run, extend, and integ
     reference, and how to add a new use-case.
 13. **[Admin UI](./admin-ui.md)** — the management SPA at `:5173`, compose override HMR, and
     local dev workflow.
+14. **[Benchmarking](./benchmarking.md)** — seeding at scale (`SEED_SCALE`) and driving load
+    with the k6 suite in `bench/k6/` (delivery reads + management writes).
 
 ## Conventions used in these docs
 
