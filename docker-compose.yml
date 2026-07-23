@@ -74,6 +74,7 @@ services:
       # Bootstrap a usable dev space + keys + demo content (idempotent).
       SEED_DEV: "true"
       SEED_LOCALES: "en-US,de-DE"
+      SEED_SCALE: "1"
       # AI entry generation: set ANTHROPIC_API_KEY (e.g. in a .env file) to use the
       # real model; unset, the API falls back to a dev stub that returns placeholders.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

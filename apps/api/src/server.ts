@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { seedConfigFrom, seedDev } from '@cw/seed';
 import {
   logger,
   metricsText,
@@ -10,7 +11,6 @@ import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { validateApiSecrets } from './secure-secrets.js';
-import { seedDev } from './seed.js';
 import { wire } from './wire.js';
 
 startTelemetry('cw-api');
@@ -21,10 +21,11 @@ validateApiSecrets(config);
 const wired = wire(config);
 const { ctx, rag, blob, ai, bus, rateLimiter } = wired;
 
-// Bootstrap dev data (space + keys + demo content) when SEED_DEV is set — the
-// in-memory store already seeds, so this matters for a real database.
+// Bootstrap dev data (space + keys + the full demo dataset) when SEED_DEV is
+// set. The in-memory store pre-seeds space + keys either way; the rich corpus
+// comes from @cw/seed and is what makes a fresh stack demo-ready.
 if (config.seedDev) {
-  await seedDev(ctx, config).catch((err) => {
+  await seedDev(ctx, seedConfigFrom(config), { blob }).catch((err) => {
     logger.error({ err }, 'seed: failed');
     process.exit(1);
   });

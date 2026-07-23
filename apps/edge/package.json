@@ -30,6 +30,7 @@
     "@cw/domain": "workspace:*",
     "@cw/mcp-server": "workspace:*",
     "@cw/ports": "workspace:*",
+    "@cw/seed": "workspace:*",
     "@cw/test-kit": "workspace:*",
     "@hono/mcp": "^0.3.1",
     "hono": "^4.6.14",

@@ -24,7 +24,10 @@ export default defineConfig({
       command: 'pnpm --filter @cw/api start',
       port: API_PORT,
       reuseExistingServer: !process.env.CI,
-      env: { PORT: String(API_PORT), SEED_LOCALES: 'en-US,de-DE' },
+      // HEALTH_PORT off the default 9464 so this API can coexist with a
+      // developer's `pnpm dev` API (both would otherwise bind the same
+      // metrics port and the second process would crash).
+      env: { PORT: String(API_PORT), SEED_LOCALES: 'en-US,de-DE', HEALTH_PORT: '9465' },
     },
     {
       command: 'pnpm dev',

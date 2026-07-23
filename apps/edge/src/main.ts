@@ -4,7 +4,6 @@ import { createApp } from '@cw/api/app';
 import { type AuthDeps, createApiHasher } from '@cw/api/auth';
 import { mountsRole } from '@cw/api/config';
 import { validateApiSecrets } from '@cw/api/secure-secrets';
-import { seedDev } from '@cw/api/seed';
 import {
   type ConsumeDeps,
   consumeEvent,
@@ -15,6 +14,7 @@ import {
   runPublishAgents,
 } from '@cw/application';
 import type { McpDeps } from '@cw/mcp-server/wire';
+import { seedConfigFrom, seedDev } from '@cw/seed';
 import { Hono } from 'hono';
 import { sendReviewDecision } from './agents/runtime.js';
 import { AgentWorkflow } from './agents/workflow.js';
@@ -221,7 +221,7 @@ export default {
     try {
       validateApiSecrets(wired.config, env as unknown as NodeJS.ProcessEnv);
       if (wired.config.seedDev && wired.persistent && !devSeeded) {
-        await seedDev(wired.ctx, wired.config);
+        await seedDev(wired.ctx, seedConfigFrom(wired.config), { blob: wired.blob });
         devSeeded = true;
       }
       const app = buildApp(wired, env);

@@ -230,6 +230,9 @@ importers:
       '@cw/ports':
         specifier: workspace:*
         version: link:../../packages/ports
+      '@cw/seed':
+        specifier: workspace:*
+        version: link:../../packages/seed
       '@cw/telemetry':
         specifier: workspace:*
         version: link:../../packages/telemetry
@@ -345,6 +348,9 @@ importers:
       '@cw/ports':
         specifier: workspace:*
         version: link:../../packages/ports
+      '@cw/seed':
+        specifier: workspace:*
+        version: link:../../packages/seed
       '@cw/test-kit':
         specifier: workspace:*
         version: link:../../packages/test-kit
@@ -1074,6 +1080,31 @@ importers:
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(@swc/core@1.15.43)(jiti@2.7.0)(postcss@8.5.22)(tsx@4.22.4)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(lightningcss@1.32.0)(terser@5.48.0)
+
+  packages/seed:
+    dependencies:
+      '@cw/application':
+        specifier: workspace:*
+        version: link:../application
+      '@cw/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@cw/ports':
+        specifier: workspace:*
+        version: link:../ports
+      '@cw/telemetry':
+        specifier: workspace:*
+        version: link:../telemetry
+    devDependencies:
+      '@cw/test-kit':
+        specifier: workspace:*
+        version: link:../test-kit
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

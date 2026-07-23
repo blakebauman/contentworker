@@ -19,14 +19,10 @@
     "./secure-secrets": {
       "types": "./src/secure-secrets.ts",
       "default": "./src/secure-secrets.ts"
-    },
-    "./seed": {
-      "types": "./src/seed.ts",
-      "default": "./src/seed.ts"
     }
   },
   "scripts": {
-    "dev": "node --import tsx --watch src/server.ts",
+    "dev": "SEED_DEV=true node --import tsx --watch src/server.ts",
     "start": "node --import tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -43,6 +39,7 @@
     "@cw/adapter-vector-qdrant": "workspace:*",
     "@cw/agent-runtime": "workspace:*",
     "@cw/application": "workspace:*",
+    "@cw/seed": "workspace:*",
     "@cw/domain": "workspace:*",
     "@cw/graphql-gen": "workspace:*",
     "@cw/ports": "workspace:*",

@@ -33,9 +33,10 @@ export interface ApiConfig {
   /** Optional server-side pepper mixed into API key hashes at rest. */
   readonly tokenPepper?: string;
   /**
-   * Dev seeding. The in-memory store always seeds; with a real database this
-   * gates an idempotent bootstrap (space + dev keys + a demo type) so a fresh
-   * Postgres stack is usable out of the box. Never enable in production.
+   * Dev seeding. The in-memory store always seeds space + keys; SEED_DEV=true
+   * additionally runs the @cw/seed demo dataset (all content types, a scaled
+   * entry corpus, and every platform surface) so a fresh stack is usable out
+   * of the box. Never enable in production.
    */
   readonly seedDev: boolean;
   /** Default space/env + locales used to seed the in-memory store. */
@@ -44,6 +45,8 @@ export interface ApiConfig {
     environmentId: string;
     defaultLocale: string;
     locales: string[];
+    /** Corpus multiplier (SEED_SCALE): 1 = demo (~400 entries), 100 = bench. */
+    scale: number;
   };
   /** HMAC secret for admin SSO session cookies. */
   readonly sessionSecret: string;
@@ -113,6 +116,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       environmentId: env.SEED_ENV_ID ?? 'main',
       defaultLocale: env.SEED_DEFAULT_LOCALE ?? 'en-US',
       locales: (env.SEED_LOCALES ?? 'en-US').split(',').map((s) => s.trim()),
+      scale: Math.max(1, Math.floor(Number(env.SEED_SCALE ?? '1')) || 1),
     },
     sessionSecret: env.SESSION_SECRET ?? 'dev-session-secret-change-me-in-production',
     sessionTtlHours: Number(env.SESSION_TTL_HOURS ?? 8),
