@@ -83,6 +83,10 @@ export interface EdgeEnv {
   readonly AWS_ACCESS_KEY_ID?: string;
   readonly AWS_SECRET_ACCESS_KEY?: string;
   readonly MCP_TOKEN?: string;
+  /** Delivery cache entry TTL, seconds (GC bound; tag invalidation stays authoritative). */
+  readonly DELIVERY_CACHE_TTL_SECONDS?: string;
+  /** Retention for relayed outbox rows + webhook delivery records, hours (default 168). */
+  readonly EVENT_RETENTION_HOURS?: string;
   readonly AGENTS_ENRICH?: string;
   readonly AGENTS_MODERATE?: string;
   readonly AGENTS_AUTO_APPLY?: string;

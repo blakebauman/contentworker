@@ -330,7 +330,11 @@ export const webhookDeliveries = pgTable(
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('webhook_deliveries_by_webhook').on(t.spaceId, t.webhookId)],
+  (t) => [
+    index('webhook_deliveries_by_webhook').on(t.spaceId, t.webhookId),
+    // Serves the retention sweep (deleteDeliveriesBefore).
+    index('webhook_deliveries_by_created').on(t.createdAt),
+  ],
 );
 
 export const releases = pgTable(
@@ -568,5 +572,12 @@ export const outbox = pgTable(
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
     relayedAt: timestamp('relayed_at', { withTimezone: true }),
   },
-  (t) => [index('outbox_pending').on(t.occurredAt).where(sql`${t.relayedAt} IS NULL`)],
+  (t) => [
+    index('outbox_pending').on(t.occurredAt).where(sql`${t.relayedAt} IS NULL`),
+    // Serves the retention sweep (deleteRelayedBefore); partial so the hot
+    // pending rows never pay for it.
+    index('outbox_relayed')
+      .on(t.relayedAt)
+      .where(sql`${t.relayedAt} IS NOT NULL`),
+  ],
 );

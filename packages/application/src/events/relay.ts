@@ -22,15 +22,36 @@ export async function relayOutbox(
   opts: { batchSize?: number } = {},
 ): Promise<number> {
   return ctx.store.withTransaction(async (tx) => {
-    const batch = await tx.outbox.readPending(opts.batchSize ?? 100);
+    const batch = await tx.outbox.readPending(opts.batchSize ?? 250);
     if (batch.length === 0) return 0;
-    for (const event of batch) {
-      // dedupeKey: queues that support producer-side dedupe (BullMQ job ids)
-      // collapse the crash-between-enqueue-and-commit redelivery; queues that
-      // don't (Cloudflare Queues) ignore it — consumers stay idempotent.
-      await queue.enqueue(EVENTS_TOPIC, event, { dedupeKey: event.id });
-    }
+    // dedupeKey: queues that support producer-side dedupe (BullMQ job ids)
+    // collapse the crash-between-enqueue-and-commit redelivery; queues that
+    // don't (Cloudflare Queues) ignore it — consumers stay idempotent.
+    await queue.enqueueMany(
+      EVENTS_TOPIC,
+      batch.map((event) => ({ payload: event, dedupeKey: event.id })),
+    );
     await tx.outbox.markRelayed(batch.map((e) => e.id));
     return batch.length;
   });
+}
+
+/**
+ * Repeatedly relays until the outbox is empty or `maxIterations` is reached —
+ * so a burst larger than one batch (a bulk publish) drains in one trigger
+ * instead of waiting out successive cron ticks. Returns the total relayed.
+ */
+export async function drainOutbox(
+  ctx: AppContext,
+  queue: Queue,
+  opts: { batchSize?: number; maxIterations?: number } = {},
+): Promise<number> {
+  const maxIterations = opts.maxIterations ?? 10;
+  let total = 0;
+  for (let i = 0; i < maxIterations; i++) {
+    const relayed = await relayOutbox(ctx, queue, opts);
+    total += relayed;
+    if (relayed === 0) break;
+  }
+  return total;
 }

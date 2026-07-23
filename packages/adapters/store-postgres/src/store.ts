@@ -8,6 +8,7 @@ import {
   type ContentType,
   type DomainEvent,
   type Entry,
+  type EntryFields,
   type EntryMetadata,
   type EntryVersion,
   type ReferenceEdge,
@@ -69,7 +70,9 @@ import {
   gt,
   gte,
   inArray,
+  isNotNull,
   isNull,
+  lt,
   lte,
   or,
   sql,
@@ -179,21 +182,37 @@ function makeEntryRepo(db: Db): EntryRepo {
       // SQL pagination is only valid when there are no JS-side field predicates.
       if (!advanced) select = select.limit(query.limit ?? 100).offset(query.skip ?? 0);
       const rows = await select;
-      // Fetch each entry's current-version fields.
-      const results: EntryWithFields[] = [];
-      for (const row of rows) {
-        const [version] = await db
+      // Fetch listed entries' current-version fields in batched queries (was
+      // one query per row). The OR-of-(entryId, version) pairs stays on the
+      // (scope, entryId, version) index and never drags in historical
+      // versions; chunking keeps an advanced (unpaginated) listing under the
+      // Postgres wire-protocol parameter cap.
+      const PAIR_CHUNK = 1000;
+      const fieldsByEntry = new Map<string, EntryFields>();
+      for (let at = 0; at < rows.length; at += PAIR_CHUNK) {
+        const chunk = rows.slice(at, at + PAIR_CHUNK);
+        const versionRows = await db
           .select()
           .from(schema.entryVersions)
           .where(
             and(
               scopeFilter(schema.entryVersions, scope),
-              eq(schema.entryVersions.entryId, row.id),
-              eq(schema.entryVersions.version, row.currentVersion),
+              or(
+                ...chunk.map((r) =>
+                  and(
+                    eq(schema.entryVersions.entryId, r.id),
+                    eq(schema.entryVersions.version, r.currentVersion),
+                  ),
+                ),
+              ),
             ),
           );
-        results.push({ entry: toEntry(row), fields: version?.fields ?? {} });
+        for (const v of versionRows) fieldsByEntry.set(v.entryId, v.fields);
       }
+      const results: EntryWithFields[] = rows.map((row) => ({
+        entry: toEntry(row),
+        fields: fieldsByEntry.get(row.id) ?? {},
+      }));
       if (!advanced) return results;
       const filtered = runEntryQuery(
         results,
@@ -290,6 +309,19 @@ function makeEntryRepo(db: Db): EntryRepo {
           and(scopeFilter(schema.entryPublished, scope), eq(schema.entryPublished.entryId, id)),
         );
       return row ? toPublished(row) : null;
+    },
+    async getPublishedMany(scope, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.entryPublished)
+        .where(
+          and(
+            scopeFilter(schema.entryPublished, scope),
+            inArray(schema.entryPublished.entryId, [...ids]),
+          ),
+        );
+      return rows.map(toPublished);
     },
     async listPublished(scope, query: EntryQuery) {
       const advanced = isAdvancedQuery(query);
@@ -479,6 +511,19 @@ function makeAssetRepo(db: Db): AssetRepo {
         );
       return row ? toPublishedAsset(row) : null;
     },
+    async getPublishedMany(scope, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(schema.assetPublished)
+        .where(
+          and(
+            scopeFilter(schema.assetPublished, scope),
+            inArray(schema.assetPublished.assetId, [...ids]),
+          ),
+        );
+      return rows.map(toPublishedAsset);
+    },
     async listPublished(scope, query) {
       const rows = await db
         .select()
@@ -576,6 +621,20 @@ function makeOutboxRepo(db: Db): OutboxRepo {
         .set({ relayedAt: new Date() })
         .where(inArray(schema.outbox.id, [...eventIds]));
     },
+    async deleteRelayedBefore(before, limit) {
+      // Postgres DELETE has no LIMIT; bound the sweep via an id subquery so a
+      // huge backlog is trimmed in controlled slices.
+      const victims = db
+        .select({ id: schema.outbox.id })
+        .from(schema.outbox)
+        .where(and(isNotNull(schema.outbox.relayedAt), lt(schema.outbox.relayedAt, before)))
+        .limit(limit);
+      const deleted = await db
+        .delete(schema.outbox)
+        .where(inArray(schema.outbox.id, victims))
+        .returning({ id: schema.outbox.id });
+      return deleted.length;
+    },
   };
 }
 
@@ -663,6 +722,18 @@ function makeWebhookRepo(db: Db): WebhookRepo {
         error: r.error ?? undefined,
         createdAt: r.createdAt.toISOString(),
       }));
+    },
+    async deleteDeliveriesBefore(before, limit) {
+      const victims = db
+        .select({ id: schema.webhookDeliveries.id })
+        .from(schema.webhookDeliveries)
+        .where(lt(schema.webhookDeliveries.createdAt, before))
+        .limit(limit);
+      const deleted = await db
+        .delete(schema.webhookDeliveries)
+        .where(inArray(schema.webhookDeliveries.id, victims))
+        .returning({ id: schema.webhookDeliveries.id });
+      return deleted.length;
     },
   };
 }
@@ -1944,6 +2015,7 @@ export function createPostgresStore(
           assets: makeAssetRepo(txdb as unknown as Db),
           references: makeReferenceRepo(txdb as unknown as Db),
           releases: makeReleaseRepo(txdb as unknown as Db),
+          taxonomy: makeTaxonomyRepo(txdb as unknown as Db),
           outbox: makeOutboxRepo(txdb as unknown as Db),
         };
         return fn(tx);

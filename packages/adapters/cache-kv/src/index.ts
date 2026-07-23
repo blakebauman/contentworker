@@ -20,6 +20,15 @@ const tagKey = (tag: string) => `tv:${tag}`;
 const MIN_KV_TTL_SECONDS = 60;
 
 /**
+ * Lifetime of `tv:` tag-version keys — 2× the longest envelope TTL the
+ * platform writes (1 day), so no live envelope can outlast the versions it
+ * snapshotted. If a tag key ever expires early, its version reads as the
+ * default `'0'`, which mismatches any snapshotted uuid — expiry can only
+ * produce a miss, never a stale hit.
+ */
+const TAG_VERSION_TTL_SECONDS = 172_800;
+
+/**
  * Workers KV Cache with tag-based invalidation via tag-version keys:
  * `invalidateTag` writes a new version under `tv:<tag>`; `set` snapshots the
  * current versions of its tags into the envelope; `get` re-reads them and
@@ -55,15 +64,20 @@ export function createKvCache(kv: KvBinding): Cache {
     async set(key, value, opts) {
       const tags = await readVersions(opts?.tags ?? []);
       const envelope: CachedEnvelope = { value, tags };
+      // Clamp the envelope TTL to half the tag-version TTL: an envelope must
+      // never outlive the tag versions it snapshotted, or an expired tag key
+      // reading as the default '0' could MATCH an envelope that snapshotted
+      // '0' before any invalidation — a stale hit, not a miss.
+      const ttl = opts?.ttlSeconds
+        ? Math.min(Math.max(MIN_KV_TTL_SECONDS, opts.ttlSeconds), TAG_VERSION_TTL_SECONDS / 2)
+        : undefined;
       await kv.put(valueKey(key), JSON.stringify(envelope), {
-        ...(opts?.ttlSeconds
-          ? { expirationTtl: Math.max(MIN_KV_TTL_SECONDS, opts.ttlSeconds) }
-          : {}),
+        ...(ttl ? { expirationTtl: ttl } : {}),
       });
     },
 
     async invalidateTag(tag) {
-      await kv.put(tagKey(tag), uuidv7());
+      await kv.put(tagKey(tag), uuidv7(), { expirationTtl: TAG_VERSION_TTL_SECONDS });
     },
   };
 }

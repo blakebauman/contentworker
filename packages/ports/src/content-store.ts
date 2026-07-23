@@ -257,6 +257,8 @@ export interface AssetRepo {
   putPublished(scope: Scope, snapshot: PublishedAsset): Promise<void>;
   removePublished(scope: Scope, id: string): Promise<void>;
   getPublished(scope: Scope, id: string): Promise<PublishedAsset | null>;
+  /** Batch point-read of published assets; missing ids are absent, order unspecified. */
+  getPublishedMany(scope: Scope, ids: readonly string[]): Promise<PublishedAsset[]>;
   listPublished(scope: Scope, query: { limit?: number; skip?: number }): Promise<PublishedAsset[]>;
 }
 
@@ -303,6 +305,7 @@ export interface ContentStoreTx {
   readonly assets: AssetRepo;
   readonly references: ReferenceRepo;
   readonly releases: ReleaseRepo;
+  readonly taxonomy: TaxonomyRepo;
   readonly outbox: OutboxRepo;
 }
 
@@ -533,6 +536,12 @@ export interface EntryRepo {
   putPublished(scope: Scope, snapshot: PublishedEntry): Promise<void>;
   removePublished(scope: Scope, entryId: string): Promise<void>;
   getPublished(scope: Scope, id: string): Promise<PublishedEntry | null>;
+  /**
+   * Batch point-read of published snapshots — one backend query for the whole
+   * id set (link-resolution frontiers, bulk dispatch). Missing/unpublished ids
+   * are simply absent from the result; order is not guaranteed.
+   */
+  getPublishedMany(scope: Scope, ids: readonly string[]): Promise<PublishedEntry[]>;
   listPublished(scope: Scope, query: EntryQuery): Promise<PublishedEntry[]>;
   /**
    * Ranked full-text search over published string field values (all locales).
@@ -578,6 +587,12 @@ export interface WebhookRepo {
     webhookId: string,
     opts?: { limit?: number },
   ): Promise<WebhookDeliveryRecord[]>;
+  /**
+   * Deletes up to `limit` delivery records older than `before`, across ALL
+   * spaces (platform retention sweep, not a tenant operation). Returns the
+   * number deleted.
+   */
+  deleteDeliveriesBefore(before: Date, limit: number): Promise<number>;
 }
 
 /** A row in the transactional outbox awaiting relay to the event bus/queue. */
@@ -592,4 +607,10 @@ export interface OutboxRepo {
   readPending(limit: number): Promise<DomainEvent[]>;
   /** Marks events as relayed so they are not re-published. */
   markRelayed(eventIds: readonly string[]): Promise<void>;
+  /**
+   * Deletes up to `limit` RELAYED rows older than `before` (retention sweep —
+   * without it the outbox grows one row per event forever). Never touches
+   * un-relayed rows. Returns the number deleted so callers can loop until dry.
+   */
+  deleteRelayedBefore(before: Date, limit: number): Promise<number>;
 }

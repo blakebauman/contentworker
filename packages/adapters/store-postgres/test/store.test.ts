@@ -183,6 +183,105 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
     expect(pending.some((ev) => ev.type === 'entry.published')).toBe(true);
   });
 
+  it('getPublishedMany returns present snapshots only, scoped', async () => {
+    const otherScope = { spaceId: `t-${uuidv7()}`, environmentId: 'main' };
+    await createSpace(ctx, {
+      spaceId: otherScope.spaceId,
+      name: 'Other',
+      defaultLocale: 'en-US',
+      locales: ['en-US'],
+    });
+    await createContentType(ctx, otherScope, {
+      apiId: 'article',
+      name: 'Article',
+      displayField: 'title',
+      fields: [
+        {
+          apiId: 'title',
+          name: 'Title',
+          type: 'Symbol',
+          localized: false,
+          required: true,
+          position: 0,
+        },
+      ],
+    });
+    const a = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Batch A' } },
+    });
+    const b = await createEntry(ctx, scope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Batch B' } },
+    });
+    const foreign = await createEntry(ctx, otherScope, {
+      contentTypeApiId: 'article',
+      fields: { title: { 'en-US': 'Foreign' } },
+    });
+    await publishEntry(ctx, scope, a.entry.id);
+    await publishEntry(ctx, scope, b.entry.id);
+    await publishEntry(ctx, otherScope, foreign.entry.id);
+
+    const got = await store.entries.getPublishedMany(scope, [
+      a.entry.id,
+      b.entry.id,
+      foreign.entry.id, // other space — must not leak
+      uuidv7(), // nonexistent — silently absent
+    ]);
+    expect(got.map((s) => s.entryId).sort()).toEqual([a.entry.id, b.entry.id].sort());
+    expect(await store.entries.getPublishedMany(scope, [])).toEqual([]);
+  });
+
+  it('deleteRelayedBefore respects the limit and never deletes pending rows', async () => {
+    const mk = (n: number) => ({
+      id: uuidv7(),
+      type: 'entry.published' as const,
+      scope,
+      occurredAt: clock.now().toISOString(),
+      entryId: `sweep-${n}`,
+      contentTypeApiId: 'article',
+      version: 1,
+      fields: {},
+    });
+    const [r1, r2, pending] = [mk(1), mk(2), mk(3)];
+    await store.outbox.append(r1);
+    await store.outbox.append(r2);
+    await store.outbox.append(pending);
+    await store.outbox.markRelayed([r1.id, r2.id]);
+
+    const future = new Date(Date.now() + 60_000); // past the relay stamps
+    expect(await store.outbox.deleteRelayedBefore(future, 1)).toBe(1);
+    expect(await store.outbox.deleteRelayedBefore(future, 10)).toBe(1);
+    expect(await store.outbox.deleteRelayedBefore(future, 10)).toBe(0);
+    // The never-relayed row survived every sweep.
+    const still = await store.outbox.readPending(1000);
+    expect(still.some((ev) => ev.id === pending.id)).toBe(true);
+  });
+
+  it('deleteDeliveriesBefore trims old delivery records across spaces', async () => {
+    const otherScope = { spaceId: `t-${uuidv7()}`, environmentId: 'main' };
+    await store.webhooks.recordDelivery(scope, {
+      webhookId: 'wh-sweep-a',
+      eventId: 'evt-1',
+      status: 'success',
+      attempts: 1,
+    });
+    await store.webhooks.recordDelivery(otherScope, {
+      webhookId: 'wh-sweep-b',
+      eventId: 'evt-2',
+      status: 'failed',
+      attempts: 1,
+    });
+
+    // Platform sweep: both spaces' old records go; a future cutoff catches
+    // the just-written rows (createdAt = DB now).
+    const future = new Date(Date.now() + 60_000);
+    const deleted = await store.webhooks.deleteDeliveriesBefore(future, 100);
+    expect(deleted).toBeGreaterThanOrEqual(2);
+    expect(await store.webhooks.listDeliveries(scope, 'wh-sweep-a')).toEqual([]);
+    expect(await store.webhooks.listDeliveries(otherScope, 'wh-sweep-b')).toEqual([]);
+  });
+
   it('round-trips roles and role-bound API keys (granular RBAC)', async () => {
     const role = await createRole(ctx, spaceId, {
       name: 'Editor',

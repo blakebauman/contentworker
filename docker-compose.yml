@@ -71,6 +71,8 @@ services:
       <<: *app-env
       PORT: "8787"
       ROLE: all
+      # Delivery cache TTL (GC bound; tag invalidation stays authoritative).
+      DELIVERY_CACHE_TTL_SECONDS: "86400"
       # Bootstrap a usable dev space + keys + demo content (idempotent).
       SEED_DEV: "true"
       SEED_LOCALES: "en-US,de-DE"
@@ -129,6 +131,9 @@ services:
     environment:
       <<: *app-env
       HEALTH_PORT: "9464"
+      # Retention for relayed outbox rows + webhook delivery records (hours),
+      # swept hourly (RETENTION_INTERVAL_MS to change the cadence).
+      EVENT_RETENTION_HOURS: "168"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9464/healthz"]

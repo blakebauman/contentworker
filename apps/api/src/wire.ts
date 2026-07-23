@@ -221,6 +221,8 @@ export function wire(config: ApiConfig): Wired {
     closers.push(async () => void redis?.disconnect());
   }
   const costGuard = makeCostGuard(config, redis);
+  const ttlRaw = Number(process.env.DELIVERY_CACHE_TTL_SECONDS);
+  const deliveryCacheTtlSeconds = Number.isFinite(ttlRaw) && ttlRaw > 0 ? ttlRaw : undefined;
   // Share the failed-auth window across replicas when Redis is present, so an
   // attacker can't multiply the budget by spreading attempts across pods.
   const rateLimiter: AuthRateLimit | undefined = redis
@@ -252,7 +254,7 @@ export function wire(config: ApiConfig): Wired {
   if (pgStore) {
     const store = pgStore;
     return {
-      ctx: { store, clock: systemClock, ids: uuidIds, cache, costGuard },
+      ctx: { store, clock: systemClock, ids: uuidIds, cache, deliveryCacheTtlSeconds, costGuard },
       rag,
       blob,
       ai,
@@ -276,6 +278,7 @@ export function wire(config: ApiConfig): Wired {
     clock: systemClock,
     ids: uuidIds,
     cache,
+    deliveryCacheTtlSeconds,
     costGuard,
   };
   // Seed dev API keys (synchronously) so the dev tokens authenticate through the

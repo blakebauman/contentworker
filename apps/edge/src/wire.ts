@@ -125,7 +125,15 @@ export function wireEdge(env: EdgeEnv): EdgeWired {
   // Meter AI spend per space via the CostGuard Durable Object (shared across
   // isolates/colos). Absent binding or 0-ceilings → unmetered (demo/dev).
   const costGuard = doCostGuardFromEnv(env);
-  const ctx: AppContext = { store, clock, ids, cache, costGuard };
+  const ttlRaw = Number(env.DELIVERY_CACHE_TTL_SECONDS);
+  const ctx: AppContext = {
+    store,
+    clock,
+    ids,
+    cache,
+    ...(Number.isFinite(ttlRaw) && ttlRaw > 0 ? { deliveryCacheTtlSeconds: ttlRaw } : {}),
+    costGuard,
+  };
 
   return {
     ctx,

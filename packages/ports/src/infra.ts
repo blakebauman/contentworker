@@ -7,6 +7,13 @@ import type { DomainEvent, Scope, Webhook } from '@cw/domain';
  * may depend on these interfaces without any concrete infra being present.
  */
 
+/** One message in a batched enqueue. */
+export interface QueueMessage {
+  readonly payload: unknown;
+  readonly delayMs?: number;
+  readonly dedupeKey?: string;
+}
+
 /** Generic work queue (BullMQ/Redis by default; SQS/NATS swappable). */
 export interface Queue {
   enqueue(
@@ -14,6 +21,13 @@ export interface Queue {
     payload: unknown,
     opts?: { delayMs?: number; dedupeKey?: string },
   ): Promise<void>;
+  /**
+   * Enqueues many messages in as few backend calls as the adapter allows
+   * (Cloudflare `sendBatch`, BullMQ `addBulk`). Same at-least-once and dedupe
+   * semantics as {@link enqueue}; callers must not assume atomicity across the
+   * whole batch — a crash mid-call may leave a prefix enqueued.
+   */
+  enqueueMany(topic: string, messages: readonly QueueMessage[]): Promise<void>;
   process(topic: string, handler: (payload: unknown) => Promise<void>): Subscription;
 }
 

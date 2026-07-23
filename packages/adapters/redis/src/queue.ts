@@ -1,6 +1,13 @@
-import type { Queue as QueuePort, Subscription } from '@cw/ports';
+import type { QueueMessage, Queue as QueuePort, Subscription } from '@cw/ports';
 import { Queue as BullQueue, type ConnectionOptions, Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
+
+const JOB_OPTS = {
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 1000 },
+  removeOnComplete: 1000,
+  removeOnFail: 5000,
+} as const;
 
 /**
  * BullMQ-backed Queue adapter. One BullMQ Queue/Worker per topic. BullMQ
@@ -42,11 +49,33 @@ export function createRedisQueue(redis: Redis): QueuePort & { close(): Promise<v
       await q.add(topic, payload, {
         delay: opts?.delayMs,
         jobId: opts?.dedupeKey,
-        attempts: 5,
-        backoff: { type: 'exponential', delay: 1000 },
-        removeOnComplete: 1000,
-        removeOnFail: 5000,
+        ...JOB_OPTS,
       });
+    },
+    async enqueueMany(topic, messages) {
+      const q = queueFor(topic);
+      // Same failed-twin handling as enqueue(), but the existence checks run
+      // concurrently (ioredis pipelines them) instead of one round-trip each.
+      // Mapped by index (not pushed from continuations) so addBulk preserves
+      // the caller's order — the outbox relays in occurrence order.
+      const results = await Promise.all(
+        messages.map(async (msg): Promise<QueueMessage | null> => {
+          if (!msg.dedupeKey) return msg;
+          const existing = await q.getJob(msg.dedupeKey);
+          if (!existing) return msg;
+          if (await existing.isFailed()) await existing.retry();
+          return null;
+        }),
+      );
+      const fresh = results.filter((msg): msg is QueueMessage => msg !== null);
+      if (fresh.length === 0) return;
+      await q.addBulk(
+        fresh.map((msg) => ({
+          name: topic,
+          data: msg.payload,
+          opts: { delay: msg.delayMs, jobId: msg.dedupeKey, ...JOB_OPTS },
+        })),
+      );
     },
     process(topic, handler): Subscription {
       const worker = new Worker(topic, async (job) => handler(job.data), { connection });

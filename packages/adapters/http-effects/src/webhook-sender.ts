@@ -11,7 +11,11 @@ import type { WebhookSendResult, WebhookSender } from '@cw/ports';
  * Uses `node:crypto` — available on Node and on Cloudflare Workers via the
  * `nodejs_compat` compatibility flag.
  */
-export function createWebhookSender(fetchImpl: typeof fetch = fetch): WebhookSender {
+export function createWebhookSender(
+  fetchImpl: typeof fetch = fetch,
+  opts: { timeoutMs?: number } = {},
+): WebhookSender {
+  const timeoutMs = opts.timeoutMs ?? 10_000;
   return {
     async send(webhook: Webhook, payload: DomainEvent): Promise<WebhookSendResult> {
       const body = JSON.stringify(payload);
@@ -33,6 +37,10 @@ export function createWebhookSender(fetchImpl: typeof fetch = fetch): WebhookSen
           // Do not chase 3xx redirects — a redirect to an internal address would
           // turn a validated public target into an SSRF. Treat it as a failure.
           redirect: 'manual',
+          // A hung receiver must not occupy the dispatching consumer for the
+          // platform's default socket timeout; a timeout is just a failed
+          // delivery, retried by the queue like any other.
+          signal: AbortSignal.timeout(timeoutMs),
         });
         return { delivered: res.ok, statusCode: res.status };
       } catch (err) {

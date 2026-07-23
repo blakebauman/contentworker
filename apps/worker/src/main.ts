@@ -26,6 +26,7 @@ import {
   aiBudgetLimits,
   assertNoFakeAdapters,
   consumeEvent,
+  pruneEventHistory,
   relayOutbox,
   runDueAgentSchedules,
   runDueScheduledActions,
@@ -63,6 +64,8 @@ const RELAY_INTERVAL_MS = Number(process.env.RELAY_INTERVAL_MS ?? 1000);
 const SCHEDULE_INTERVAL_MS = Number(process.env.SCHEDULE_INTERVAL_MS ?? 5000);
 // Recurring agent jobs (AGENTS_SCHEDULES=true): due-schedule poll cadence.
 const AGENT_SCHEDULE_INTERVAL_MS = Number(process.env.AGENT_SCHEDULE_INTERVAL_MS ?? 60_000);
+// Event-history retention sweep cadence (outbox + webhook_deliveries).
+const RETENTION_INTERVAL_MS = Number(process.env.RETENTION_INTERVAL_MS ?? 3_600_000);
 const SCHEDULES_ENABLED = process.env.AGENTS_SCHEDULES === 'true';
 // Health + metrics port (K8s probes, Prometheus scrape). 9464 is the
 // conventional Prometheus exporter port.
@@ -271,6 +274,26 @@ async function main() {
   const scheduleTimer = setInterval(scheduleTick, SCHEDULE_INTERVAL_MS);
   logger.info({ intervalMs: SCHEDULE_INTERVAL_MS }, 'worker running scheduled actions');
 
+  // Retention sweep: trims relayed outbox rows + old webhook delivery records
+  // so per-event history tables don't grow unbounded. Idempotent across
+  // replicas; hourly is plenty.
+  const retentionTick = async () => {
+    try {
+      const pruned = await pruneEventHistory(ctx, {
+        ...(process.env.EVENT_RETENTION_HOURS
+          ? { retentionHours: Number(process.env.EVENT_RETENTION_HOURS) }
+          : {}),
+      });
+      if (pruned.outboxDeleted > 0 || pruned.webhookDeliveriesDeleted > 0) {
+        logger.info(pruned, 'event history pruned');
+      }
+    } catch (err) {
+      logger.error({ err }, 'event history prune error');
+    }
+  };
+  const retentionTimer = setInterval(retentionTick, RETENTION_INTERVAL_MS);
+  logger.info({ intervalMs: RETENTION_INTERVAL_MS }, 'worker pruning event history');
+
   // Recurring agent jobs: run due schedules under the background agent budget
   // (AI_AGENT_* window when set — separate `cwagent` Redis keys — else the
   // standard one), so batch agent spend can never exhaust the interactive
@@ -339,6 +362,7 @@ async function main() {
     logger.info({ signal }, 'worker shutting down');
     clearInterval(relayTimer);
     clearInterval(scheduleTimer);
+    clearInterval(retentionTimer);
     if (agentScheduleTimer) clearInterval(agentScheduleTimer);
     health.close();
     try {

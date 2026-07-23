@@ -169,6 +169,13 @@
       "when": 1784740649449,
       "tag": "0023_bouncy_firelord",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784786726126,
+      "tag": "0024_giant_texas_twister",
+      "breakpoints": true
     }
   ]
 }

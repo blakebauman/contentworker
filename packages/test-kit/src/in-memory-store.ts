@@ -75,12 +75,19 @@ const scopeKey = (s: Scope) => `${s.spaceId}::${s.environmentId}`;
  * outbox) without isolation guarantees — transactions simply run the callback.
  */
 export class InMemoryContentStore implements ContentStore {
+  /**
+   * Time source for adapter-stamped instants (outbox `relayedAt`) — the fields
+   * the REAL adapter stamps with database time, not the use-case clock. Tests
+   * exercising retention point this at their FixedClock for determinism.
+   */
+  nowMs: () => number = () => Date.now();
+
   private readonly spaceConfigs = new Map<string, SpaceConfig>();
   private readonly contentTypeData = new Map<string, ContentType>();
   private readonly entryData = new Map<string, Entry>();
   private readonly versionData = new Map<string, EntryVersion[]>();
   private readonly publishedData = new Map<string, PublishedEntry>();
-  private readonly outboxData: { event: DomainEvent; relayed: boolean }[] = [];
+  private readonly outboxData: { event: DomainEvent; relayed: boolean; relayedAt?: number }[] = [];
 
   private readonly environmentData = new Map<string, { id: string; name: string }[]>();
   private readonly aliasData = new Map<string, EnvironmentAlias>();
@@ -185,6 +192,8 @@ export class InMemoryContentStore implements ContentStore {
       this.publishedData.delete(`${scopeKey(scope)}::${entryId}`);
     },
     getPublished: async (scope, id) => this.publishedData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    getPublishedMany: async (scope, ids) =>
+      ids.flatMap((id) => this.publishedData.get(`${scopeKey(scope)}::${id}`) ?? []),
     listPublished: async (scope, query: EntryQuery) => {
       const prefix = `${scopeKey(scope)}::`;
       let rows = [...this.publishedData.entries()]
@@ -310,6 +319,8 @@ export class InMemoryContentStore implements ContentStore {
     },
     getPublished: async (scope, id) =>
       this.publishedAssetData.get(`${scopeKey(scope)}::${id}`) ?? null,
+    getPublishedMany: async (scope, ids) =>
+      ids.flatMap((id) => this.publishedAssetData.get(`${scopeKey(scope)}::${id}`) ?? []),
     listPublished: async (scope, query) => {
       const prefix = `${scopeKey(scope)}::`;
       const rows = [...this.publishedAssetData.entries()]
@@ -377,7 +388,9 @@ export class InMemoryContentStore implements ContentStore {
       this.webhookDeliveries.push({
         ...delivery,
         id: this.deliverySeq,
-        createdAt: new Date(this.deliverySeq).toISOString(),
+        // Stamped from the injectable time source (like the real adapter's
+        // DB default) so retention tests can control record age.
+        createdAt: new Date(this.nowMs()).toISOString(),
       });
     },
     listDeliveries: async (_scope, webhookId, opts) =>
@@ -385,6 +398,17 @@ export class InMemoryContentStore implements ContentStore {
         .filter((d) => d.webhookId === webhookId)
         .sort((a, b) => b.id - a.id)
         .slice(0, opts?.limit ?? 50),
+    deleteDeliveriesBefore: async (before, limit) => {
+      const cutoff = before.toISOString();
+      let deleted = 0;
+      for (let i = this.webhookDeliveries.length - 1; i >= 0 && deleted < limit; i--) {
+        if ((this.webhookDeliveries[i]?.createdAt ?? '') < cutoff) {
+          this.webhookDeliveries.splice(i, 1);
+          deleted += 1;
+        }
+      }
+      return deleted;
+    },
   };
 
   private readonly apiKeyData = new Map<string, ApiKey>();
@@ -832,8 +856,23 @@ export class InMemoryContentStore implements ContentStore {
     markRelayed: async (eventIds) => {
       const ids = new Set(eventIds);
       for (const row of this.outboxData) {
-        if (ids.has(row.event.id)) row.relayed = true;
+        if (ids.has(row.event.id)) {
+          row.relayed = true;
+          row.relayedAt = this.nowMs();
+        }
       }
+    },
+    deleteRelayedBefore: async (before, limit) => {
+      const cutoff = before.getTime();
+      let deleted = 0;
+      for (let i = this.outboxData.length - 1; i >= 0 && deleted < limit; i--) {
+        const row = this.outboxData[i];
+        if (row?.relayed && (row.relayedAt ?? 0) < cutoff) {
+          this.outboxData.splice(i, 1);
+          deleted += 1;
+        }
+      }
+      return deleted;
     },
   };
 
@@ -873,6 +912,7 @@ export class InMemoryContentStore implements ContentStore {
         assets: this.assets,
         references: this.references,
         releases: this.releases,
+        taxonomy: this.taxonomy,
         outbox: this.outbox,
       });
     } catch (err) {

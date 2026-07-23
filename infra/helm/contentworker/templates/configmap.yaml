@@ -61,6 +61,8 @@ data:
   SEED_DEFAULT_LOCALE: {{ .Values.config.seedDefaultLocale | quote }}
   SEED_LOCALES: {{ .Values.config.seedLocales | quote }}
   SEED_SCALE: {{ .Values.config.seedScale | quote }}
+  DELIVERY_CACHE_TTL_SECONDS: {{ .Values.config.deliveryCacheTtlSeconds | quote }}
+  EVENT_RETENTION_HOURS: {{ .Values.config.eventRetentionHours | quote }}
   AGENTS_ENRICH: {{ .Values.agents.enrich | quote }}
   AGENTS_MODERATE: {{ .Values.agents.moderate | quote }}
   AGENTS_AUTO_APPLY: {{ .Values.agents.autoApply | quote }}

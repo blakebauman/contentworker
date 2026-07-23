@@ -1,0 +1,2 @@
+CREATE INDEX "outbox_relayed" ON "outbox" USING btree ("relayed_at") WHERE "outbox"."relayed_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "webhook_deliveries_by_created" ON "webhook_deliveries" USING btree ("created_at");

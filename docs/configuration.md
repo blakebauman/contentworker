@@ -24,6 +24,7 @@ selection is driven by which ones are set. The same image runs anywhere; only th
 | `PORT` | `8787` (api), `8788` (mcp-server) | HTTP listen port |
 | `DATABASE_URL` | — | Postgres connection string; absent → in-memory store |
 | `REDIS_URL` | — | Redis connection string; absent → no cache (and the worker won't start) |
+| `DELIVERY_CACHE_TTL_SECONDS` | `86400` | TTL on delivery cache entries — a garbage-collection bound so the cache backend doesn't accumulate every render forever; tag-version invalidation stays the correctness mechanism |
 | `MAX_BODY_BYTES` | `5242880` | Max accepted request body size (DoS guard); oversized → 413 |
 | `TRUSTED_PROXY_COUNT` | `1` | Reverse proxies in front; X-Forwarded-For is read this many hops from the right (spoof-resistant rate-limit keying). `0` ignores XFF |
 | `NODE_ENV` | `production` | Set in the Dockerfile |
@@ -188,6 +189,8 @@ publish-time indexing. The API can still serve search with local embeddings when
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `RELAY_INTERVAL_MS` | `1000` | Outbox poll interval |
+| `EVENT_RETENTION_HOURS` | `168` | Retention for relayed outbox rows + webhook delivery records; the worker (and the edge cron) sweeps them past this age so per-event history tables don't grow unbounded |
+| `RETENTION_INTERVAL_MS` | `3600000` | Cadence of the retention sweep on the Node worker (edge sweeps on the top-of-hour cron tick) |
 | `HEALTH_PORT` | `9464` | Health (`/healthz`, `/readyz`) + Prometheus `/metrics` port on the worker and agent-worker; on the API it serves `/metrics` only (health stays on the API port). Worker liveness fails only when the relay loop *hangs* (a tick that never returns); erroring ticks surface via `cw_relay_errors_total` instead of restart-looping |
 | `AGENTS_ENRICH` | `false` | Run the enrich agent on `entry.published` (needs an AI provider) |
 | `AGENTS_SCHEDULES` | `false` | Run recurring agent jobs (cron-based `agent-schedules`) from the worker loop / edge cron |

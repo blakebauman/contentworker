@@ -6,6 +6,7 @@ import type {
   GenerateRequest,
   GenerateResult,
   Queue,
+  QueueMessage,
   Subscription,
   WebhookSendResult,
   WebhookSender,
@@ -21,6 +22,10 @@ export class InMemoryQueue implements Queue {
 
   async enqueue(topic: string, payload: unknown): Promise<void> {
     this.jobs.push({ topic, payload });
+  }
+
+  async enqueueMany(topic: string, messages: readonly QueueMessage[]): Promise<void> {
+    for (const msg of messages) this.jobs.push({ topic, payload: msg.payload });
   }
 
   process(topic: string, handler: (payload: unknown) => Promise<void>): Subscription {

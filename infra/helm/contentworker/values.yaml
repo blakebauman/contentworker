@@ -50,6 +50,12 @@ config:
   seedLocales: en-US
   # Corpus multiplier for SEED_DEV bootstraps: 1 = demo, larger = load-test data.
   seedScale: "1"
+  # Delivery cache entry TTL, seconds — a GC bound; tag invalidation stays the
+  # correctness mechanism.
+  deliveryCacheTtlSeconds: "86400"
+  # Retention for relayed outbox rows + webhook delivery records, hours
+  # (the worker sweeps hourly; RETENTION_INTERVAL_MS in extraEnv to change).
+  eventRetentionHours: "168"
   # Extra non-secret env (e.g. AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_VERSION).
   extraEnv: {}
 
