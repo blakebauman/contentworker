@@ -9,7 +9,7 @@ import {
   unpublishEntry,
   wrapUntrusted,
 } from '@cw/application';
-import type { EntryFields, Scope } from '@cw/domain';
+import { type EntryFields, InvalidStateError, NotFoundError, type Scope } from '@cw/domain';
 import type { AIProvider } from '@cw/ports';
 import type { Activities, GenerateFieldsInput, LoadedEntry } from './types.js';
 
@@ -33,12 +33,21 @@ export function makeActivities(deps: ActivitiesDeps): Activities {
 
   return {
     async recordRun(scope, run) {
-      await recordAgentRun(ctx, scope, run as Parameters<typeof recordAgentRun>[2]);
+      await recordAgentRun(ctx, scope, run);
     },
     async retractEntry(scope, entryId) {
-      // Already unpublished or gone is a no-op, not a failure — the workflow
-      // only needs the entry to END UP out of delivery.
-      await unpublishEntry(ctx, scope, entryId).catch(() => {});
+      try {
+        await unpublishEntry(ctx, scope, entryId);
+      } catch (err) {
+        // "Already gone / not published" means the entry is ALREADY out of
+        // delivery — the desired end state, so a no-op. Anything else (store
+        // or connection failure) must propagate: this runs as a durable step,
+        // and swallowing it would resolve the step successfully, skip its
+        // retries, and let the ledger record a retraction that never happened
+        // while flagged content stayed live.
+        if (err instanceof NotFoundError || err instanceof InvalidStateError) return;
+        throw err;
+      }
     },
     async loadEntry(scope, entryId): Promise<LoadedEntry | null> {
       const found = await ctx.store.entries.get(scope, entryId);

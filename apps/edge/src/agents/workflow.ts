@@ -21,6 +21,7 @@ import { InMemoryContentStore } from '@cw/test-kit';
 import { v7 as uuidv7 } from 'uuid';
 import { doAgentCostGuardFromEnv } from '../do/cost-guard.js';
 import type { EdgeEnv } from '../env.js';
+import { makeMetrics } from '../metrics.js';
 import { makeAI } from '../wire.js';
 import { type AgentWfParams, REVIEW_DECISION_EVENT, reviewInstanceId } from './runtime.js';
 
@@ -109,26 +110,50 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
     const ctx: AppContext = { store, clock: { now: () => new Date() }, ids, costGuard };
 
     try {
+      // Wrapped in a step: un-stepped side effects re-execute on replay. The
+      // instance id is deterministic and "already exists" is swallowed, so a
+      // replay is harmless either way — but the step keeps it durable and
+      // independently retried like every other effect.
       const startWatcher = this.env.AGENT_WF
-        ? async (scope: Scope, reviewId: string, entryId: string) => {
-            const wf = this.env.AGENT_WF as Workflow;
-            await wf
-              .create({
-                id: reviewInstanceId(reviewId),
-                params: { workflow: 'review', input: { scope, reviewId, entryId } },
-              })
-              .catch((err: unknown) => {
-                // A watcher already started (duplicate delivery) is fine.
-                const m = String(err);
-                if (!m.includes('already') && !m.includes('exists')) throw err;
-              });
-          }
+        ? (scope: Scope, reviewId: string, entryId: string): Promise<void> =>
+            step.do(`startReviewWatcher#${reviewId}`, STEP_CONFIG, async () => {
+              const wf = this.env.AGENT_WF as Workflow;
+              await wf
+                .create({
+                  id: reviewInstanceId(reviewId),
+                  params: { workflow: 'review', input: { scope, reviewId, entryId } },
+                })
+                .catch((err: unknown) => {
+                  // A watcher already started (duplicate delivery) is fine.
+                  const m = String(err);
+                  if (!m.includes('already') && !m.includes('exists')) throw err;
+                });
+            })
         : undefined;
       const activities = stepActivities(step, makeActivities({ ctx, ai }));
       if (event.payload.workflow === 'publish_agents') {
-        return await publishAgentsWorkflow(activities, event.payload.input, {
+        const input = event.payload.input;
+        const runs = await publishAgentsWorkflow(activities, input, {
           ...(startWatcher ? { startReviewWatcher: startWatcher } : {}),
         });
+        // The consumer acked at START, so it can no longer report outcomes —
+        // without a terminal signal here, a chunk that fails entirely looks
+        // identical to one that never ran.
+        const metrics = makeMetrics(this.env.METRICS);
+        metrics.count('cw_agent_chunk_entries_total', input.entryIds.length, {
+          outcome: 'processed',
+        });
+        const held = runs.filter((r) => r.status === 'held').length;
+        if (held > 0) metrics.count('cw_agent_runs_held_total', held);
+        console.log(
+          JSON.stringify({
+            msg: 'publish agents chunk complete',
+            entries: input.entryIds.length,
+            runs: runs.length,
+            held,
+          }),
+        );
+        return runs;
       }
       if (event.payload.workflow === 'review') {
         // HITL watcher: the human decision arrives as a Workflow event;

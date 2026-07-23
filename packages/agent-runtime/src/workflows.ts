@@ -1,9 +1,9 @@
-import type { Scope } from '@cw/domain';
 import type {
   Activities,
   AgentRunResult,
   DurableWaits,
   PublishAgentsHooks,
+  PublishRunsInput,
   ReviewWatchInput,
   WorkflowInput,
 } from './types.js';
@@ -338,15 +338,6 @@ export async function moderateWorkflow(
   };
 }
 
-/** Input for the on-publish agent pass over a CHUNK of entries. */
-export interface PublishAgentsInput {
-  readonly scope: Scope;
-  readonly entryIds: readonly string[];
-  readonly enrich: boolean;
-  readonly moderate: boolean;
-  readonly autoApply?: boolean;
-}
-
 /**
  * The full on-publish agent pass, as durable orchestration.
  *
@@ -357,13 +348,13 @@ export interface PublishAgentsInput {
  * minutes per entry. Moving the whole pass in here lets the consumer create the
  * instance and ack immediately: the run records its own outcome.
  *
- * It processes a CHUNK of entries so one instance covers many publishes —
- * ~8 steps per entry against the per-instance step ceiling, so a chunk of ~50
- * stays well inside it while cutting instance count by the same factor.
+ * It processes a CHUNK of entries so one instance covers many publishes. The
+ * host picks the chunk size against the per-instance STEP ceiling — worst case
+ * is ~13 steps per entry (see AGENT_CHUNK in apps/edge/src/main.ts).
  */
 export async function publishAgentsWorkflow(
   act: Activities,
-  input: PublishAgentsInput,
+  input: PublishRunsInput,
   hooks: PublishAgentsHooks = {},
 ): Promise<AgentRunResult[]> {
   const names: ('enrich' | 'moderate')[] = [];
@@ -372,6 +363,39 @@ export async function publishAgentsWorkflow(
 
   const results: AgentRunResult[] = [];
   for (const entryId of input.entryIds) {
+    // Per-entry error boundary. The consumer acked every message in the chunk
+    // when it started this instance, so an exception escaping here would abort
+    // the remaining entries with no retry and no dead-letter — and the most
+    // likely failure is deterministic, not transient (an over-budget entry
+    // raises RateLimitedError on every attempt, precisely under the bulk
+    // publishes chunking exists for). One bad entry must not take the rest.
+    try {
+      results.push(...(await runEntryPass(act, input, entryId, names, hooks)));
+    } catch (err) {
+      await act
+        .recordRun(input.scope, {
+          workflow: names[0] ?? 'enrich',
+          entryId,
+          status: 'skipped',
+          decisions: [`agent pass failed: ${err instanceof Error ? err.message : String(err)}`],
+          usage: ZERO,
+        })
+        .catch(() => {});
+    }
+  }
+  return results;
+}
+
+/** One entry's pass: enrich (first, so moderation sees enriched content), then
+ *  moderate, recording each run and retracting anything held. */
+async function runEntryPass(
+  act: Activities,
+  input: PublishRunsInput,
+  entryId: string,
+  names: readonly ('enrich' | 'moderate')[],
+  hooks: PublishAgentsHooks,
+): Promise<AgentRunResult[]> {
+  {
     const perEntry: AgentRunResult[] = [];
     for (const name of names) {
       // Enrich before moderate so moderation sees the enriched content.
@@ -398,6 +422,8 @@ export async function publishAgentsWorkflow(
     // A held entry is already live (agents run off entry.published), so take it
     // out of delivery rather than only noting the hold.
     if (perEntry.some((r) => r.workflow === 'moderate' && r.status === 'held')) {
+      // Record the retraction only AFTER it succeeds: the ledger must not
+      // claim flagged content was pulled from delivery when it wasn't.
       await act.retractEntry(input.scope, entryId);
       await act.recordRun(input.scope, {
         workflow: 'moderate',
@@ -407,7 +433,6 @@ export async function publishAgentsWorkflow(
         usage: ZERO,
       });
     }
-    results.push(...perEntry);
+    return perEntry;
   }
-  return results;
 }

@@ -151,6 +151,51 @@ describe('publishAgentsWorkflow', () => {
     expect(recorded).toHaveLength(1); // the run was still recorded
   });
 
+  it('isolates a failing entry so the rest of the chunk still runs', async () => {
+    // The consumer acks the whole chunk when it starts the instance, so an
+    // exception escaping the pass would drop the remaining entries with no
+    // retry and no dead-letter. Deterministic failures (e.g. an over-budget
+    // entry) are the realistic case under a bulk publish.
+    let n = 0;
+    const { act, recorded } = fakeActivities({
+      classify: async () => {
+        n += 1;
+        if (n === 2) throw new Error('budget exceeded');
+        return { flagged: false, categories: [], usage: ZERO };
+      },
+    });
+    const out = await publishAgentsWorkflow(act, {
+      scope,
+      entryIds: ['e1', 'e2', 'e3'],
+      enrich: false,
+      moderate: true,
+    });
+    // e1 and e3 completed; e2 recorded a failure instead of aborting the chunk.
+    expect(out.map((r) => r.entryId)).toEqual(['e1', 'e3']);
+    const failed = recorded.find((r) => r.entryId === 'e2');
+    expect(failed?.status).toBe('skipped');
+  });
+
+  it('does not record a retraction when retracting fails', async () => {
+    // The ledger must never claim flagged content was pulled from delivery
+    // when the unpublish actually failed.
+    const { act, recorded } = fakeActivities({
+      classify: async () => ({ flagged: true, categories: ['spam'], usage: ZERO }),
+      retractEntry: async () => {
+        throw new Error('store unavailable');
+      },
+    });
+    await publishAgentsWorkflow(act, {
+      scope,
+      entryIds: ['e1'],
+      enrich: false,
+      moderate: true,
+    });
+    expect(recorded.some((r) => r.status === 'held')).toBe(true);
+    // The per-entry boundary caught it; no "retracted" claim was written.
+    expect(recorded.filter((r) => r.status === 'held')).toHaveLength(1);
+  });
+
   it('runs only the enabled workflows', async () => {
     const { act, recorded } = fakeActivities();
     await publishAgentsWorkflow(act, {

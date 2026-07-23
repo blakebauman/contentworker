@@ -108,9 +108,10 @@ export interface Activities {
   recordRun(
     scope: Scope,
     run: {
-      workflow: string;
+      // Literal unions, not `string`: a typo must not reach the ledger.
+      workflow: Exclude<WorkflowName, 'review'>;
       entryId: string;
-      status: string;
+      status: AgentRunResult['status'];
       decisions: string[];
       usage: Usage;
     },

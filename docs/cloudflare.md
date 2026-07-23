@@ -231,9 +231,13 @@ The full side-by-side matrix (including the Node column) lives in
   await a result — which matters because Workflows has no blocking result API,
   and the previous model polled `instance.status()` every 2s, pinning one
   consumer invocation per entry for up to ten minutes. One instance covers a
-  chunk of entries (~50), so 100k published entries cost ~2k instances rather
-  than 100k+, and `max_concurrency` on the consumer bounds the
-  instance-creation rate under a bulk publish. Without the `AGENTS_QUEUE`
+  chunk of entries (25, sized against the per-instance step ceiling at ~13
+  steps per entry worst case), so 100k published entries cost ~4k instances
+  rather than 100k+, and `max_concurrency` on the consumer bounds the
+  instance-creation rate under a bulk publish. Entries within a chunk are
+  processed sequentially and each has its own error boundary, so one failing
+  entry never drops the rest — but a flagged entry's retraction waits on its
+  predecessors, so moderation-critical deployments should lower the chunk size. Without the `AGENTS_QUEUE`
   binding — or on a runtime with no durable start — agents run inline
   (dev/demo parity).
 - **Bulk jobs run on their own queue:** `bulk.chunk_due` control events route

@@ -167,10 +167,18 @@ async function consumeEvents(batch: MessageBatch, env: EdgeEnv, wired: EdgeWired
   }
 }
 
-/** Entries per durable agent-workflow instance. ~8 steps per entry against the
- *  per-instance step ceiling, so this stays far inside it while cutting the
- *  instance count by the same factor. */
-const AGENT_CHUNK = 50;
+/**
+ * Entries per durable agent-workflow instance.
+ *
+ * Sized against the per-instance STEP ceiling (~1024 on Workflows). Worst case
+ * per entry is ~13 steps: enrich (loadEntry, generateFields, record,
+ * createReview) + moderate (loadEntry, classify, record) + one recordRun per
+ * workflow + the watcher start + the retract path (retractEntry, recordRun).
+ * 25 × 13 ≈ 325 leaves room for a future activity without silently pushing an
+ * instance over the limit — and still cuts instance count 25×, so 100k
+ * published entries cost ~4k instances instead of 100k+.
+ */
+const AGENT_CHUNK = 25;
 
 /**
  * cw-agents consumer body.
@@ -222,24 +230,30 @@ async function consumeAgentJobs(
       byScope.set(key, bucket);
     }
     for (const bucket of byScope.values()) {
-      try {
-        for (let at = 0; at < bucket.ids.length; at += AGENT_CHUNK) {
+      // Ack/retry PER CHUNK, not per bucket: retrying messages whose instance
+      // already started would re-run their agents, and the pass now performs a
+      // real state change (retracting a held entry), so duplicates are not
+      // free the way recorded proposals were.
+      for (let at = 0; at < bucket.ids.length; at += AGENT_CHUNK) {
+        const ids = bucket.ids.slice(at, at + AGENT_CHUNK);
+        const msgs = bucket.msgs.slice(at, at + AGENT_CHUNK);
+        try {
           await agents.startPublishRuns({
             scope: bucket.scope,
-            entryIds: bucket.ids.slice(at, at + AGENT_CHUNK),
+            entryIds: ids,
             enrich: agentConfig.enrich,
             moderate: agentConfig.moderate,
             ...(agentConfig.autoApply !== undefined ? { autoApply: agentConfig.autoApply } : {}),
           });
+          for (const m of msgs) m.ack();
+          metrics.count('cw_agent_jobs_total', msgs.length, { outcome: 'started' });
+        } catch (err) {
+          // Instance creation failed (rate limit, transient) — only this
+          // chunk's messages redeliver.
+          console.error('agent workflow start failed; retrying chunk', err);
+          for (const m of msgs) m.retry();
+          metrics.count('cw_agent_jobs_total', msgs.length, { outcome: 'error' });
         }
-        for (const m of bucket.msgs) m.ack();
-        metrics.count('cw_agent_jobs_total', bucket.msgs.length, { outcome: 'started' });
-      } catch (err) {
-        // Instance creation failed (rate limit, transient): retry the whole
-        // bucket. A duplicate start is benign — runs are recorded proposals.
-        console.error('agent workflow start failed; retrying', err);
-        for (const m of bucket.msgs) m.retry();
-        metrics.count('cw_agent_jobs_total', bucket.msgs.length, { outcome: 'error' });
       }
     }
     return;
