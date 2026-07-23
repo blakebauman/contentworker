@@ -6,36 +6,29 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import type { Asset } from '@cw/domain';
 import { ImageIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ManagementClient } from '../lib/management.js';
+import { useRef, useState } from 'react';
+import { useClient } from '../lib/client-context.js';
+import { useAssetsQuery, useInvalidate } from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 
 /** Media library: lists assets, uploads via presigned PUT, publishes. */
-export function MediaLibrary(props: { client: ManagementClient; locale: string }) {
-  const { client, locale } = props;
+export function MediaLibrary(props: { locale: string }) {
+  const { locale } = props;
+  const { client } = useClient();
   const toast = useToast();
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const invalidate = useInvalidate();
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Asset | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setAssets(await client.listAssets());
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  }, [client, toast]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const assets = useAssetsQuery().data ?? [];
+  const reload = () => invalidate(['assets']);
 
   const onUpload = async (file: File) => {
     setBusy(true);
     try {
       await client.uploadAsset(file); // create → presigned PUT → publish
-      await load();
+      await reload();
       toast.success(`Uploaded ${file.name}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -44,6 +37,11 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
       if (fileRef.current) fileRef.current.value = '';
     }
   };
+
+  const setPublished = (id: string, publish: boolean) =>
+    void (publish ? client.publishAsset(id) : client.unpublishAsset(id))
+      .then(reload)
+      .catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
 
   return (
     <div className="space-y-4">
@@ -98,7 +96,7 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
                     size="xs"
                     onClick={(e) => {
                       e.stopPropagation();
-                      client.unpublishAsset(a.id).then(load);
+                      setPublished(a.id, false);
                     }}
                   >
                     Unpublish
@@ -110,7 +108,7 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
                     size="xs"
                     onClick={(e) => {
                       e.stopPropagation();
-                      client.publishAsset(a.id).then(load);
+                      setPublished(a.id, true);
                     }}
                   >
                     Publish
@@ -126,7 +124,7 @@ export function MediaLibrary(props: { client: ManagementClient; locale: string }
         locale={locale}
         open={selected !== null}
         onOpenChange={(open) => !open && setSelected(null)}
-        onSaved={load}
+        onSaved={() => void reload()}
       />
     </div>
   );

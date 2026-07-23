@@ -13,10 +13,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { Concept, ConceptScheme, Tag } from '@cw/domain';
+import type { Concept } from '@cw/domain';
 import { Hash, Tags, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useClient } from '../lib/client-context.js';
+import { useInvalidate, useScopedQuery } from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 
 const NONE = '__none__';
@@ -72,49 +73,43 @@ function asTree(concepts: Concept[]): { concept: Concept; depth: number }[] {
 function ConceptsTab() {
   const { client, busy, run } = useClient();
   const toast = useToast();
-  const [schemes, setSchemes] = useState<ConceptScheme[]>([]);
-  const [concepts, setConcepts] = useState<Concept[]>([]);
-  const [schemeId, setSchemeId] = useState('');
+  const invalidate = useInvalidate();
+  const [pickedSchemeId, setPickedSchemeId] = useState('');
   const [newScheme, setNewScheme] = useState('');
   const [label, setLabel] = useState('');
   const [broaderId, setBroaderId] = useState<string>(NONE);
 
-  const loadSchemes = useCallback(
-    () =>
-      run(async () => {
-        const list = await client.listSchemes();
-        setSchemes(list);
-        setSchemeId((cur) => cur || list[0]?.id || '');
-      }),
-    [client, run],
-  );
-  useEffect(() => {
-    loadSchemes();
-  }, [loadSchemes]);
-
-  const loadConcepts = useCallback(
-    (id: string) => run(async () => setConcepts(id ? await client.listConcepts(id) : [])),
-    [client, run],
-  );
-  useEffect(() => {
-    if (schemeId) loadConcepts(schemeId);
-  }, [schemeId, loadConcepts]);
+  const schemes = useScopedQuery(['schemes'], () => client.listSchemes()).data ?? [];
+  // Default to the first scheme until the user picks one explicitly. The pick
+  // must exist in the current list — after a delete or an environment switch a
+  // stale pick would otherwise drive a concepts fetch for a missing scheme.
+  const schemeId = schemes.some((s) => s.id === pickedSchemeId)
+    ? pickedSchemeId
+    : (schemes[0]?.id ?? '');
+  const concepts =
+    useScopedQuery(['concepts', schemeId], () => client.listConcepts(schemeId), {
+      enabled: !!schemeId,
+    }).data ?? [];
 
   const addScheme = () =>
     run(async () => {
       const created = await client.createScheme({ name: newScheme.trim() });
       setNewScheme('');
       toast.success('Scheme created');
-      await loadSchemes();
-      setSchemeId(created.id);
+      await invalidate(['schemes']);
+      setPickedSchemeId(created.id);
     });
 
   const removeScheme = (id: string) =>
     run(async () => {
       await client.deleteScheme(id);
       toast.success('Scheme deleted');
-      setSchemeId('');
-      await loadSchemes();
+      setPickedSchemeId('');
+      // Refetch schemes first: once the deleted scheme is gone from the list,
+      // its concepts query is inactive, so the concepts invalidation can't
+      // fire a doomed listConcepts() against the deleted scheme.
+      await invalidate(['schemes']);
+      await invalidate(['concepts']);
     });
 
   const addConcept = () =>
@@ -126,13 +121,13 @@ function ConceptsTab() {
       });
       setLabel('');
       setBroaderId(NONE);
-      await loadConcepts(schemeId);
+      await invalidate(['concepts', schemeId]);
     });
 
   const removeConcept = (id: string) =>
     run(async () => {
       await client.deleteConcept(id);
-      await loadConcepts(schemeId);
+      await invalidate(['concepts', schemeId]);
     });
 
   const tree = asTree(concepts);
@@ -170,7 +165,7 @@ function ConceptsTab() {
                     className={`flex-1 truncate rounded-md px-2 py-1 text-left text-sm ${
                       s.id === schemeId ? 'bg-muted font-medium' : 'hover:bg-muted/60'
                     }`}
-                    onClick={() => setSchemeId(s.id)}
+                    onClick={() => setPickedSchemeId(s.id)}
                   >
                     {s.name}
                   </button>
@@ -271,26 +266,23 @@ function ConceptsTab() {
 function TagsTab() {
   const { client, busy, run } = useClient();
   const toast = useToast();
-  const [tags, setTags] = useState<Tag[]>([]);
+  const invalidate = useInvalidate();
   const [name, setName] = useState('');
 
-  const load = useCallback(() => run(async () => setTags(await client.listTags())), [client, run]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  const tags = useScopedQuery(['tags'], () => client.listTags()).data ?? [];
 
   const add = () =>
     run(async () => {
       await client.createTag({ name: name.trim() });
       setName('');
-      await load();
+      await invalidate(['tags']);
     });
 
   const remove = (id: string) =>
     run(async () => {
       await client.deleteTag(id);
       toast.success('Tag deleted');
-      await load();
+      await invalidate(['tags']);
     });
 
   return (

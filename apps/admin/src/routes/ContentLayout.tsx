@@ -1,57 +1,37 @@
 import { cn } from '@/lib/utils';
-import type { ContentType } from '@cw/domain';
-import { useCallback, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useClient } from '../lib/client-context.js';
-import type { SpaceConfig } from '../lib/management.js';
+import { useContentTypesQuery, useQueryKeys, useSpaceConfigQuery } from '../lib/queries.js';
 import type { ContentOutlet } from './content-context.js';
-
-type LocaleConfig = {
-  locales: readonly string[];
-  defaultLocale: string;
-  fallbacks?: Readonly<Record<string, string | null>>;
-};
 
 /**
  * Content section shell: a secondary nav listing the space's content types,
- * beside an outlet that renders the entries list / entry editor. Loads the
- * content types + locale config once and shares them with nested routes.
+ * beside an outlet that renders the entries list / entry editor. Content types
+ * and locale config come from the query cache and are shared with nested
+ * routes; `reload` invalidates both so any nested mutation can refresh them.
  */
 export function ContentLayout() {
-  const { client, conn, run } = useClient();
-  const [types, setTypes] = useState<ContentType[]>([]);
-  const [localeCfg, setLocaleCfg] = useState<LocaleConfig>({
-    locales: [conn.locale],
-    defaultLocale: conn.locale,
-  });
+  const { conn } = useClient();
+  const queryClient = useQueryClient();
+  const keys = useQueryKeys();
+  const typesQuery = useContentTypesQuery();
+  const configQuery = useSpaceConfigQuery();
 
-  const reload = useCallback(
-    () =>
-      run(async () => {
-        const [ts, cfg] = await Promise.all([
-          client.listContentTypes(),
-          client.getSpaceConfig().catch((): SpaceConfig | null => null),
-        ]);
-        setTypes(ts);
-        if (cfg)
-          setLocaleCfg({
-            locales: cfg.locales,
-            defaultLocale: cfg.defaultLocale,
-            fallbacks: cfg.fallbacks,
-          });
-      }),
-    [client, run],
-  );
+  const types = typesQuery.data ?? [];
+  const cfg = configQuery.data ?? null;
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  const reload = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: keys.contentTypes });
+    void queryClient.invalidateQueries({ queryKey: keys.spaceConfig });
+  }, [queryClient, keys]);
 
   const outlet: ContentOutlet = {
     types,
-    locales: localeCfg.locales,
-    defaultLocale: localeCfg.defaultLocale,
-    fallbacks: localeCfg.fallbacks,
+    locales: cfg?.locales ?? [conn.locale],
+    defaultLocale: cfg?.defaultLocale ?? conn.locale,
+    fallbacks: cfg?.fallbacks,
     reload,
   };
 
@@ -78,7 +58,7 @@ export function ContentLayout() {
             <span className="text-xs text-muted-foreground">{t.status}</span>
           </NavLink>
         ))}
-        {types.length === 0 && (
+        {types.length === 0 && !typesQuery.isPending && (
           <div className="px-2 py-1 text-sm text-muted-foreground">No content types.</div>
         )}
       </aside>

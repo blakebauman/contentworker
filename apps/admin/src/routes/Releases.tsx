@@ -45,11 +45,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { PreviewEntry } from '@/lib/management';
-import type { Release, ReleaseWithItems, ScheduledAction } from '@cw/domain';
 import { CalendarClock, PackageOpen, Rocket, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useClient } from '../lib/client-context.js';
+import { useAllEntriesQuery, useInvalidate, useScopedQuery } from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 
 const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleString() : '—');
@@ -66,39 +65,28 @@ function defaultScheduleLocal(): string {
 export function Releases() {
   const { client, busy, run } = useClient();
   const toast = useToast();
-  const [releases, setReleases] = useState<Release[]>([]);
-  const [scheduled, setScheduled] = useState<ScheduledAction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const invalidate = useInvalidate();
   const [creating, setCreating] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const load = useCallback(
-    () =>
-      run(async () => {
-        setLoading(true);
-        try {
-          const [rels, acts] = await Promise.all([
-            client.listReleases(),
-            client.listScheduledActions(),
-          ]);
-          setReleases(rels);
-          setScheduled(acts);
-        } finally {
-          setLoading(false);
-        }
-      }),
-    [client, run],
-  );
+  const releasesQuery = useScopedQuery(['releases'], () => client.listReleases());
+  const scheduledQuery = useScopedQuery(['scheduled-actions'], () => client.listScheduledActions());
+  const releases = releasesQuery.data ?? [];
+  const scheduled = scheduledQuery.data ?? [];
+  const loading = releasesQuery.isPending || scheduledQuery.isPending;
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // Publishing a release publishes its entries, so entry lists/details go
+  // stale too; the entries invalidations are cheap no-ops when unmounted.
+  // The 'release' prefix covers every detail sheet's cache — without it a
+  // just-published release could reopen as still-editable within staleTime.
+  const reload = () =>
+    invalidate(['releases'], ['scheduled-actions'], ['release'], ['entries'], ['entry']);
 
   const publishNow = (id: string) =>
     run(async () => {
       await client.publishRelease(id);
       toast.success('Release published');
-      await load();
+      await reload();
     });
 
   const remove = (id: string) =>
@@ -106,14 +94,14 @@ export function Releases() {
       await client.deleteRelease(id);
       toast.success('Release deleted');
       if (openId === id) setOpenId(null);
-      await load();
+      await reload();
     });
 
   const cancel = (id: string) =>
     run(async () => {
       await client.cancelScheduledAction(id);
       toast.success('Scheduled action canceled');
-      await load();
+      await reload();
     });
 
   const pendingCount = scheduled.filter((a) => a.status === 'pending').length;
@@ -275,14 +263,18 @@ export function Releases() {
             const created = await client.createRelease(input);
             setCreating(false);
             toast.success('Release created');
-            await load();
+            await reload();
             setOpenId(created.id);
           })
         }
         busy={busy}
       />
 
-      <ReleaseDetailSheet releaseId={openId} onClose={() => setOpenId(null)} onChanged={load} />
+      <ReleaseDetailSheet
+        releaseId={openId}
+        onClose={() => setOpenId(null)}
+        onChanged={() => void reload()}
+      />
     </div>
   );
 }
@@ -358,32 +350,24 @@ function ReleaseDetailSheet(props: {
 }) {
   const { client, busy, run } = useClient();
   const toast = useToast();
-  const [detail, setDetail] = useState<ReleaseWithItems | null>(null);
-  const [entries, setEntries] = useState<PreviewEntry[]>([]);
-  const [pick, setPick] = useState('');
+  const invalidate = useInvalidate();
+  // The entry picker resets in-render whenever a different release is opened.
+  const [pickState, setPickState] = useState({ releaseId: props.releaseId, id: '' });
+  if (pickState.releaseId !== props.releaseId) {
+    setPickState({ releaseId: props.releaseId, id: '' });
+  }
+  const pick = pickState.releaseId === props.releaseId ? pickState.id : '';
+  const setPick = (id: string) => setPickState({ releaseId: props.releaseId, id });
   const [when, setWhen] = useState(defaultScheduleLocal);
 
-  const load = useCallback(
-    (id: string) =>
-      run(async () => {
-        const [d, all] = await Promise.all([client.getRelease(id), client.listEntries()]);
-        setDetail(d);
-        setEntries(all);
-      }),
-    [client, run],
-  );
-
-  useEffect(() => {
-    if (props.releaseId) {
-      setPick('');
-      load(props.releaseId);
-    } else {
-      setDetail(null);
-    }
-  }, [props.releaseId, load]);
+  const detail =
+    useScopedQuery(['release', props.releaseId], () => client.getRelease(props.releaseId ?? ''), {
+      enabled: !!props.releaseId,
+    }).data ?? null;
+  const entries = useAllEntriesQuery({ enabled: !!props.releaseId }).data ?? [];
 
   const refresh = async () => {
-    if (props.releaseId) await load(props.releaseId);
+    await invalidate(['release', props.releaseId]);
     props.onChanged();
   };
 

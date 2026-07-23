@@ -9,15 +9,23 @@ import { VersionHistory } from '@/components/VersionHistory';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { EntryFields } from '@cw/domain';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link2, PenLine, Sparkles } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CanvasDialog } from '../components/CanvasDialog.js';
 import type { Pickers } from '../components/EntryForm.js';
 import { EntryForm } from '../components/EntryForm.js';
 import { GenerateEntryDialog } from '../components/GenerateEntryDialog.js';
 import { useClient } from '../lib/client-context.js';
-import type { AppExtension, ModelTier } from '../lib/management.js';
+import type { ModelTier } from '../lib/management.js';
+import {
+  useAllEntriesQuery,
+  useAppExtensionsQuery,
+  useAssetsQuery,
+  useEntryQuery,
+  useQueryKeys,
+} from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 import { useContentOutlet } from './content-context.js';
 
@@ -28,95 +36,93 @@ export function EntryEditor() {
   const toast = useToast();
   const { client, conn, busy, run } = useClient();
   const { types, locales, defaultLocale, fallbacks } = useContentOutlet();
+  const queryClient = useQueryClient();
+  const keys = useQueryKeys();
 
   const isEdit = Boolean(entryId);
   const selectedType = types.find((t) => t.apiId === typeId);
   const backTo = `/content/${typeId}`;
 
-  const [initial, setInitial] = useState<EntryFields | null>(isEdit ? null : {});
-  const [meta, setMeta] = useState<{ version: number; status: string } | null>(null);
-  const [pickers, setPickers] = useState<Pickers>({ entries: [], assets: [] });
-  const [extensions, setExtensions] = useState<AppExtension[]>([]);
+  // AI generation/canvas results, merged over the loaded draft until the form
+  // is re-seeded from the server (save, restore, or suggestion apply). Bound to
+  // the entry they were generated for and reset in-render on navigation
+  // (e.g. via a "referenced by" link), so they never leak into another entry.
+  const [overrideState, setOverrideState] = useState<{
+    target: string;
+    fields: EntryFields | null;
+  }>({ target: `${typeId}:${entryId ?? 'new'}`, fields: null });
+  if (overrideState.target !== `${typeId}:${entryId ?? 'new'}`) {
+    setOverrideState({ target: `${typeId}:${entryId ?? 'new'}`, fields: null });
+  }
+  const overrides =
+    overrideState.target === `${typeId}:${entryId ?? 'new'}` ? overrideState.fields : null;
+  const setOverrides = (update: (prev: EntryFields | null) => EntryFields | null) =>
+    setOverrideState((s) => ({ ...s, fields: update(s.fields) }));
   const [genOpen, setGenOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   // Bumped after a generation/restore to re-seed the form (EntryForm reads `initial` once).
   const [formKey, setFormKey] = useState(0);
 
-  // Load the existing draft (edit mode) into the form's initial values.
-  const loadEntry = useCallback(async () => {
-    if (!isEdit || !entryId) return;
-    const e = await client.getEntry(entryId);
-    setInitial(e.fields as EntryFields);
-    setMeta({ version: e.version, status: e.status });
-  }, [client, entryId, isEdit]);
+  // The existing draft (edit mode) seeds the form's initial values.
+  const entryQuery = useEntryQuery(isEdit ? entryId : undefined);
+  const meta = entryQuery.data
+    ? { version: entryQuery.data.version, status: entryQuery.data.status }
+    : null;
+  const baseFields = isEdit ? ((entryQuery.data?.fields as EntryFields) ?? null) : {};
+  const initial: EntryFields | null =
+    baseFields === null ? null : { ...baseFields, ...(overrides ?? {}) };
 
+  // A failed load already toasts via the query cache; leave the broken editor.
   useEffect(() => {
-    let live = true;
-    loadEntry().catch((err) => {
-      if (!live) return;
-      toast.error(err instanceof Error ? err.message : String(err));
-      navigate(backTo);
-    });
-    return () => {
-      live = false;
-    };
-  }, [loadEntry, navigate, backTo, toast]);
+    if (entryQuery.isError) navigate(backTo);
+  }, [entryQuery.isError, navigate, backTo]);
 
-  // Build reference/asset picker options (all entries + all assets) for Link fields.
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const [allEntries, assets] = await Promise.all([client.listEntries(), client.listAssets()]);
-        if (!live) return;
-        const displayFieldOf = new Map(types.map((t) => [t.apiId, t.displayField]));
-        setPickers({
-          entries: allEntries.map((e) => {
-            const df = displayFieldOf.get(e.contentType);
-            const title = df
-              ? (e.fields[df] as Record<string, unknown> | undefined)?.[conn.locale]
-              : undefined;
-            return {
-              id: e.id,
-              contentType: e.contentType,
-              label: `${String(title ?? e.id)} (${e.contentType})`,
-            };
-          }),
-          assets: assets.map((a) => ({
-            id: a.id,
-            label: String(a.title?.[conn.locale] ?? a.file.fileName),
-          })),
-        });
-      } catch {
-        /* pickers are best-effort; the form still works without them */
-      }
-    })();
-    return () => {
-      live = false;
+  // Build reference/asset picker options (all entries + all assets) for Link
+  // fields. Both queries are best-effort; the form still works without them.
+  const allEntriesQuery = useAllEntriesQuery();
+  const assetsQuery = useAssetsQuery();
+  const pickers: Pickers = useMemo(() => {
+    const displayFieldOf = new Map(types.map((t) => [t.apiId, t.displayField]));
+    return {
+      entries: (allEntriesQuery.data ?? []).map((e) => {
+        const df = displayFieldOf.get(e.contentType);
+        const title = df
+          ? (e.fields[df] as Record<string, unknown> | undefined)?.[conn.locale]
+          : undefined;
+        return {
+          id: e.id,
+          contentType: e.contentType,
+          label: `${String(title ?? e.id)} (${e.contentType})`,
+        };
+      }),
+      assets: (assetsQuery.data ?? []).map((a) => ({
+        id: a.id,
+        label: String(a.title?.[conn.locale] ?? a.file.fileName),
+      })),
     };
-  }, [client, types, conn.locale]);
+  }, [allEntriesQuery.data, assetsQuery.data, types, conn.locale]);
 
-  // Load installed UI extensions (sidebar widgets + custom field editors).
-  useEffect(() => {
-    let live = true;
-    client
-      .listAppExtensions()
-      .then((items) => {
-        if (live) setExtensions(items.filter((e) => e.active));
-      })
-      .catch(() => {
-        /* extensions are optional; the editor works without them */
-      });
-    return () => {
-      live = false;
-    };
-  }, [client]);
+  // Installed UI extensions (sidebar widgets + custom field editors); optional.
+  const extensionsQuery = useAppExtensionsQuery();
+  const extensions = useMemo(
+    () => (extensionsQuery.data ?? []).filter((e) => e.active),
+    [extensionsQuery.data],
+  );
+
+  // Re-seed the form from the server after a restore or applied AI suggestion.
+  const reseedFromServer = async () => {
+    if (entryId) await queryClient.invalidateQueries({ queryKey: keys.entry(entryId) });
+    setOverrides(() => null);
+    setFormKey((k) => k + 1);
+  };
 
   const save = (fields: EntryFields) =>
     run(async () => {
       if (!selectedType) return;
       if (isEdit && entryId) await client.updateEntry(entryId, fields);
       else await client.createEntry(selectedType.apiId, fields);
+      if (entryId) void queryClient.invalidateQueries({ queryKey: keys.entry(entryId) });
+      void queryClient.invalidateQueries({ queryKey: keys.entriesRoot });
       toast.success(isEdit ? 'Draft updated' : 'Entry created');
       navigate(backTo);
     });
@@ -126,7 +132,7 @@ export function EntryEditor() {
   const generate = async (prompt: string, tier: ModelTier) => {
     if (!selectedType) return;
     const res = await client.generateEntry({ contentTypeApiId: selectedType.apiId, prompt, tier });
-    setInitial((prev) => ({ ...(prev ?? {}), ...res.fields }));
+    setOverrides((prev) => ({ ...(prev ?? {}), ...res.fields }));
     setFormKey((k) => k + 1);
     const total = res.usage.inputTokens + res.usage.outputTokens;
     toast.success(`Generated ${Object.keys(res.fields).length} field(s) · ${total} tokens`);
@@ -137,7 +143,7 @@ export function EntryEditor() {
   const mapCanvas = async (prose: string, tier: ModelTier) => {
     if (!selectedType) return;
     const res = await client.canvasEntry({ contentTypeApiId: selectedType.apiId, prose, tier });
-    setInitial((prev) => ({ ...(prev ?? {}), ...res.fields }));
+    setOverrides((prev) => ({ ...(prev ?? {}), ...res.fields }));
     setFormKey((k) => k + 1);
     const total = res.usage.inputTokens + res.usage.outputTokens;
     toast.success(`Mapped ${Object.keys(res.fields).length} field(s) · ${total} tokens`);
@@ -182,7 +188,7 @@ export function EntryEditor() {
         <p className="text-muted-foreground">Loading…</p>
       ) : (
         <EntryForm
-          key={formKey}
+          key={`${typeId}:${entryId ?? 'new'}:${formKey}`}
           contentType={selectedType}
           initial={initial}
           locales={locales}
@@ -220,10 +226,7 @@ export function EntryEditor() {
             contentType={selectedType}
             locales={locales}
             defaultLocale={defaultLocale}
-            onApplied={() => {
-              loadEntry();
-              setFormKey((k) => k + 1);
-            }}
+            onApplied={() => void reseedFromServer()}
           />
           <CollaborationPanel entryId={entryId} />
           <EntryMetadataPanel entryId={entryId} />
@@ -232,10 +235,7 @@ export function EntryEditor() {
               entryId={entryId}
               currentVersion={meta.version}
               publishedVersion={meta.status === 'published' ? meta.version : null}
-              onRestored={() => {
-                loadEntry();
-                setFormKey((k) => k + 1);
-              }}
+              onRestored={() => void reseedFromServer()}
             />
           )}
           <ReferencedBy id={entryId} types={types} />

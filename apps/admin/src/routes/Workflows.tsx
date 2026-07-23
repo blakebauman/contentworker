@@ -21,10 +21,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { PermissionScope, WorkflowDefinition, WorkflowStep } from '@cw/domain';
+import type { PermissionScope, WorkflowStep } from '@cw/domain';
 import { GitBranch, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useClient } from '../lib/client-context.js';
+import { useInvalidate, useScopedQuery } from '../lib/queries.js';
 import { useToast } from '../lib/toast.js';
 
 /** Scopes that make sense as the gate to move an entry into a step. */
@@ -54,31 +55,18 @@ function stepId(name: string, index: number): string {
 export function Workflows() {
   const { client, busy, run } = useClient();
   const toast = useToast();
-  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
+  const invalidate = useInvalidate();
   const [creating, setCreating] = useState(false);
 
-  const load = useCallback(
-    () =>
-      run(async () => {
-        setLoading(true);
-        try {
-          setWorkflows(await client.listWorkflows());
-        } finally {
-          setLoading(false);
-        }
-      }),
-    [client, run],
-  );
-  useEffect(() => {
-    load();
-  }, [load]);
+  const workflowsQuery = useScopedQuery(['workflows'], () => client.listWorkflows());
+  const workflows = workflowsQuery.data ?? [];
+  const loading = workflowsQuery.isPending;
 
   const remove = (id: string) =>
     run(async () => {
       await client.deleteWorkflow(id);
       toast.success('Workflow deleted');
-      await load();
+      await invalidate(['workflows']);
     });
 
   const create = (name: string, steps: WorkflowStep[]) =>
@@ -86,7 +74,7 @@ export function Workflows() {
       await client.defineWorkflow({ name, steps });
       setCreating(false);
       toast.success('Workflow created');
-      await load();
+      await invalidate(['workflows']);
     });
 
   return (
