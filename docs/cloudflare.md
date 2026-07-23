@@ -26,6 +26,7 @@ and differ only in adapters and composition roots.
 | S3/MinIO blob | R2 via its S3 API (same `@cw/adapter-blob-s3`, presigned URLs) |
 | Temporal agent runtime | `AGENT_WF` Cloudflare Workflow (`AGENT_RUNTIME=cloudflare-workflows`) |
 | In-process auth rate limiter | `AUTH_LIMITER` Durable Object per client IP — the failure budget is global across isolates/colos (same `AUTH_RATE_LIMIT_*` vars) |
+| Prometheus metrics (worker `/metrics`) | `METRICS` Workers Analytics Engine dataset — same `cw_*` metric names (`cw_outbox_relayed_total`, `cw_relay_errors_total`, `cw_events_consumed_total`, `cw_scheduled_actions_total`, plus edge-only `cw_agent_jobs_total`, `cw_dead_letters_total`). Unbound → each increment falls back to a structured JSON log line in Workers Logs |
 | Admin SPA (static hosting) | Same Worker, `assets` binding (same-origin, no CORS) |
 
 Every env var keeps its Node-path name ([configuration.md](configuration.md));
@@ -49,6 +50,14 @@ wrangler secret put ADMIN_TOKEN         # + MCP_TOKEN, TOKEN_PEPPER, SESSION_SEC
 pnpm --filter @cw/admin build
 pnpm --filter @cw/edge deploy
 ```
+
+The committed config is **production-strict**: `ALLOW_FAKE_ADAPTERS` is empty,
+so a persistent (Hyperdrive) deployment refuses to boot on any dev fake (stub
+AI, fake blob store, hash embeddings). A staging deployment that intentionally
+runs without R2/embeddings/Anthropic uses
+`pnpm --filter @cw/edge deploy:staging`, which passes
+`ALLOW_FAKE_ADAPTERS=ai,blob,embeddings` as a deploy-time `--var` instead of
+committing the allowance.
 
 Use Neon's **direct (unpooled)** endpoint behind Hyperdrive — Hyperdrive is the
 pooler; stacking pgbouncer under it breaks transaction pinning. Migrations run

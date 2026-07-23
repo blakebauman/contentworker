@@ -8,6 +8,10 @@
   // and the postgres.js driver. It also populates process.env from vars.
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // Operational counters (outbox relays, consumed events, dead letters) — the
+  // edge analogue of the Node worker's Prometheus metrics, same cw_* names.
+  // Unbound → counters fall back to structured log lines in Workers Logs.
+  "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "cw_edge_metrics" }],
 
   // @cw/telemetry boots the OTel NodeSDK + pino (Node-only); on Workers the
   // shim logs structured JSON to console and passes spans through.
@@ -152,11 +156,11 @@
     "SEARCH_PROVIDER": "",
     "OPENSEARCH_URL": "",
     "OPENSEARCH_INDEX": "",
-    // Staging runs persistent (Hyperdrive) but without R2/embeddings/Anthropic
-    // configured; name those fakes explicitly so the boot guard accepts them.
-    // PRODUCTION: set to "" (and configure the real adapters) — a persistent
-    // deployment refuses to start on any fake not listed here.
-    "ALLOW_FAKE_ADAPTERS": "ai,blob,embeddings",
+    // Production-strict: a persistent (Hyperdrive) deployment refuses to start
+    // on ANY fake adapter. Staging intentionally runs without R2/embeddings/
+    // Anthropic — deploy it with `pnpm --filter @cw/edge deploy:staging`, which
+    // passes the allowance as a deploy-time --var instead of committing it here.
+    "ALLOW_FAKE_ADAPTERS": "",
     "BLOB_BUCKET": "",
     "BLOB_ENDPOINT": "",
     "BLOB_FORCE_PATH_STYLE": "true",
@@ -201,7 +205,7 @@
         "ROLE": "delivery,preview",
         "REQUIRE_SECURE_SECRETS": "true",
         "SEED_DEV": "false",
-        "ALLOW_FAKE_ADAPTERS": "ai,blob,embeddings"
+        "ALLOW_FAKE_ADAPTERS": ""
       },
       // "routes": [{ "pattern": "cdn.example.com/*", "custom_domain": true }],
       "triggers": { "crons": [] },
@@ -215,6 +219,7 @@
         }
       ],
       "kv_namespaces": [{ "binding": "KV_CACHE", "id": "43d0683e48b94bfe98ce95dc808cbf0e" }],
+      "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "cw_edge_metrics" }],
       "vectorize": [{ "binding": "VECTORIZE", "index_name": "cw-vectors" }],
       "durable_objects": {
         "bindings": [
@@ -235,7 +240,7 @@
         "ROLE": "management",
         "REQUIRE_SECURE_SECRETS": "true",
         "SEED_DEV": "false",
-        "ALLOW_FAKE_ADAPTERS": "ai,blob,embeddings",
+        "ALLOW_FAKE_ADAPTERS": "",
         "AI_MAX_REQUESTS_PER_WINDOW": "60",
         "AI_MAX_TOKENS_PER_WINDOW": "200000",
         "AI_BUDGET_WINDOW_SECONDS": "60",
@@ -268,6 +273,7 @@
         }
       ],
       "kv_namespaces": [{ "binding": "KV_CACHE", "id": "43d0683e48b94bfe98ce95dc808cbf0e" }],
+      "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "cw_edge_metrics" }],
       "vectorize": [{ "binding": "VECTORIZE", "index_name": "cw-vectors" }],
       "queues": {
         "producers": [{ "binding": "EVENTS_QUEUE", "queue": "cw-events" }]
@@ -308,7 +314,7 @@
         "AGENTS_MODERATE": "false",
         "AGENTS_AUTO_APPLY": "false",
         "AGENTS_SCHEDULES": "false",
-        "ALLOW_FAKE_ADAPTERS": "ai,blob,embeddings",
+        "ALLOW_FAKE_ADAPTERS": "",
         "AI_MAX_REQUESTS_PER_WINDOW": "60",
         "AI_MAX_TOKENS_PER_WINDOW": "200000",
         "AI_BUDGET_WINDOW_SECONDS": "60"
@@ -321,6 +327,7 @@
         }
       ],
       "kv_namespaces": [{ "binding": "KV_CACHE", "id": "43d0683e48b94bfe98ce95dc808cbf0e" }],
+      "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "cw_edge_metrics" }],
       "vectorize": [{ "binding": "VECTORIZE", "index_name": "cw-vectors" }],
       "queues": {
         "producers": [

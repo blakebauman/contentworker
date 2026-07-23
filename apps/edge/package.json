@@ -8,7 +8,8 @@
     "deploy": "wrangler deploy",
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run",
+    "deploy:staging": "wrangler deploy --var ALLOW_FAKE_ADAPTERS:ai,blob,embeddings"
   },
   "dependencies": {
     "@cw/adapter-ai-anthropic": "workspace:*",
@@ -35,6 +36,7 @@
     "uuid": "^11.0.3"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.7.8",
     "@cloudflare/workers-types": "^4.20250712.0",
     "@cw/admin": "workspace:*",
     "@types/node": "^22.20.0",
