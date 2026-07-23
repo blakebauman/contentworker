@@ -10,6 +10,8 @@ export type DomainEvent =
   | EntryUnpublishedEvent
   | ContentTypePublishedEvent
   | ReleasePublishedEvent
+  | AssetPublishedEvent
+  | AssetUnpublishedEvent
   | SearchReindexRequestedEvent
   | BulkChunkDueEvent
   | EntriesPublishedBulkEvent
@@ -33,6 +35,22 @@ export interface EntryUnpublishedEvent extends BaseEvent {
   readonly type: 'entry.unpublished';
   readonly entryId: string;
   readonly contentTypeApiId: string;
+}
+
+/**
+ * An asset entered/left the published read model. Delivery renders EMBED asset
+ * file/title/description into the entries that link them, so these events are
+ * what let those renders be invalidated — without them a republished asset
+ * stays stale in every entry and list that shows it until the cache TTL.
+ */
+export interface AssetPublishedEvent extends BaseEvent {
+  readonly type: 'asset.published';
+  readonly assetId: string;
+}
+
+export interface AssetUnpublishedEvent extends BaseEvent {
+  readonly type: 'asset.unpublished';
+  readonly assetId: string;
 }
 
 export interface ContentTypePublishedEvent extends BaseEvent {

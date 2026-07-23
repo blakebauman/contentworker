@@ -206,11 +206,14 @@ The full side-by-side matrix (including the Node column) lives in
   query has no tag that reliably bumps; a scope-wide "any publish" tag would
   exceed KV's ~1 write/s/key limit). `DELIVERY_LIST_TTL_SECONDS` (default
   3600) bounds anything the tags don't cover.
-- **Embedded ASSET changes do not invalidate entry or list renders.** Assets
-  emit no domain events, so republishing an asset (new title/file) leaves
-  renders that embed it stale until their TTL. Pre-dates list caching and
-  applies to the single-entry cache too; the fix is to emit asset publish
-  events and invalidate the entries that reference them.
+- **Asset publish/unpublish invalidates the entries that embed the asset.**
+  A delivery render embeds a published asset and leaves an unresolved link as a
+  `{ id, linkType }` stub, so an asset crossing that boundary changes what
+  entries and lists render even though no entry changed. `asset.published` /
+  `asset.unpublished` are appended in the same transaction as the write, and
+  dispatch walks the reference graph (asset edges included) to invalidate the
+  embedding entries plus their content-type tags — covering both the
+  single-entry and list caches.
 - **Scheduled publishing granularity:** the cron sweeper fires every minute, so
   scheduled publish/unpublish executes within 60s of its wall-clock time
   (vs 5s on the Node worker).
