@@ -57,6 +57,31 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
   const spaceId = `t-${uuidv7()}`;
   const scope = { spaceId, environmentId: 'main' };
 
+  /**
+   * Outbox assertions query the table DIRECTLY rather than scanning
+   * `readPending`.
+   *
+   * `readPending` returns the OLDEST N un-relayed rows. These tests leave their
+   * outbox rows behind and stamp them with the suite's fixed clock, so a
+   * developer database that has accumulated rows across runs pushes freshly
+   * appended events outside the window — and the assertion fails on perfectly
+   * good code. (CI never sees it: fresh database every run.) Querying by id or
+   * entry id is independent of how much history the table holds.
+   */
+  const publishedEventsFor = async (entryIds: string[]): Promise<{ id: string }[]> =>
+    // `in ${sql(ids)}` expands to a value list. Deliberately not
+    // `= any(sql.array(...))`: that needs runtime type discovery, which the
+    // edge/Hyperdrive driver config (`fetch_types: false`) disables — the
+    // second CI pass runs exactly that way.
+    store.sql`select id from outbox
+              where type = 'entry.published'
+                and payload->>'entryId' in ${store.sql(entryIds)}` as unknown as Promise<
+      { id: string }[]
+    >;
+  const outboxRowById = async (id: string): Promise<{ id: string; relayed: boolean }[]> =>
+    store.sql`select id, relayed_at is not null as relayed from outbox
+              where id = ${id}` as unknown as Promise<{ id: string; relayed: boolean }[]>;
+
   beforeAll(async () => {
     store = createPostgresStore(URL as string, storeOptions);
     ctx = { store, clock, ids };
@@ -180,8 +205,7 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
       fields: { title: { 'en-US': 'Outbox' } },
     });
     await publishEntry(ctx, scope, e.entry.id);
-    const pending = await store.outbox.readPending(100);
-    expect(pending.some((ev) => ev.type === 'entry.published')).toBe(true);
+    expect(await publishedEventsFor([e.entry.id])).toHaveLength(1);
   });
 
   it('bulk publishes and unpublishes through the batched statements', async () => {
@@ -214,13 +238,7 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
     expect(new Set(published.map((p) => p.publishedAt)).size).toBe(1);
     const drafts = await store.entries.getMany(scope, [a.entry.id, b.entry.id]);
     expect(drafts.every((d) => d.entry.status === 'published')).toBe(true);
-    const events = await store.outbox.readPending(1000);
-    const ourPublishes = events.filter(
-      (ev) =>
-        ev.type === 'entry.published' &&
-        [a.entry.id, b.entry.id, c.entry.id].includes((ev as { entryId: string }).entryId),
-    );
-    expect(ourPublishes).toHaveLength(3);
+    expect(await publishedEventsFor([a.entry.id, b.entry.id, c.entry.id])).toHaveLength(3);
 
     // Unpublish: exercises removePublishedMany + edge clearing.
     const undo = await bulkEntryAction(ctx, scope, 'unpublish', [a.entry.id, b.entry.id]);
@@ -415,9 +433,8 @@ describe.skipIf(!URL)('Postgres store (contract)', { timeout: 30_000 }, () => {
     expect(await store.outbox.deleteRelayedBefore(future, 1)).toBe(1);
     expect(await store.outbox.deleteRelayedBefore(future, 10)).toBe(1);
     expect(await store.outbox.deleteRelayedBefore(future, 10)).toBe(0);
-    // The never-relayed row survived every sweep.
-    const still = await store.outbox.readPending(1000);
-    expect(still.some((ev) => ev.id === pending.id)).toBe(true);
+    // The never-relayed row survived every sweep, and is still un-relayed.
+    expect(await outboxRowById(pending.id)).toEqual([{ id: pending.id, relayed: false }]);
   });
 
   it('deleteDeliveriesBefore trims old delivery records across spaces', async () => {
