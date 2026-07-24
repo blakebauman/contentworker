@@ -743,6 +743,12 @@ export function managementRoutes(deps: AuthDeps): Hono<AuthVars> {
       await guardEntry(c, id, 'publish');
       // Optional synchronous pre-publish moderation gate: reject flagged content
       // before it ever reaches the delivery read model.
+      //
+      // SCOPE: this route only. Bulk publish, bulk jobs, release publish and
+      // scheduled publishes deliberately do NOT gate — one inline model call
+      // per entry is incompatible with their throughput — and rely on
+      // post-publish moderation retracting a flagged entry instead. Do not
+      // read this flag as "flagged content can never reach delivery".
       if (deps.moderateBeforePublish) {
         const verdict = await moderateEntry(ctx, agents, scopeOf(c), id);
         if (verdict.flagged) {

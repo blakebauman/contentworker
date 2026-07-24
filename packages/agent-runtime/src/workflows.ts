@@ -11,6 +11,10 @@ import { DEFAULT_REVIEW_TIMEOUT_MS } from './types.js';
 
 const ZERO = { inputTokens: 0, outputTokens: 0 };
 
+/** Entries processed concurrently within one chunk. Bounded so a chunk cannot
+ *  burst the AI provider or the per-instance connection budget. */
+const ENTRY_CONCURRENCY = 5;
+
 /** Persists a proposal as a pending review and shapes the needs_review result. */
 async function proposeForReview(
   act: Activities,
@@ -353,35 +357,52 @@ export async function moderateWorkflow(
  * is ~13 steps per entry (see AGENT_CHUNK in apps/edge/src/main.ts).
  */
 export async function publishAgentsWorkflow(
-  act: Activities,
+  sharedAct: Activities,
   input: PublishRunsInput,
   hooks: PublishAgentsHooks = {},
+  /** Per-entry Activities, so concurrent entries get deterministic step names
+   *  on engines that name their steps (Cloudflare Workflows). */
+  forEntry?: (entryId: string) => Activities,
 ): Promise<AgentRunResult[]> {
   const names: ('enrich' | 'moderate')[] = [];
   if (input.enrich) names.push('enrich');
   if (input.moderate) names.push('moderate');
 
+  // Entries run concurrently in bounded slices. Sequential processing made a
+  // flagged entry's retraction wait on every predecessor in the chunk, which
+  // is exposure time for content the classifier already held. Concurrency is
+  // only safe because `forEntry` gives each entry its own step-name scope —
+  // see stepActivities in apps/edge/src/agents/workflow.ts.
   const results: AgentRunResult[] = [];
-  for (const entryId of input.entryIds) {
-    // Per-entry error boundary. The consumer acked every message in the chunk
-    // when it started this instance, so an exception escaping here would abort
-    // the remaining entries with no retry and no dead-letter — and the most
-    // likely failure is deterministic, not transient (an over-budget entry
-    // raises RateLimitedError on every attempt, precisely under the bulk
-    // publishes chunking exists for). One bad entry must not take the rest.
-    try {
-      results.push(...(await runEntryPass(act, input, entryId, names, hooks)));
-    } catch (err) {
-      await act
-        .recordRun(input.scope, {
-          workflow: names[0] ?? 'enrich',
-          entryId,
-          status: 'skipped',
-          decisions: [`agent pass failed: ${err instanceof Error ? err.message : String(err)}`],
-          usage: ZERO,
-        })
-        .catch(() => {});
-    }
+  for (let at = 0; at < input.entryIds.length; at += ENTRY_CONCURRENCY) {
+    const slice = input.entryIds.slice(at, at + ENTRY_CONCURRENCY);
+    const settled = await Promise.all(
+      slice.map(async (entryId) => {
+        // Per-entry error boundary. The consumer acked every message in the
+        // chunk when it started this instance, so an exception escaping here
+        // would abort the remaining entries with no retry and no dead-letter —
+        // and the most likely failure is deterministic, not transient (an
+        // over-budget entry raises RateLimitedError on every attempt,
+        // precisely under the bulk publishes chunking exists for).
+        const act = forEntry?.(entryId) ?? sharedAct;
+        try {
+          return await runEntryPass(act, input, entryId, names, hooks);
+        } catch (err) {
+          await act
+            .recordRun(input.scope, {
+              workflow: names[0] ?? 'enrich',
+              entryId,
+              status: 'skipped',
+              decisions: [`agent pass failed: ${err instanceof Error ? err.message : String(err)}`],
+              usage: ZERO,
+            })
+            .catch(() => {});
+          return [];
+        }
+      }),
+    );
+    // Flattened in slice order, so the result list stays deterministic.
+    for (const r of settled) results.push(...r);
   }
   return results;
 }

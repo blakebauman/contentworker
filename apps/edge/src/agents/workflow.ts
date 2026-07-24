@@ -43,14 +43,24 @@ const STEP_CONFIG = {
  * `proxyActivities` in apps/agent-worker. Activities I/O is plain JSON
  * (verified: no Dates/functions cross the seam), as `step.do` requires.
  */
-function stepActivities(step: WorkflowStep, real: Activities): Activities {
+/**
+ * Wraps each Activities method in a `step.do`.
+ *
+ * `prefix` scopes the step names. Step names must be DETERMINISTIC across
+ * replays: a single shared counter is fine while entries run one at a time,
+ * but the moment entries run concurrently the counter is assigned in
+ * scheduling order, which can differ on replay and desynchronise the durable
+ * log. Giving each entry its own prefixed instance keeps every name a function
+ * of (entry, activity, call-index-within-that-entry), all of which are stable.
+ */
+function stepActivities(step: WorkflowStep, real: Activities, prefix = ''): Activities {
   let n = 0;
   const wrap =
     <A extends unknown[], R>(name: string, fn: (...args: A) => Promise<R>) =>
     (...args: A): Promise<R> =>
       // Activities I/O is plain JSON data, but step.do's Serializable<R>
       // constraint cannot see that through the generic — hence the cast.
-      step.do(`${name}#${n++}`, STEP_CONFIG, (() => fn(...args)) as never) as Promise<R>;
+      step.do(`${prefix}${name}#${n++}`, STEP_CONFIG, (() => fn(...args)) as never) as Promise<R>;
   return {
     loadEntry: wrap('loadEntry', real.loadEntry.bind(real)),
     generateFields: wrap('generateFields', real.generateFields.bind(real)),
@@ -133,9 +143,13 @@ export class AgentWorkflow extends WorkflowEntrypoint<EdgeEnv, AgentWfParams> {
       const activities = stepActivities(step, makeActivities({ ctx, ai }));
       if (event.payload.workflow === 'publish_agents') {
         const input = event.payload.input;
-        const runs = await publishAgentsWorkflow(activities, input, {
-          ...(startWatcher ? { startReviewWatcher: startWatcher } : {}),
-        });
+        const runs = await publishAgentsWorkflow(
+          activities,
+          input,
+          { ...(startWatcher ? { startReviewWatcher: startWatcher } : {}) },
+          // Per-entry activities so concurrent entries get stable step names.
+          (entryId) => stepActivities(step, makeActivities({ ctx, ai }), `${entryId}:`),
+        );
         // The consumer acked at START, so it can no longer report outcomes —
         // without a terminal signal here, a chunk that fails entirely looks
         // identical to one that never ran.
