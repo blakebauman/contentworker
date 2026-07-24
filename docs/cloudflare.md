@@ -234,10 +234,12 @@ The full side-by-side matrix (including the Node column) lives in
   chunk of entries (25, sized against the per-instance step ceiling at ~13
   steps per entry worst case), so 100k published entries cost ~4k instances
   rather than 100k+, and `max_concurrency` on the consumer bounds the
-  instance-creation rate under a bulk publish. Entries within a chunk are
-  processed sequentially and each has its own error boundary, so one failing
-  entry never drops the rest — but a flagged entry's retraction waits on its
-  predecessors, so moderation-critical deployments should lower the chunk size. Without the `AGENTS_QUEUE`
+  instance-creation rate under a bulk publish. Entries within a chunk run
+  concurrently in bounded slices (5 at a time) and each has its own error
+  boundary, so one failing entry never drops the rest and a flagged entry's
+  retraction does not queue behind every predecessor. Concurrency is safe only
+  because each entry gets its own step-name scope — a shared step counter would
+  be assigned in scheduling order and desync the durable log on replay. Without the `AGENTS_QUEUE`
   binding — or on a runtime with no durable start — agents run inline
   (dev/demo parity).
 - **Bulk jobs run on their own queue:** `bulk.chunk_due` control events route

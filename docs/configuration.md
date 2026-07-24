@@ -199,7 +199,7 @@ publish-time indexing. The API can still serve search with local embeddings when
 | `AGENT_SCHEDULE_MAX_ENTRIES` | `25` | Entry cap per schedule run; a truncated window resumes next firing |
 | `AGENT_SCHEDULE_MAX_RUN_TOKENS` | `100000` | Token ceiling per schedule run; the run stops mid-batch once exceeded |
 | `AGENTS_MODERATE` | `false` | Run the moderation agent on `entry.published` (classify; flagged content is retracted from delivery) |
-| `AGENTS_MODERATE_BLOCKING` | `false` | Synchronous pre-publish gate: run moderation **before** publishing and reject (422) flagged content instead of retracting it after |
+| `AGENTS_MODERATE_BLOCKING` | `false` | Synchronous pre-publish gate for **single-entry publish only** (the `POST /entries/:id/published` route and the equivalent MCP tool): runs moderation *before* publishing and rejects flagged content instead of retracting it afterwards. **It is not a guarantee that flagged content never reaches delivery** — bulk publish (`/bulk/entries/publish`, `/bulk/jobs`), release publish, and scheduled publishes all bypass this gate and rely on post-publish moderation, which retracts a flagged entry after it has gone live. Gating those paths would mean one inline model call per entry, which is incompatible with their throughput; see [consistency.md](consistency.md) |
 | `AGENTS_AUTO_APPLY` | `false` | Auto-apply enrichment vs. route to human review |
 | `AGENT_RUNTIME` | — | `temporal` → durable workflows via Temporal; `cloudflare-workflows` → Cloudflare Workflows (edge target only); unset → in-process |
 | `SCHEDULE_INTERVAL_MS` | `5000` | Poll interval for due scheduled publish/unpublish actions |

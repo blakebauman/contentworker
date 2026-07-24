@@ -57,12 +57,18 @@ describe('publishAgentsWorkflow', () => {
     });
     // 2 entries × (enrich + moderate)
     expect(out).toHaveLength(4);
-    expect(recorded.map((r) => `${r.entryId}:${r.workflow}`)).toEqual([
+    // Entries run concurrently, so records interleave ACROSS entries — assert
+    // the set, plus the per-entry ordering invariant below.
+    expect(recorded.map((r) => `${r.entryId}:${r.workflow}`).sort()).toEqual([
       'e1:enrich',
       'e1:moderate',
       'e2:enrich',
       'e2:moderate',
     ]);
+    for (const id of ['e1', 'e2']) {
+      const seq = recorded.filter((r) => r.entryId === id).map((r) => r.workflow);
+      expect(seq).toEqual(['enrich', 'moderate']);
+    }
   });
 
   it('runs enrich before moderate so moderation sees enriched content', async () => {
@@ -84,6 +90,7 @@ describe('publishAgentsWorkflow', () => {
       moderate: true,
       autoApply: true,
     });
+    // Single entry: the guarantee is per-entry, so this is the meaningful case.
     expect(order).toEqual(['enrich', 'moderate']);
   });
 
@@ -194,6 +201,52 @@ describe('publishAgentsWorkflow', () => {
     expect(recorded.some((r) => r.status === 'held')).toBe(true);
     // The per-entry boundary caught it; no "retracted" claim was written.
     expect(recorded.filter((r) => r.status === 'held')).toHaveLength(1);
+  });
+
+  it('processes entries concurrently so a late entry does not wait on all predecessors', async () => {
+    // The point of concurrency here is exposure time: a flagged entry's
+    // retraction should not queue behind every earlier entry in the chunk.
+    let inFlight = 0;
+    let peak = 0;
+    const { act } = fakeActivities({
+      classify: async () => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight -= 1;
+        return { flagged: false, categories: [], usage: ZERO };
+      },
+    });
+    await publishAgentsWorkflow(act, {
+      scope,
+      entryIds: ['e1', 'e2', 'e3', 'e4'],
+      enrich: false,
+      moderate: true,
+    });
+    // Sequential would peak at 1.
+    expect(peak).toBeGreaterThan(1);
+  });
+
+  it('uses per-entry activities so concurrent step names stay deterministic', async () => {
+    // Cloudflare Workflows names each step; a shared counter assigned in
+    // scheduling order would differ across replays and desync the durable log.
+    const seen: string[] = [];
+    const { act } = fakeActivities();
+    const forEntry = (entryId: string) => ({
+      ...act,
+      classify: async (...args: Parameters<typeof act.classify>) => {
+        seen.push(`${entryId}:classify`);
+        return act.classify(...args);
+      },
+    });
+    await publishAgentsWorkflow(
+      act,
+      { scope, entryIds: ['e1', 'e2'], enrich: false, moderate: true },
+      {},
+      forEntry,
+    );
+    // Each entry's work went through ITS OWN activities instance.
+    expect(seen.sort()).toEqual(['e1:classify', 'e2:classify']);
   });
 
   it('runs only the enabled workflows', async () => {
